@@ -1,0 +1,20 @@
+{
+  "id": "co2prism",
+  "title": "CO2 Prism",
+  "description": "Module pour Chroniques Oubliées 2, initialement pour Fantasy. Socle minimal sans fonctionnalité de jeu.",
+  "version": "0.1.0",
+  "compatibility": {
+    "minimum": "14",
+    "maximum": "14"
+  },
+  "authors": [{ "name": "Alchimiste36" }],
+  "relationships": {
+    "systems": [{ "id": "co2", "type": "system" }]
+  },
+  "esmodules": ["co2prism.mjs"],
+  "styles": ["css/co2prism.css"],
+  "languages": [
+    { "lang": "fr", "name": "Français", "path": "lang/fr.json" },
+    { "lang": "en", "name": "English", "path": "lang/en.json" }
+  ]
+}
