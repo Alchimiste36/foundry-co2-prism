@@ -1,15 +1,31 @@
-﻿{
+{
   "CO2PRISM": {
     "Title": "CO2 Prism",
     "Size": "Taille de la barre",
     "SizeHint": "Choisir S, M, L ou XL. La modification est appliquée immédiatement.",
     "Locked": "Verrouiller la position de la barre",
-    "LockedHint": "Déverrouiller pour déplacer la barre depuis sa poignée.",
+    "LockedHint": "Déverrouiller pour déplacer la barre depuis son portrait.",
     "Lock": "Verrouiller la position",
     "Unlock": "Déverrouiller la position",
     "Move": "Déplacer la barre (lorsqu’elle est déverrouillée)",
     "Unavailable": "—",
     "NoActor": "Sélectionnez un seul token autorisé pour afficher son acteur.",
+    "Actions": {
+      "sheet": "Ouvrir la feuille de l’acteur",
+      "fortune": "Jet de chance",
+      "hp": "Modifier les PV actuels",
+      "mana": "Modifier les PM actuels",
+      "fastRest": "Récupération rapide",
+      "fullRest": "Récupération complète"
+    },
+    "Save": "Enregistrer",
+    "Preset": "Preset",
+    "ConfigUnavailable": "Configuration réservée au propriétaire de l’acteur sélectionné ou au MJ.",
+    "ConfigError": "La configuration CO2 Prism n’a pas pu être enregistrée. Consultez la console pour les détails.",
+    "CommandUnavailable": "Commande indisponible pour la sélection, les droits ou les ressources actuels, ou pendant une autre action.",
+    "RestUnavailable": "Récupération indisponible : entrée fastRest/fullRest absente ou ambiguë dans le registre de repos CO2 du contenu actif.",
+    "InvalidValue": "Saisissez un entier entre zéro et le maximum actuel de la ressource.",
+    "ActionError": "L’action CO2 Prism a échoué. Consultez la console pour les détails.",
     "Gauges": {
       "recovery": "Dés de récupération",
       "fortune": "Chance",

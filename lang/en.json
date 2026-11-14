@@ -1,15 +1,31 @@
-﻿{
+{
   "CO2PRISM": {
     "Title": "CO2 Prism",
     "Size": "Bar size",
     "SizeHint": "Choose S, M, L or XL. Changes apply immediately.",
     "Locked": "Lock bar position",
-    "LockedHint": "Unlock to move the bar using its handle.",
+    "LockedHint": "Unlock to move the bar using its portrait.",
     "Lock": "Lock position",
     "Unlock": "Unlock position",
     "Move": "Move the bar (when unlocked)",
     "Unavailable": "—",
     "NoActor": "Select a single authorized token to display its actor.",
+    "Actions": {
+      "sheet": "Open actor sheet",
+      "fortune": "Fortune roll",
+      "hp": "Edit current HP",
+      "mana": "Edit current MP",
+      "fastRest": "Quick recovery",
+      "fullRest": "Full recovery"
+    },
+    "Save": "Save",
+    "Preset": "Preset",
+    "ConfigUnavailable": "Configuration requires ownership of the selected actor or GM permissions.",
+    "ConfigError": "The CO2 Prism configuration could not be saved. See the console for details.",
+    "CommandUnavailable": "Command unavailable for the current selection, permissions or resources, or while another action is running.",
+    "RestUnavailable": "Recovery unavailable: the active CO2 content has no unique fastRest/fullRest entry in its rest registry.",
+    "InvalidValue": "Enter an integer between zero and the current resource maximum.",
+    "ActionError": "The CO2 Prism action failed. See the console for details.",
     "Gauges": {
       "recovery": "Recovery dice",
       "fortune": "Fortune",

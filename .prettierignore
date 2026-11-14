@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+.claude/
+.vscode/
+.idea/
+.DS_Store
+package-lock.json
+
+# Foundry Handlebars templates use inline block helpers in attributes that Prettier cannot parse safely.
+templates/**/*.hbs

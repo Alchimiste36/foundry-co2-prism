@@ -1,33 +1,34 @@
-﻿<div id="co2prism-bar" class="co2prism-bar" aria-label="{{localize 'CO2PRISM.Title'}}">
-  <div class="co2prism-art" role="img" aria-label="{{localize 'CO2PRISM.NoActor'}}">
-    <div class="co2prism-piece co2prism-diamond" style="--x:4;--y:0;--w:524;--h:523"></div>
-    <div class="co2prism-piece co2prism-presets" style="--x:0;--y:389;--w:249;--h:126"></div>
-    <div class="co2prism-piece co2prism-gauge-base" style="--x:265;--y:261;--w:600;--h:253"></div>
-    <img class="co2prism-piece co2prism-portrait" src="icons/svg/mystery-man.svg" alt="" style="--x:93;--y:88;--w:345;--h:346">
-    <div aria-hidden="true">
-      <span class="co2prism-piece co2prism-number co2prism-number-active" style="--x:102;--y:413;--w:44;--h:44">1</span>
-      <span class="co2prism-piece co2prism-number" style="--x:60;--y:462;--w:44;--h:44">2</span>
-      <span class="co2prism-piece co2prism-number" style="--x:144;--y:462;--w:44;--h:44">3</span>
-      <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:242;--y:444;--w:48;--h:48"><i class="fa-solid fa-star"></i></span>
-      <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:448;--y:236;--w:48;--h:48"><i class="fa-solid fa-gear"></i></span>
-      <div class="co2prism-piece co2prism-gauge co2prism-gauge-orange" data-co2prism-gauge="recovery" style="--x:469;--y:267;--w:190;--h:51"></div>
-      <div class="co2prism-piece co2prism-gauge co2prism-gauge-resource" data-co2prism-gauge="fortune" style="--x:403;--y:329;--w:319;--h:52"></div>
-      <div class="co2prism-piece co2prism-gauge co2prism-gauge-purple" data-co2prism-gauge="mana" style="--x:341;--y:392;--w:443;--h:51"></div>
-      <div class="co2prism-piece co2prism-gauge co2prism-gauge-health" data-co2prism-gauge="hp" style="--x:278;--y:454;--w:569;--h:52"></div>
-      <span class="co2prism-piece co2prism-icon" style="--x:502;--y:274;--w:40;--h:40"><i class="fa-solid fa-heart-pulse"></i></span>
-      <span class="co2prism-piece co2prism-icon" style="--x:502;--y:337;--w:40;--h:40"><i class="fa-solid fa-clover"></i></span>
-      <span class="co2prism-piece co2prism-icon" style="--x:486;--y:398;--w:40;--h:40"><i class="fa-solid fa-bolt"></i></span>
-      <span class="co2prism-piece co2prism-icon" style="--x:485;--y:461;--w:40;--h:40"><i class="fa-solid fa-heart"></i></span>
-      <span class="co2prism-piece co2prism-icon co2prism-icon-dark" style="--x:700;--y:460;--w:40;--h:40"><i class="fa-solid fa-mug-saucer"></i></span>
-      <span class="co2prism-piece co2prism-icon co2prism-icon-dark" style="--x:758;--y:460;--w:42;--h:40"><i class="fa-solid fa-bed"></i></span>
-      <span class="co2prism-piece co2prism-value" data-co2prism-value="recovery" style="--x:542;--y:267;--w:80;--h:51">{{localize 'CO2PRISM.Unavailable'}}</span>
-      <span class="co2prism-piece co2prism-value" data-co2prism-value="fortune" style="--x:540;--y:329;--w:80;--h:52">{{localize 'CO2PRISM.Unavailable'}}</span>
-      <span class="co2prism-piece co2prism-value" data-co2prism-value="mana" style="--x:530;--y:392;--w:100;--h:51">{{localize 'CO2PRISM.Unavailable'}}</span>
-      <span class="co2prism-piece co2prism-value" data-co2prism-value="hp" style="--x:532;--y:454;--w:100;--h:52">{{localize 'CO2PRISM.Unavailable'}}</span>
-    </div>
+<div id="co2prism-bar" class="co2prism-bar" aria-label="{{localize 'CO2PRISM.Title'}}">
+  <div class="co2prism-art" role="group" aria-label="{{localize 'CO2PRISM.NoActor'}}">
+    <div class="co2prism-piece co2prism-diamond" style="--x:0;--y:0;--w:522;--h:515" ></div>
+    <div class="co2prism-piece co2prism-presets" style="--x:319;--y:49;--w:194;--h:194" ></div>
+    <span class="co2prism-piece co2prism-name" style="--x:320;--y:0;--w:194;--h:46" ></span>
+    <img class="co2prism-piece co2prism-portrait" src="icons/svg/mystery-man.svg" alt="" draggable="false" style="--x:88;--y:88;--w:346;--h:346">
+    <button type="button" disabled class="co2prism-piece co2prism-number" style="--x:382;--y:61;--w:47;--h:47" data-co2prism-preset="1" aria-disabled="true">1</button>
+    <button type="button" disabled class="co2prism-piece co2prism-number" style="--x:454;--y:61;--w:47;--h:47" data-co2prism-preset="2" aria-disabled="true">2</button>
+    <button type="button" disabled class="co2prism-piece co2prism-number" style="--x:454;--y:133;--w:47;--h:47" data-co2prism-preset="3" aria-disabled="true">3</button>
+    <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:237;--y:30;--w:48;--h:48" aria-hidden="true"><i class="fa-solid fa-suitcase" aria-hidden="true"></i></span>
+    <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:29;--y:234;--w:48;--h:48" aria-hidden="true"><i class="fa-solid fa-user" aria-hidden="true"></i></span>
+    <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-action" style="--x:237;--y:444;--w:48;--h:48" data-co2prism-action="sheet"><i class="fa-solid fa-star" aria-hidden="true"></i></button>
+    <button class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-lock" style="--x:443;--y:235;--w:48;--h:48" type="button"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
+    <div class="co2prism-piece co2prism-gauge-border" style="--x:451;--y:255;--w:273;--h:63" ></div>
+    <div class="co2prism-piece co2prism-gauge co2prism-gauge-orange" style="--x:461;--y:265;--w:255;--h:52" data-co2prism-gauge="recovery"></div>
+    <span class="co2prism-piece co2prism-value" style="--x:543;--y:265;--w:110;--h:52" data-co2prism-value="recovery">{{localize 'CO2PRISM.Unavailable'}}</span>
+    <span class="co2prism-piece co2prism-icon " style="--x:668;--y:273;--w:38;--h:36" aria-hidden="true"><i class="fa-solid fa-heart-pulse" aria-hidden="true"></i></span>
+    <div class="co2prism-piece co2prism-gauge-border" style="--x:388;--y:318;--w:336;--h:63" ></div>
+    <div class="co2prism-piece co2prism-gauge co2prism-gauge-resource" style="--x:398;--y:328;--w:318;--h:52" data-co2prism-gauge="fortune"></div>
+    <span class="co2prism-piece co2prism-value" style="--x:543;--y:328;--w:110;--h:52" data-co2prism-value="fortune">{{localize 'CO2PRISM.Unavailable'}}</span>
+    <button type="button" disabled class="co2prism-piece co2prism-icon  co2prism-action" style="--x:668;--y:336;--w:38;--h:36" data-co2prism-action="fortune"><i class="fa-solid fa-clover" aria-hidden="true"></i></button>
+    <div class="co2prism-piece co2prism-gauge-border" style="--x:325;--y:380;--w:399;--h:63" ></div>
+    <div class="co2prism-piece co2prism-gauge co2prism-gauge-purple" style="--x:335;--y:390;--w:381;--h:52" data-co2prism-gauge="mana"></div>
+    <button type="button" disabled class="co2prism-piece co2prism-value co2prism-action" style="--x:543;--y:390;--w:110;--h:52" data-co2prism-value="mana" data-co2prism-action="mana">{{localize 'CO2PRISM.Unavailable'}}</button>
+    <span class="co2prism-piece co2prism-icon " style="--x:668;--y:398;--w:38;--h:36" aria-hidden="true"><i class="fa-solid fa-bolt" aria-hidden="true"></i></span>
+    <div class="co2prism-piece co2prism-gauge-border" style="--x:262;--y:443;--w:462;--h:72" ></div>
+    <div class="co2prism-piece co2prism-gauge co2prism-gauge-health" style="--x:272;--y:453;--w:444;--h:52" data-co2prism-gauge="hp"></div>
+    <button type="button" disabled class="co2prism-piece co2prism-value co2prism-action" style="--x:543;--y:453;--w:110;--h:52" data-co2prism-value="hp" data-co2prism-action="hp">{{localize 'CO2PRISM.Unavailable'}}</button>
+    <span class="co2prism-piece co2prism-icon " style="--x:668;--y:461;--w:38;--h:36" aria-hidden="true"><i class="fa-solid fa-heart" aria-hidden="true"></i></span>
+    <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-dark co2prism-action" style="--x:329;--y:462;--w:42;--h:36" data-co2prism-action="fastRest"><i class="fa-solid fa-mug-saucer" aria-hidden="true"></i></button>
+    <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-dark co2prism-action" style="--x:381;--y:462;--w:44;--h:36" data-co2prism-action="fullRest"><i class="fa-solid fa-bed" aria-hidden="true"></i></button>
   </div>
-  <div class="co2prism-tools">
-    <button type="button" class="co2prism-handle" title="{{localize 'CO2PRISM.Move'}}" aria-label="{{localize 'CO2PRISM.Move'}}"><i class="fa-solid fa-arrows-up-down-left-right" aria-hidden="true"></i></button>
-    <button type="button" class="co2prism-lock"></button>
-  </div>
+  
 </div>

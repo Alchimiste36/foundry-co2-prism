@@ -18,9 +18,12 @@ function setup() {
   bar.gauges = Object.fromEntries(["recovery", "fortune", "mana", "hp"].map(key => [key, { fill: node(), text: node() }]));
   bar.portrait = { getAttribute(key) { return this[key]; }, setAttribute(key, value) { this[key] = value; } };
   bar.art = { setAttribute(key, value) { this[key] = value; } };
+  bar.name = node();
+  bar.actions = [];
+  bar.presetButtons = [];
   bar.connectActor();
   const actor = (id, resources = {}) => ({
-    uuid: `Actor.${id}`, name: id, img: `${id}.webp`, testUserPermission: () => true,
+    uuid: `Actor.${id}`, type: "character", name: id, img: `${id}.webp`, testUserPermission: () => true,
     system: { attributes: { hp: { value: 12, max: 30 } }, resources }
   });
   const token = actor => ({ actor, document: { baseActor: actor } });
@@ -34,11 +37,13 @@ test("sélection unique, changement d'acteur et états neutres", () => {
   context.canvas.tokens.controlled = [a];
   hooks.get("controlToken")(a, true);
   assert.equal(bar.portrait.src, "a.webp");
+  assert.equal(bar.name.textContent, "a");
   assert.equal(bar.gauges.hp.text.textContent, "12 / 30");
   assert.equal(bar.gauges.mana.fill.style["--fill"], "75%");
   const b = token(actor("b"));
   context.canvas.tokens.controlled = [b]; hooks.get("controlToken")(b, true);
   assert.equal(bar.portrait.src, "b.webp");
+  assert.equal(bar.name.textContent, "b");
   assert.equal(bar.gauges.mana.text.textContent, "—");
   context.canvas.tokens.controlled = [a, b]; bar.refreshActor();
   assert.equal(bar.gauges.hp.text.textContent, "—");
@@ -68,6 +73,9 @@ test("acteur synthétique, mises à jour ciblées et changement de scène", () =
   const base = actor("base"), synthetic = actor("synthetic");
   const t = token(synthetic); t.document.baseActor = base;
   context.canvas.tokens.controlled = [t]; bar.refreshActor();
+  synthetic.name = "Nouveau nom";
+  hooks.get("updateActor")(synthetic, { name: synthetic.name });
+  assert.equal(bar.name.textContent, "Nouveau nom");
   synthetic.system.attributes.hp.value = 3;
   hooks.get("updateActor")(synthetic, { system: { attributes: { hp: { value: 3 } } } });
   assert.equal(bar.gauges.hp.text.textContent, "3 / 30");
@@ -100,4 +108,414 @@ test("rencontre sans ressources et permissions insuffisantes", () => {
   encounter.testUserPermission = () => true;
   hooks.get("updateActor")(encounter, { ownership: {} });
   assert.equal(bar.gauges.hp.text.textContent, "12 / 30");
+});
+
+test("déplacement depuis le portrait, verrouillage et position utilisateur", () => {
+  const { bar, context } = setup();
+  let locked = true;
+  const saved = [];
+  context.game.settings = {
+    get: (_module, key) => key === "locked" ? locked : "M",
+    set: (module, key, value) => saved.push({ module, key, value })
+  };
+  context.window = { innerWidth: 1000, innerHeight: 800 };
+  const capture = new Set();
+  bar.handle = { setPointerCapture: id => capture.add(id), hasPointerCapture: id => capture.has(id),
+    releasePointerCapture: id => capture.delete(id), classList: { toggle() {} } };
+  bar.lock = { setAttribute() {} };
+  bar.element = { style: { left: "40px", top: "400px" }, getBoundingClientRect() {
+    return { left: parseFloat(this.style.left), top: parseFloat(this.style.top), width: 430, height: 306 };
+  } };
+  const event = { button: 0, pointerId: 1, clientX: 50, clientY: 420, preventDefault() {}, stopPropagation() {} };
+  bar.startDrag(event);
+  assert.equal(bar.drag, undefined);
+  locked = false; bar.updateLock(); bar.startDrag(event);
+  assert.equal(capture.has(1), true);
+  bar.moveDrag({ pointerId: 1, clientX: 100, clientY: 450 });
+  assert.equal(saved.length, 0);
+  bar.endDrag({ pointerId: 2 });
+  assert.equal(capture.has(1), true);
+  bar.startDrag({ ...event, pointerId: 2 });
+  assert.equal(bar.drag.id, 1);
+  bar.endDrag();
+  assert.equal(bar.element.style.left, "90px");
+  assert.equal(bar.element.style.top, "430px");
+  assert.equal(saved[0].module, "co2prism");
+  assert.equal(saved[0].key, "position");
+  assert.equal(saved[0].value.x, 90);
+  assert.equal(capture.size, 0);
+  bar.layout();
+  assert.equal(bar.element.style.left, "90px");
+  locked = true; bar.updateLock(); bar.startDrag(event);
+  assert.equal(bar.drag, null);
+});
+
+test("redimensionnement, bornage et restauration dans une petite fenêtre", () => {
+  const { bar, context } = setup();
+  const settings = { size: "XL", position: { x: 950, y: 750 } };
+  const writes = [];
+  context.game.settings = {
+    get: (_module, key) => settings[key],
+    set: (_module, key, value) => { settings[key] = value; writes.push(key); }
+  };
+  context.window = { innerWidth: 420, innerHeight: 300 };
+  bar.position = settings.position;
+  bar.element = { style: {}, getBoundingClientRect() {
+    return { left: parseFloat(this.style.left) || 0, top: parseFloat(this.style.top) || 0,
+      width: parseFloat(this.style.width), height: parseFloat(this.style.height) };
+  } };
+  bar.layout();
+  const rect = bar.element.getBoundingClientRect();
+  assert.ok(rect.width <= 412 && rect.height <= 292);
+  assert.ok(rect.left + rect.width <= 420 && rect.top + rect.height <= 300);
+  assert.equal(settings.position.x, rect.left);
+  assert.equal(settings.position.y, rect.top);
+  assert.equal(writes.length, 1);
+  bar.position = settings.position;
+  bar.layout();
+  assert.equal(writes.length, 1);
+  context.window.innerWidth = 1000;
+  context.window.innerHeight = 800;
+  bar.layout();
+  const enlarged = bar.element.getBoundingClientRect();
+  assert.equal(enlarged.width, 780);
+  assert.ok(enlarged.left + enlarged.width <= 1000);
+  assert.ok(enlarged.top + enlarged.height <= 800);
+});
+
+function setupActions() {
+  const env = setup();
+  const { bar, context, actor, token } = env;
+  const calls = [], warnings = [], errors = [];
+  const a = actor("selected", {
+    fortune: { value: 2, max: 4 }, mana: { value: 8, max: 18 }, recovery: { value: 1, max: 3 }
+  });
+  a.sheet = { render: options => calls.push({ sheet: a.uuid, options }) };
+  a.system.rollFortune = function () { calls.push({ fortune: this }); };
+  a.system.useRecovery = () => {};
+  a.update = async update => calls.push({ update });
+  context.game.system = { CONST: { restActions: [] } };
+  context.ui = { notifications: { warn: message => warnings.push(message), error: message => errors.push(message) } };
+  context.foundry = { utils: { escapeHTML: text => text }, applications: { api: { DialogV2: {} } } };
+  bar.actions = ["sheet", "fortune", "hp", "mana", "fastRest", "fullRest"].map(action => ({
+    dataset: { co2prismAction: action }, setAttribute(key, value) { this[key] = value; }
+  }));
+  context.canvas.tokens.controlled = [token(a)];
+  bar.refreshActor();
+  return { ...env, a, calls, warnings, errors,
+    dialog: fn => context.foundry.applications.api.DialogV2.prompt = fn,
+    button: action => bar.actions.find(node => node.dataset.co2prismAction === action) };
+}
+
+test("feuille et chance ciblent uniquement token.actor avec les droits adaptés", async () => {
+  const { bar, context, a, calls, actor, token, button } = setupActions();
+  await bar.performAction("sheet");
+  assert.equal(calls[0].sheet, a.uuid);
+  assert.equal(calls[0].options.force, true);
+  await bar.performAction("fortune");
+  assert.equal(calls[1].fortune, a.system);
+  const b = actor("synthetic", { fortune: { value: 0, max: 4 } });
+  b.system.rollFortune = () => calls.push("synthetic fortune");
+  context.canvas.tokens.controlled = [token(b)];
+  await bar.performAction("fortune");
+  assert.equal(calls.at(-1), "synthetic fortune");
+  b.testUserPermission = (_user, level) => level === "OBSERVER";
+  await bar.performAction("fortune");
+  assert.equal(calls.length, 3);
+  assert.equal(button("fortune").disabled, true);
+  context.game.user.isGM = true;
+  await bar.performAction("fortune");
+  assert.equal(calls.length, 4);
+  context.game.user.isGM = false;
+  b.sheet = a.sheet;
+  await bar.performAction("sheet");
+  assert.equal(calls.length, 5);
+  b.type = "encounter";
+  b.testUserPermission = () => true;
+  await bar.performAction("fortune");
+  assert.equal(calls.length, 5);
+  context.canvas.tokens.controlled = [];
+  await bar.performAction("sheet");
+  assert.ok(bar.actions.every(node => node.disabled));
+});
+
+test("PV et PM : seules les valeurs actuelles valides passent par Actor.update", async () => {
+  const { bar, context, a, calls, warnings, dialog, hooks } = setupActions();
+  let answer = "0";
+  dialog(async options => {
+    assert.equal(options.modal, false);
+    assert.equal(options.rejectClose, false);
+    return options.ok.callback(null, { form: { elements: { namedItem: name => {
+      assert.equal(name, "co2prism-current"); return { value: answer };
+    } } } });
+  });
+  await bar.performAction("hp");
+  assert.deepEqual({ ...calls[0].update }, { "system.attributes.hp.value": 0 });
+  answer = "18";
+  await bar.performAction("mana");
+  assert.deepEqual({ ...calls[1].update }, { "system.resources.mana.value": 18 });
+  for (answer of ["", " ", "abc", "-1", "19", "1.5", "Infinity", "NaN", "9007199254740993"]) {
+    await bar.performAction("mana");
+  }
+  assert.equal(calls.length, 2);
+  assert.equal(warnings.length, 9);
+  dialog(async () => null);
+  await bar.performAction("hp");
+  assert.equal(calls.length, 2);
+  a.system.attributes.hp.value = 1;
+  hooks.get("updateActor")(a, { "system.attributes.hp.value": 1 });
+  assert.equal(bar.gauges.hp.text.textContent, "1 / 30");
+  delete a.system.resources.mana;
+  let prompts = 0;
+  dialog(async () => { prompts++; return "2"; });
+  await bar.performAction("mana");
+  assert.equal(prompts, 0);
+  assert.equal(calls.length, 2);
+  context.canvas.tokens.controlled[0].actor.type = "encounter";
+  await bar.performAction("hp");
+  assert.deepEqual({ ...calls.at(-1).update }, { "system.attributes.hp.value": 2 });
+});
+
+test("un dialogue revérifie sélection, droits, ressource et maximum au moment de valider", async () => {
+  for (const change of ["token", "permissions", "maximum", "missing", "scene"]) {
+    const { bar, context, a, calls, dialog, actor, token } = setupActions();
+    dialog(async () => {
+      if (change === "token") context.canvas.tokens.controlled = [token(actor("other"))];
+      if (change === "permissions") a.testUserPermission = (_user, level) => level === "OBSERVER";
+      if (change === "maximum") a.system.attributes.hp.max = 3;
+      if (change === "missing") delete a.system.attributes.hp;
+      if (change === "scene") context.canvas.ready = false;
+      return "5";
+    });
+    await bar.performAction("hp");
+    assert.equal(calls.length, 0, change);
+  }
+});
+
+test("repos : handlers du registre, absence, ambiguïté et garde des doubles clics", async () => {
+  const { bar, context, a, calls, button } = setupActions();
+  await bar.performAction("fastRest");
+  assert.equal(button("fastRest").disabled, true);
+  assert.equal(button("fastRest").title, "CO2PRISM.RestUnavailable");
+  const rest = { id: "fastRest", handler: actor => calls.push({ rest: actor }) };
+  context.game.system.CONST.restActions = [rest, { id: "fullRest", handler: actor => calls.push({ full: actor }) }];
+  bar.refreshActor();
+  assert.equal(button("fastRest").disabled, false);
+  await bar.performAction("fastRest");
+  assert.equal(calls[0].rest, a);
+  await bar.performAction("fastRest");
+  await bar.performAction("fullRest");
+  assert.equal(calls.length, 1);
+  bar.lastRest.at -= 1000;
+  await bar.performAction("fullRest");
+  assert.equal(calls[1].full, a);
+  context.game.system.CONST.restActions.push(rest);
+  bar.refreshActor();
+  assert.equal(button("fastRest").disabled, true);
+  context.game.system.CONST.restActions = [rest];
+  a.type = "encounter";
+  await bar.performAction("fastRest");
+  assert.equal(calls.length, 2);
+  a.type = "character";
+  delete a.system.resources.recovery;
+  bar.refreshActor();
+  assert.equal(button("fastRest").disabled, true);
+});
+
+test("action en cours : aucune exécution concurrente, même si le token change", async () => {
+  const { bar, context, a, calls, token, actor } = setupActions();
+  let release;
+  a.system.rollFortune = () => new Promise(resolve => { release = resolve; calls.push("start"); });
+  const pending = bar.performAction("fortune");
+  assert.ok(bar.actions.every(node => node.disabled));
+  context.canvas.tokens.controlled = [token(actor("b"))];
+  await bar.performAction("fortune");
+  assert.equal(calls.length, 1);
+  release(); await pending;
+  assert.equal(bar.busyAction, null);
+  assert.equal(bar.actor.name, "b");
+});
+
+function setupConfiguration() {
+  const env = setup();
+  const { bar, context, actor, token, hooks } = env;
+  const writes = [], errors = [];
+  context.foundry = { utils: { deepClone: structuredClone } };
+  context.ui = { notifications: { error: message => errors.push(message) } };
+  context.console = { error() {} };
+  bar.presetButtons = [1, 2, 3].map(number => ({ dataset: { co2prismPreset: String(number) },
+    setAttribute(key, value) { this[key] = value; } }));
+  const configuredActor = (id, flags = {}) => {
+    const a = actor(id);
+    a.flags = structuredClone(flags);
+    a.getFlag = (scope, key) => {
+      const root = a.flags[scope];
+      // Reproduire le contrôle initial de getProperty dans Foundry.
+      if (root && key in root) return root[key];
+      return key.split(".").reduce((value, part) => value?.[part], root);
+    };
+    a.setFlag = async (scope, key, value) => {
+      writes.push({ actor: a, scope, key, value });
+      if (!a.flags[scope] || typeof a.flags[scope] !== "object" || Array.isArray(a.flags[scope])) a.flags[scope] = {};
+      const parts = key.split(".");
+      let target = a.flags[scope];
+      for (const part of parts.slice(0, -1)) {
+        if (!target[part] || typeof target[part] !== "object" || Array.isArray(target[part])) target[part] = {};
+        target = target[part];
+      }
+      target[parts.at(-1)] = value;
+      hooks.get("updateActor")(a, { [`flags.${scope}.${key}`]: value });
+      return a;
+    };
+    return a;
+  };
+  const select = a => {
+    context.canvas.tokens.controlled = a ? [token(a)] : [];
+    hooks.get("controlToken")();
+  };
+  return { ...env, configuredActor, select, writes, errors };
+}
+
+test("configuration : défauts en lecture, trois presets isolés et flags mal formés", async () => {
+  const { bar, configuredActor, select, writes } = setupConfiguration();
+  const a = configuredActor("a"); select(a);
+  assert.equal(bar.configuration.activePreset, 1);
+  assert.deepEqual(Object.keys(bar.configuration.presets), ["1", "2", "3"]);
+  assert.ok(Object.values(bar.configuration.panels).every(value => value === false));
+  assert.notEqual(bar.configuration.presets[1].slots, bar.configuration.presets[2].slots);
+  bar.configuration.presets[1].slots.example = "temporary";
+  assert.equal(bar.configuration.presets[2].slots.example, undefined);
+  bar.refreshActor();
+  assert.equal(bar.configuration.presets[1].slots.example, undefined);
+  await bar.setActivePreset(1);
+  await bar.setPanelState("combat", false);
+  assert.equal(writes.length, 0);
+  for (const malformed of [null, "old", [], { activePreset: 9, panels: { combat: "true" }, presets: [] }]) {
+    const b = configuredActor("malformed", { co2prism: malformed }); select(b);
+    assert.equal(bar.configuration.activePreset, 1);
+    assert.equal(bar.configuration.panels.combat, false);
+    assert.deepEqual(Object.keys(bar.configuration.presets[1].slots), []);
+  }
+  assert.equal(writes.length, 0);
+});
+
+test("presets A/B : persistance et restauration, sans écraser slots ou champs inconnus", async () => {
+  const { bar, context, configuredActor, select, writes } = setupConfiguration();
+  const a = configuredActor("a", { other: { saved: true }, co2prism: {
+    extra: { saved: true }, presets: { 1: { slots: { x: { uuid: "existing" } }, extra: 7 },
+      2: { slots: { y: "untouched" } }, 3: { slots: {} }, future: { saved: true } }
+  } });
+  const before = structuredClone(a.flags);
+  const b = configuredActor("b");
+  select(a); await bar.setActivePreset(2);
+  select(b); await bar.setActivePreset(3);
+  select(a);
+  assert.equal(bar.configuration.activePreset, 2);
+  assert.equal(bar.presetButtons[1]["aria-pressed"], "true");
+  assert.equal(bar.presetButtons[0]["aria-pressed"], "false");
+  assert.deepEqual(a.flags.co2prism.presets, before.co2prism.presets);
+  assert.deepEqual(a.flags.other, before.other);
+  assert.deepEqual(a.flags.co2prism.extra, before.co2prism.extra);
+  bar.configuration.presets[1].slots.x.uuid = "local-only";
+  assert.equal(a.flags.co2prism.presets[1].slots.x.uuid, "existing");
+  select(b); assert.equal(bar.configuration.activePreset, 3);
+  const reloaded = setup();
+  reloaded.context.canvas.tokens.controlled = context.canvas.tokens.controlled;
+  reloaded.bar.refreshActor();
+  assert.equal(reloaded.bar.configuration.activePreset, 3);
+  assert.equal(writes.length, 2);
+  assert.ok(writes.every(write => write.scope === "co2prism" && write.key === "activePreset"));
+});
+
+test("volets indépendants, mises à jour distantes et aucune sauvegarde en boucle", async () => {
+  const { bar, configuredActor, select, writes, hooks } = setupConfiguration();
+  const a = configuredActor("a", { co2prism: { panels: { future: true } } }); select(a);
+  await Promise.all([bar.setPanelState("combat", true), bar.setPanelState("competences", true),
+    bar.setPanelState("equipements", true)]);
+  assert.ok(Object.values(bar.configuration.panels).every(value => value === true));
+  await bar.setPanelState("combat", false);
+  assert.equal(bar.configuration.panels.competences, true);
+  assert.equal(bar.configuration.panels.equipements, true);
+  assert.equal(a.flags.co2prism.panels.future, true);
+  assert.deepEqual(writes.map(write => write.key), ["panels.combat", "panels.competences", "panels.equipements", "panels.combat"]);
+  const count = writes.length;
+  a.flags.co2prism.activePreset = 3;
+  a.flags.co2prism.panels.competences = false;
+  hooks.get("updateActor")(a, { flags: { co2prism: a.flags.co2prism } });
+  assert.equal(bar.configuration.activePreset, 3);
+  assert.equal(bar.configuration.panels.competences, false);
+  a.flags.co2prism.activePreset = 2;
+  hooks.get("updateActor")(a, { "flags.co2prism.activePreset": 2 });
+  assert.equal(bar.configuration.activePreset, 2);
+  assert.equal(writes.length, count);
+});
+
+test("écritures rapides : ordre par acteur, permissions revérifiées et erreurs récupérables", async () => {
+  const { bar, configuredActor, select, writes, errors } = setupConfiguration();
+  const a = configuredActor("a"), b = configuredActor("b");
+  const save = a.setFlag;
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  a.setFlag = async (...args) => { await blocked; return save(...args); };
+  select(a);
+  const p2 = bar.setActivePreset(2), p3 = bar.setActivePreset(3), p1 = bar.setActivePreset(1);
+  await Promise.resolve();
+  select(b); await bar.setActivePreset(3);
+  assert.equal(bar.configuration.activePreset, 3);
+  release(); await Promise.all([p2, p3, p1]);
+  assert.equal(a.flags.co2prism.activePreset, 1);
+  assert.equal(b.flags.co2prism.activePreset, 3);
+  assert.deepEqual(writes.filter(write => write.actor === a).map(write => write.value), [2, 3, 1]);
+  select(a);
+  const denied = bar.setActivePreset(2);
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  assert.equal(await denied, false);
+  a.testUserPermission = () => true;
+  a.setFlag = async () => { throw Error("Persistence unavailable"); };
+  assert.equal(await bar.setActivePreset(2), false);
+  assert.equal(errors.length, 1);
+  a.setFlag = save;
+  assert.equal(await bar.setActivePreset(2), true);
+});
+
+test("configuration : droits Owner/MJ, sélection neutre et entrées refusées", async () => {
+  const { bar, context, configuredActor, select, writes, hooks } = setupConfiguration();
+  const a = configuredActor("a", { co2prism: { activePreset: 2 } });
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  select(a);
+  assert.ok(bar.presetButtons.every(button => button.disabled));
+  assert.equal(bar.configuration.activePreset, 2);
+  assert.equal(await bar.setActivePreset(3), false);
+  assert.equal(await bar.setPanelState("combat", true), false);
+  context.game.user.isGM = true;
+  assert.equal(await bar.setActivePreset(3), true);
+  for (const invalid of [0, 4, "2", true, NaN]) assert.equal(await bar.setActivePreset(invalid), false);
+  assert.equal(await bar.setPanelState("other", true), false);
+  assert.equal(await bar.setPanelState("combat", "true"), false);
+  assert.equal(writes.length, 1);
+  a.testUserPermission = () => false;
+  hooks.get("updateActor")(a, { ownership: {} });
+  assert.equal(bar.actor, null);
+  assert.ok(bar.presetButtons.every(button => button["aria-pressed"] === "false"));
+  select(null);
+  assert.equal(await bar.setActivePreset(1), false);
+  assert.equal(writes.length, 1);
+});
+
+test("tokens liés et synthétiques : écrire sur token.actor, jamais sur baseActor", async () => {
+  const { bar, context, configuredActor, select, token, hooks, writes } = setupConfiguration();
+  const base = configuredActor("base", { co2prism: { activePreset: 2 } });
+  select(base); await bar.setActivePreset(3);
+  const synthetic = configuredActor("synthetic", { co2prism: { activePreset: 3 } });
+  synthetic.uuid = "Scene.s.Token.t.Actor.base";
+  const unlinked = token(synthetic); unlinked.document.baseActor = base;
+  context.canvas.tokens.controlled = [unlinked]; hooks.get("controlToken")();
+  await bar.setActivePreset(1);
+  assert.equal(writes.at(-1).actor, synthetic);
+  assert.equal(base.flags.co2prism.activePreset, 3);
+  assert.equal(synthetic.flags.co2prism.activePreset, 1);
+  hooks.get("updateToken")(unlinked.document, { "delta.flags.co2prism.activePreset": 1 });
+  assert.equal(bar.configuration.activePreset, 1);
+  hooks.get("canvasTearDown")();
+  assert.ok(bar.presetButtons.every(button => button.disabled));
 });
