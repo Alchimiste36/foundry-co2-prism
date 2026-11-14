@@ -1,6 +1,7 @@
 ﻿const MODULE = "co2prism";
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
+const COMBAT_ROW_ORIGINS = [522, 731];
 let bar;
 
 Hooks.once("init", () => {
@@ -43,6 +44,20 @@ class PrismBar {
       [key, this.element.querySelector(`[data-co2prism-combat-value="${key}"]`)]));
     this.combatEffects = this.element.querySelector(".co2prism-effects");
     this.combatSlots = this.element.querySelector(".co2prism-combat-slots");
+    this.combatRows = [...this.combatSlots.querySelectorAll(".co2prism-combat-row")];
+    this.combatLine = this.element.querySelector(".co2prism-combat-line");
+    this.combatArrow = this.element.querySelector(".co2prism-combat-arrow");
+    this.budgetScroll = this.element.querySelector(".co2prism-budget-scroll");
+    // Observer le début/la fin du drag, sans intercepter les dépôts hors Prism.
+    document.addEventListener("dragstart", () => {
+      this.refreshActor();
+      this.slotDrag = { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
+    });
+    document.addEventListener("dragend", () => {
+      this.slotDrag = null;
+      this.combatSlots.querySelectorAll(".co2prism-drop-target, .co2prism-drop-candidate")
+        .forEach(node => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate"));
+    });
     this.skillsPanel = this.element.querySelector(".co2prism-skills");
     this.skillsToggle = this.element.querySelector(".co2prism-skills-toggle");
     this.skillsToggle.addEventListener("click", event => {
@@ -147,6 +162,7 @@ class PrismBar {
     const actor = candidate?.testUserPermission(game.user, "OBSERVER") ? candidate : null;
     this.token = token;
     this.actor = actor;
+    if (this.slotDrag && (this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const summaries = [];
     for (const [key, nodes] of Object.entries(this.gauges)) {
@@ -174,6 +190,7 @@ class PrismBar {
       : game.i18n.localize("CO2PRISM.NoActor"));
     this.updateActions();
     this.configuration = this.readConfiguration(actor);
+    if (this.slotDrag && this.slotDrag.preset !== this.configuration.activePreset) this.slotDrag.cancelled = true;
     this.updatePresets();
     const skillsChanged = this.updateSkills();
     const combatChanged = this.updateCombat();
@@ -207,15 +224,8 @@ class PrismBar {
       count.textContent = `(${list ? list.length : unavailable})`;
       const label = game.i18n.localize(`CO2PRISM.Abilities.${key}`);
       const lines = list?.map(bonus => {
-        // Le template reste détaché : aucun HTML de description n'est affiché ni exécuté.
-        const plain = text => {
-          const template = document.createElement("template");
-          template.innerHTML = typeof text === "string" ? text : "";
-          template.content.querySelectorAll("script, style").forEach(node => node.remove());
-          return template.content.textContent.replace(/\s+/g, " ").trim();
-        };
         const number = Number.isFinite(bonus?.value) ? `${bonus.value >= 0 ? "+" : ""}${bonus.value}` : unavailable;
-        return [plain(bonus?.name), number, plain(bonus?.description), plain(bonus?.additionalInfos)].filter(Boolean).join(" — ");
+        return [this.plainText(bonus?.name), number, this.plainText(bonus?.description), this.plainText(bonus?.additionalInfos)].filter(Boolean).join(" — ");
       });
       button.title = `${label} : ${value.textContent}\n${game.i18n.localize("CO2PRISM.SkillBonuses")} ${count.textContent}`
         + (lines?.length ? `\n${lines.join("\n")}` : "");
@@ -292,12 +302,191 @@ class PrismBar {
     });
     this.combatEffects.replaceChildren(...elements);
     this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
-    // Le format de référence des raccourcis n'est pas encore défini : aucun mapping inventé.
-    const slots = this.configuration.presets[this.configuration.activePreset].slots;
-    const count = Object.keys(slots).length;
-    this.combatSlots.dataset.co2prismStoredSlots = String(count);
-    this.combatSlots.title = count ? game.i18n.localize("CO2PRISM.Combat.UnresolvedSlots") : "";
-    return changed;
+    const resized = this.renderCombatSlots();
+    return changed || resized;
+  }
+
+  slotRows(actor = this.actor, preset = this.configuration.activePreset) {
+    const slots = this.readConfiguration(actor).presets[preset].slots;
+    const rows = [[], []];
+    for (const [key, reference] of Object.entries(slots)) {
+      if (["left-hand", "right-hand"].includes(key)) continue;
+      const row = reference?.row === 2 ? 2 : 1;
+      rows[row - 1].push({ key, reference, row, order: Number.isSafeInteger(reference?.order) ? reference.order : 0 });
+    }
+    for (const row of rows) row.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
+    rows[0].unshift(...["left", "right"].map(hand => ({ key: `${hand}-hand`, hand, row: 1,
+      order: hand === "left" ? 0 : 1, reference: slots[`${hand}-hand`] })));
+    rows.forEach((row, index) => row.push({ row: index + 1, order: 1 + Math.max(-1,
+      ...row.filter(slot => !slot.hand).map(slot => slot.order)), terminal: true }));
+    return rows;
+  }
+
+  resolveShortcut(actor, reference) {
+    if (!actor || !reference || typeof reference.source !== "string" || !Number.isSafeInteger(reference.indice)
+      || reference.indice < 0) return null;
+    try {
+      const item = reference.itemId ? actor.items?.get(reference.itemId) : null;
+      if (reference.itemId && (!item || (item.testUserPermission && !item.testUserPermission(game.user, "OBSERVER")))) return null;
+      const actions = item ? item.actions : actor.actions;
+      const matches = actions?.filter(entry => entry.indice === reference.indice
+        && (item || entry.source === reference.source)) ?? [];
+      if (matches.length !== 1) return null;
+      const action = matches[0];
+      return { action, item: item ?? [...(actor.items?.values() ?? [])].find(entry => entry.actions?.includes(action)) };
+    } catch { return null; }
+  }
+
+  shortcutFromDrop(actor, data) {
+    try {
+      if (data?.type === "co.attack") {
+        const item = [...(actor.items?.values() ?? [])].find(entry => entry.uuid === data.uuid && entry.type === "attack");
+        const action = item?.actions?.[0];
+        if (!action) return null;
+        data = { type: "co.action", source: action.source, indice: action.indice };
+      }
+      if (data?.type !== "co.action" || typeof data.source !== "string" || !Number.isSafeInteger(data.indice)) return null;
+      // La collection native de l'acteur agrège aussi les actions de ses Items.
+      const matches = actor.actions?.filter(entry => entry.source === data.source && entry.indice === data.indice) ?? [];
+      if (matches.length !== 1) return null;
+      const action = matches[0];
+      const item = [...(actor.items?.values() ?? [])].find(entry => entry.actions?.includes(action));
+      if (!item && action.source !== actor.uuid) return null;
+      if (item?.testUserPermission && !item.testUserPermission(game.user, "OBSERVER")) return null;
+      return { source: action.source, indice: action.indice, itemId: item?.id ?? null };
+    } catch { return null; }
+  }
+
+  plainText(html) {
+    const template = document.createElement("template");
+    template.innerHTML = typeof html === "string" ? html : "";
+    template.content.querySelectorAll("script, style").forEach(node => node.remove());
+    return template.content.textContent.replace(/\s+/g, " ").trim();
+  }
+
+  renderCombatSlots() {
+    const rows = this.slotRows();
+    for (const [index, row] of rows.entries()) {
+      const scroll = this.combatRows[index].scrollLeft;
+      const nodes = row.map(slot => {
+        const node = document.createElement("div");
+        node.className = "co2prism-combat-slot";
+        node.dataset.co2prismRow = String(slot.row);
+        if (slot.hand) node.dataset.co2prismHand = slot.hand;
+        node.setAttribute("role", "group");
+        const label = game.i18n.localize(slot.hand === "left" ? "CO2PRISM.Combat.LeftHand"
+          : slot.hand === "right" ? "CO2PRISM.Combat.RightHand" : "CO2PRISM.Combat.EmptySlot");
+        const resolved = slot.reference !== undefined ? this.resolveShortcut(this.actor, slot.reference) : null;
+        const add = (tag, cls, text) => {
+          const child = document.createElement(tag); child.className = cls;
+          if (text !== undefined) child.textContent = text;
+          node.append(child); return child;
+        };
+        node.title = label;
+        if (slot.reference !== undefined && !resolved) {
+          node.classList.add("co2prism-slot-unavailable");
+          add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.UnavailableSlot"));
+          node.title = game.i18n.localize("CO2PRISM.Combat.UnavailableSlot");
+        } else if (resolved) {
+          const { action, item } = resolved;
+          const read = key => { try { return action[key]; } catch { return undefined; } };
+          const image = read("actionImg") || read("img") || item?.img;
+          if (typeof image === "string" && image) {
+            const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = read("actionName") || item?.name || ""; img.draggable = false;
+          }
+          const icon = read("iconFA");
+          if (typeof icon === "string" && icon) add("i", "co2prism-slot-type fa-solid "
+            + icon.split(/\s+/).filter(cls => /^fa-[a-z0-9-]+$/.test(cls) && cls !== "fa-solid").join(" "));
+          const time = { l: "L", a: "A", m: "M", f: "G" }[read("actionTypeFinal")];
+          if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
+          let quantity = read("hasQuantity") ? read("quantity") : read("hasCharges") ? read("charges") : null;
+          if (quantity === null || quantity === undefined) {
+            const model = item?.system;
+            if (model?.isConsumable) quantity = model.quantity?.current;
+            else if (model?.hasFrequency || model?.isReloadable) quantity = model.charges?.current;
+          }
+          if (Number.isFinite(quantity)) add("span", "co2prism-slot-uses", String(quantity));
+          const cost = read("manaCost");
+          if (Number.isFinite(cost) && cost > 0) {
+            const badge = add("span", "co2prism-slot-cost", `${cost} `);
+            const bolt = document.createElement("i"); bolt.className = "fa-solid fa-bolt"; badge.append(bolt);
+          }
+          node.title = [read("actionName") || item?.name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
+        } else add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.EmptySlot"));
+        if (slot.hand) add("span", "co2prism-slot-hand", game.i18n.localize(`CO2PRISM.Combat.Hand_${slot.hand}`));
+        node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
+        node.addEventListener("dragenter", event => this.hoverSlot(event, slot, node));
+        node.addEventListener("dragover", event => this.hoverSlot(event, slot, node));
+        node.addEventListener("dragleave", () => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate"));
+        node.addEventListener("drop", event => { void this.dropSlot(event, slot, node); });
+        return node;
+      });
+      this.combatRows[index].replaceChildren(...nodes);
+      this.combatRows[index].scrollLeft = scroll;
+    }
+    const widths = rows.map(row => row.length * 209 - 11);
+    const extent = Math.max(1223, ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
+    // Une ligne peut grandir sans changer l'extrémité globale du volet.
+    const resized = extent !== this.combatExtent || widths.some((width, index) => width !== this.combatRowWidths?.[index]);
+    this.combatExtent = extent;
+    this.combatRowWidths = widths;
+    return resized;
+  }
+
+  hoverSlot(event, slot, node) {
+    node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate");
+    if (!this.slotDrag) {
+      this.slotDrag = { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
+    }
+    const context = this.slotDrag;
+    if (context.cancelled || !this.canConfigure(context.actor) || !this.configuration.panels.combat) return;
+    const raw = event.dataTransfer?.getData("text/plain");
+    if (raw) {
+      try { if (!this.shortcutFromDrop(context.actor, JSON.parse(raw))) return; } catch { return; }
+    } else if (!Array.from(event.dataTransfer?.types ?? []).includes("text/plain")) return;
+    event.preventDefault(); event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    node.classList.add(raw ? "co2prism-drop-target" : "co2prism-drop-candidate");
+  }
+
+  async dropSlot(event, slot, node) {
+    event.preventDefault(); event.stopPropagation();
+    node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate");
+    const context = this.slotDrag ?? { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
+    this.slotDrag = null;
+    this.refreshActor();
+    let data;
+    try { data = JSON.parse(event.dataTransfer.getData("text/plain")); } catch { /* Dépôt non CO2. */ }
+    if (context.cancelled || context.actor !== this.actor || context.token !== this.token
+      || context.preset !== this.configuration.activePreset || !this.configuration.panels.combat || !this.canConfigure(context.actor)) {
+      ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
+    }
+    const reference = this.shortcutFromDrop(context.actor, data);
+    if (!reference) { ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false; }
+    const saved = await this.saveShortcut(context.actor, context.preset, slot, reference);
+    if (saved && slot.terminal && this.actor === context.actor && this.configuration.activePreset === context.preset) {
+      const row = this.combatRows?.[slot.row - 1];
+      if (row) row.scrollLeft = row.scrollWidth > row.clientWidth ? row.scrollWidth : 0;
+    }
+    return saved;
+  }
+
+  saveShortcut(actor, preset, slot, reference) {
+    if (!this.canConfigure(actor) || ![1, 2, 3].includes(preset) || ![1, 2].includes(slot?.row)
+      || (slot.key && (!/^[A-Za-z0-9_-]+$/.test(slot.key) || ["__proto__", "constructor", "prototype"].includes(slot.key)))) {
+      ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return Promise.resolve(false);
+    }
+    return this.queueConfiguration(actor, async () => {
+      if (!this.canConfigure(actor) || !this.resolveShortcut(actor, reference)) {
+        ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
+      }
+      const rows = this.slotRows(actor, preset);
+      const terminal = rows[slot.row - 1].at(-1);
+      const key = slot.key ?? `slot-${foundry.utils.randomID()}`;
+      const value = { ...reference, row: slot.row, order: slot.terminal ? terminal.order : slot.order, hand: slot.hand ?? null };
+      await actor.setFlag(MODULE, `presets.${preset}.slots.${key}`, value);
+      return true;
+    });
   }
 
   readConfiguration(actor = this.actor) {
@@ -365,9 +554,8 @@ class PrismBar {
     this.refreshActor();
     const actor = this.actor;
     if (!this.canConfigure(actor)) return Promise.resolve(false);
-    this.configWrites ??= new WeakMap();
     // Capturer l'acteur du clic ; une autre sélection ne doit jamais recevoir cette écriture.
-    const pending = (this.configWrites.get(actor) ?? Promise.resolve()).then(async () => {
+    return this.queueConfiguration(actor, async () => {
       if (!this.canConfigure(actor)) return false;
       const config = this.readConfiguration(actor);
       const previous = path === "activePreset" ? config.activePreset : config.panels[path.split(".")[1]];
@@ -384,7 +572,12 @@ class PrismBar {
       // Un chemin précis préserve les autres presets, volets et champs inconnus.
       await actor.setFlag(MODULE, path, next);
       return true;
-    }).catch(error => {
+    });
+  }
+
+  queueConfiguration(actor, operation) {
+    this.configWrites ??= new WeakMap();
+    const pending = (this.configWrites.get(actor) ?? Promise.resolve()).then(operation).catch(error => {
       console.error("co2prism | Configuration", error);
       ui.notifications.error(game.i18n.localize("CO2PRISM.ConfigError"));
       return false;
@@ -528,21 +721,36 @@ class PrismBar {
     const open = Boolean(this.actor && this.configuration?.panels.competences);
     const combat = Boolean(this.actor && this.configuration?.panels.combat);
     this.panelOffset = { x: width * (open ? 168 : combat ? 122 : 0) / 724, y: open ? width * 237 / 724 : 0 };
+    const scale = width / 724;
+    const right = combat ? Math.min(this.combatExtent ?? 1344,
+      Math.max(732, (window.innerWidth - this.panelOffset.x - 8) / scale)) : 724;
+    this.element.style.setProperty("--co2prism-unit", `${scale}px`);
+    for (const [index, row] of (this.combatRows ?? []).entries()) {
+      row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? 198, Math.max(1, right - COMBAT_ROW_ORIGINS[index])));
+    }
+    this.budgetScroll?.style.setProperty("--w", Math.min(492, Math.max(1, right - 731)));
+    this.combatEffects?.style.setProperty("--w", Math.min(824, Math.max(1, right - 731)));
+    this.combatLine?.style.setProperty("--w", Math.max(0, right - 480 - 60));
+    this.combatArrow?.style.setProperty("--x", right - 93);
     this.element.style.setProperty("--co2prism-base-width", `${width}px`);
     this.element.style.setProperty("--co2prism-base-height", `${width * 515 / 724}px`);
     this.element.style.setProperty("--co2prism-offset-x", `${this.panelOffset.x}px`);
     this.element.style.setProperty("--co2prism-offset-y", `${this.panelOffset.y}px`);
-    this.element.style.width = `${width * (combat ? 1677 : 724) / 724 + this.panelOffset.x}px`;
+    this.element.style.width = `${width * right / 724 + this.panelOffset.x}px`;
     this.element.style.height = `${width * 515 / 724 + this.panelOffset.y}px`;
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
     const x = preserveAnchor ? anchor.x : valid ? saved.x : 40;
     const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * 515 / 724 - 40;
-    this.place(x - this.panelOffset.x, y - this.panelOffset.y, !preserveAnchor);
+    // Le maintien du portrait ne peut pas laisser le volet déplié hors écran.
+    this.place(x - this.panelOffset.x, y - this.panelOffset.y);
+    for (const row of this.combatRows ?? []) {
+      if (row.scrollWidth <= row.clientWidth) row.scrollLeft = 0;
+    }
     // Mémoriser aussi le retour à l'écran après un changement de taille.
     const placed = this.element.getBoundingClientRect();
-    if (!preserveAnchor && valid && (Math.abs(placed.left + this.panelOffset.x - saved.x) > 0.5
-      || Math.abs(placed.top + this.panelOffset.y - saved.y) > 0.5)) {
+    if ((valid || preserveAnchor) && (Math.abs(placed.left + this.panelOffset.x - x) > 0.5
+      || Math.abs(placed.top + this.panelOffset.y - y) > 0.5)) {
       this.position = { x: placed.left + this.panelOffset.x, y: placed.top + this.panelOffset.y };
       void game.settings.set(MODULE, "position", this.position);
     }

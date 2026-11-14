@@ -27,11 +27,14 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const ready = [];
       const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on() {} };
       const settings = { size: "M", position: {}, locked: true };
+      const warnings = [];
+      const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
       const game = { system: { id: "co2" }, user: {},
         settings: { get: (_, key) => settings[key], set: (_, key, value) => settings[key] = value },
         i18n: { localize: key => key } };
-      const foundry = { utils: { deepClone: structuredClone },
+      let sequence = 0;
+      const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
         applications: { handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
       ${read("../module/applications/_module.mjs")}
       (async () => {
@@ -45,7 +48,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(root.querySelectorAll("canvas").length === 0, "Canvas ajouté par Prism");
           check(bar.actions.every(button => button.disabled), "Commandes actives sans acteur");
           const calls = [];
-          const actor = { name: "Acteur de test", type: "character", img: "", testUserPermission: () => true,
+          const actor = { uuid: "Actor.test", name: "Acteur de test", type: "character", img: "", testUserPermission: () => true,
             flags: {}, getFlag(scope, key) { return key.split(".").reduce((value, part) => value?.[part], this.flags[scope]); },
             async setFlag(scope, key, value) {
               this.flags[scope] ??= {}; let target = this.flags[scope]; const parts = key.split(".");
@@ -105,7 +108,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(button.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)),
                 size + " commande inaccessible " + button.dataset.co2prismAction);
               check(Math.abs(b.width - Number(button.style.getPropertyValue("--w")) * r.width / 724) < 0.1,
-                size + " boîte du bouton modifiée");
+                size + " boîte du bouton modifiée " + b.width + " attendu " + Number(button.style.getPropertyValue("--w")) * r.width / 724);
               const style = getComputedStyle(button);
               check(style.backgroundColor === "rgba(0, 0, 0, 0)" && style.borderTopWidth === "0px" && style.opacity === "1",
                 size + " décoration de bouton inattendue");
@@ -182,16 +185,16 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const r = root.getBoundingClientRect(), after = bar.portrait.getBoundingClientRect();
             combatDimensions.push({ size, width: r.width, height: r.height });
             check(!bar.combatPanel.hidden && actor.flags.co2prism.activePreset === 1, size + " Combat fermé");
-            check(Math.abs(r.width - width * 1799 / 724) < 0.1, size + " étendue Combat");
+            check(Math.abs(r.width - width * 1466 / 724) < 0.1, size + " étendue Combat");
             check(Math.abs(before.x - after.x) < 0.1 && Math.abs(before.y - after.y) < 0.1, size + " base déplacée par Combat");
             check(bar.combatValues.meters.textContent === "10" && bar.combatValues.cells.textContent === "5"
               && bar.combatValues.def.textContent === "15" && bar.combatValues.dr.textContent === "4", "Valeurs Combat");
             const slots = [...root.querySelectorAll(".co2prism-combat-slot")];
-            check(slots.length === 8, "Nombre de cases");
+            check(slots.length === 4, "Nombre de cases");
             check(slots[0].dataset.co2prismHand === "left" && slots[1].dataset.co2prismHand === "right", "Convention des mains");
-            const firstY = slots[0].getBoundingClientRect().y, secondY = slots[5].getBoundingClientRect().y;
-            check(slots.slice(0, 5).every(slot => slot.getBoundingClientRect().y === firstY)
-              && slots.slice(5).every(slot => slot.getBoundingClientRect().y === secondY) && secondY > firstY, "Disposition 5/3");
+            const firstY = slots[0].getBoundingClientRect().y, secondY = slots[3].getBoundingClientRect().y;
+            check(slots.slice(0, 3).every(slot => slot.getBoundingClientRect().y === firstY)
+              && slots.slice(3).every(slot => slot.getBoundingClientRect().y === secondY) && secondY > firstY, "Disposition 5/3");
             check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.title === "Native effect", "Effets réels");
             const count = calls.length, original = JSON.stringify(actor.system);
             for (const node of [...slots, ...root.querySelectorAll(".co2prism-time, .co2prism-defense-control")]) {
@@ -206,15 +209,134 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             }
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
             check(!bar.skillsPanel.hidden && !bar.combatPanel.hidden, "Volets exclusifs");
-            for (const node of [...slots, ...bar.skillNodes.map(skill => skill.button)]) {
+            for (const node of [...root.querySelectorAll(".co2prism-combat-slot"), ...bar.skillNodes.map(skill => skill.button)]) {
               const b = node.getBoundingClientRect();
-              check(node.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)), size + " collision de volets");
+              check(node.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)), size + " collision de volets " + node.className + " à " + b.x + "," + b.y);
             }
             check(document.elementFromPoint(r.x + 2, r.y + 2)?.id === "board", size + " coin transparent Combat");
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
             root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
           }
           result.combatDimensions = combatDimensions;
+          // Ouverture au bord droit : déplacer Prism, sans retour arbitraire au repli.
+          settings.size = "M"; bar.position = { x: innerWidth - 432, y: 400 }; bar.layout();
+          const edgeBefore = bar.portrait.getBoundingClientRect();
+          await bar.selectCombatPreset(1);
+          const edgeOpen = bar.portrait.getBoundingClientRect();
+          check(root.getBoundingClientRect().right <= innerWidth + 0.1 && edgeOpen.x < edgeBefore.x, "Combat hors écran au dépliage");
+          await bar.selectCombatPreset(1);
+          check(Math.abs(bar.portrait.getBoundingClientRect().x - edgeOpen.x) < 0.1, "Saut arbitraire au repli");
+          await bar.setPanelState("competences", true);
+          bar.position = { x: innerWidth - 432, y: 400 }; bar.layout();
+          await bar.selectCombatPreset(1);
+          check(!bar.skillsPanel.hidden && !bar.combatPanel.hidden && root.getBoundingClientRect().right <= innerWidth + 0.1,
+            "Combat hors écran avec Compétences");
+          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "capacity",
+            system: { description: "<b>Description native</b>", hasFrequency: true, charges: { current: 3 } },
+            testUserPermission: () => true };
+          const nativeAction = { source: item.uuid, indice: 0, actionName: "Action réelle",
+            actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "l",
+            hasCharges: true, charges: 3, manaCost: 2 };
+          item.actions = [nativeAction]; actor.items = new Map([[item.id, item]]);
+          Object.defineProperty(actor, "actions", { get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
+          const payload = { type: "co.action", source: item.uuid, indice: 0, name: "Copie ignorée", img: "ignored" };
+          const lengths = () => bar.combatRows.map(row => row.children.length).join(",");
+          const dropAt = async (row, index, data = payload) => {
+            const transfer = new DataTransfer(); transfer.setData("text/plain", JSON.stringify(data));
+            document.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+            const target = bar.combatRows[row - 1].children[index];
+            target.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+            if (data === payload) check(target.classList.contains("co2prism-drop-target"), "Cible valide non indiquée");
+            target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+            await bar.configWrites.get(actor); await Promise.resolve();
+            document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+          };
+          check(lengths() === "3,1", "Preset vide différent de 3/1");
+          await dropAt(1, 0); await dropAt(1, 1);
+          check(lengths() === "3,1", "Les mains font croître la ligne");
+          const occupied = bar.combatRows[0].children[0];
+          check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.title.includes("Description native"), "Image ou description copiée incorrectement");
+          check(occupied.querySelector(".co2prism-slot-time").textContent === "L"
+            && occupied.querySelector(".co2prism-slot-uses").textContent === "3"
+            && occupied.querySelector(".co2prism-slot-cost").textContent.trim() === "2", "Décorations natives");
+          await dropAt(1, 2); check(lengths() === "4,1", "Croissance ligne 1 incorrecte");
+          await dropAt(2, 0); check(lengths() === "4,2", "Croissance ligne 2 incorrecte");
+          const invalidBefore = JSON.stringify(actor.flags);
+          await dropAt(2, 1, { type: "Item", uuid: item.uuid });
+          check(JSON.stringify(actor.flags) === invalidBefore && lengths() === "4,2" && warnings.length > 0, "Drop invalide accepté");
+          const executeBefore = calls.length;
+          for (const type of ["click", "contextmenu"]) occupied.dispatchEvent(new MouseEvent(type, { bubbles: true, ctrlKey: true }));
+          check(calls.length === executeBefore, "Raccourci exécuté");
+          nativeAction.actionName = "Action modifiée"; nativeAction.charges = 0; nativeAction.hasCharges = false; item.system.charges.current = 0;
+          bar.refreshActor();
+          check(bar.combatRows[0].children[0].title.includes("Action modifiée")
+            && bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent === "0", "Données non actualisées");
+          actor.items.delete(item.id); bar.refreshActor();
+          check(bar.combatRows[0].children[0].classList.contains("co2prism-slot-unavailable") && lengths() === "4,2", "Action supprimée non conservée");
+          actor.items.set(item.id, item); bar.refreshActor();
+          await bar.selectCombatPreset(2); check(lengths() === "3,1", "Slots mélangés entre presets");
+          await bar.selectCombatPreset(1); check(lengths() === "4,2", "Ordre non restauré");
+          settings.size = "XL"; bar.layout();
+          for (let index = 0; index < 12; index++) await dropAt(1, bar.combatRows[0].children.length - 1);
+          check(lengths() === "16,2", "Limite arbitraire de cases");
+          const row = bar.combatRows[0];
+          row.scrollLeft = row.scrollWidth;
+          const terminal = row.lastElementChild.getBoundingClientRect(), viewport = row.getBoundingClientRect();
+          check(row.scrollWidth > row.clientWidth && terminal.right <= viewport.right + 1 && terminal.right > viewport.left, "Fin de ligne inaccessible");
+          check(root.getBoundingClientRect().right <= innerWidth + 0.1, "Racine plus large que l'écran");
+          check(document.elementFromPoint(innerWidth - 2, innerHeight - 2)?.id === "board", "Overlay après croissance");
+          const savedPreset = JSON.stringify(actor.flags.co2prism.presets[1]);
+          const fullRows = label => {
+            for (const row of bar.combatRows) {
+              const bounds = row.getBoundingClientRect(), last = row.lastElementChild.getBoundingClientRect();
+              check(row.scrollWidth <= row.clientWidth && row.scrollLeft === 0, label + " défilement inutile");
+              check(last.right <= bounds.right + 0.1, label + " dernière case tronquée");
+            }
+          };
+          for (const [size, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
+            for (const skills of [false, true]) {
+              // Preset isolé pour tester les largeurs sans modifier les raccourcis précédents.
+              actor.flags.co2prism.presets[3] = { slots: {} };
+              actor.flags.co2prism.activePreset = 3;
+              actor.flags.co2prism.panels = { combat: true, competences: skills, equipements: false };
+              settings.size = size; bar.refreshActor();
+              bar.position = { x: 300, y: 350 }; bar.layout();
+              const label = size + (skills ? " deux volets" : " Combat seul");
+              check(lengths() === "3,1", label + " initialisation"); fullRows(label);
+              await dropAt(2, 0); fullRows(label + " seconde ligne à deux cases");
+              await dropAt(2, 1);
+              check(lengths() === "3,3", label + " lignes égales"); fullRows(label + " lignes égales");
+              bar.position = { x: innerWidth - width - 2, y: 350 }; bar.layout();
+              const beforeGrowth = bar.portrait.getBoundingClientRect().x;
+              const oldWidth = root.getBoundingClientRect().width;
+              await dropAt(2, 2);
+              check(lengths() === "3,4", label + " seconde ligne plus longue");
+              fullRows(label + " seconde ligne plus longue");
+              check(root.getBoundingClientRect().width > oldWidth, label + " volet non agrandi");
+              check(bar.portrait.getBoundingClientRect().x < beforeGrowth, label + " croissance sans repositionnement");
+              check(root.getBoundingClientRect().right <= innerWidth + 0.1, label + " hors écran");
+              const origin1 = bar.combatRows[0].getBoundingClientRect().left;
+              const origin2 = bar.combatRows[1].getBoundingClientRect().left;
+              check(Math.abs(origin2 - origin1 - 209 * width / 724) < 0.1, label + " décalage modifié");
+              await bar.setPanelState("combat", false);
+              bar.position = { x: innerWidth - width - 2, y: 350 }; bar.layout();
+              await bar.setPanelState("combat", true);
+              fullRows(label + " réouverture");
+              check(root.getBoundingClientRect().right <= innerWidth + 0.1, label + " réouverture hors écran");
+            }
+          }
+          check(JSON.stringify(actor.flags.co2prism.presets[1]) === savedPreset, "Autre preset modifié par les tests de largeur");
+          await bar.selectCombatPreset(2); check(lengths() === "3,1", "Dimensions fantômes après changement de preset");
+          await bar.selectCombatPreset(3); check(lengths() === "3,4", "Seconde ligne non restaurée");
+          fullRows("retour au preset");
+          const originalToken = canvas.tokens.controlled[0];
+          const other = { ...actor, uuid: "Actor.other", flags: { co2prism: { panels: { combat: true } } }, items: new Map() };
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(lengths() === "3,1", "Cases de l'acteur précédent conservées"); fullRows("autre acteur");
+          canvas.tokens.controlled = [originalToken]; bar.refreshActor();
+          check(lengths() === "3,4", "Seconde ligne non restaurée après changement d'acteur"); fullRows("retour à l'acteur");
+          result.restoredSlots = actor.flags.co2prism.presets[3].slots;
+          await bar.setPanelState("combat", false); await bar.setPanelState("competences", false);
           if (${Boolean(process.env.CO2PRISM_SCREENSHOT)}) {
             settings.size = "L"; bar.position = { x: 300, y: 350 }; bar.layout();
             actor.img = "file:///F:/FVTT_V14/public/icons/svg/mystery-man.svg";
@@ -246,6 +368,66 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
     console.log(JSON.stringify({ dimensions: result.dimensions, skillsDimensions: result.skillsDimensions,
       combatDimensions: result.combatDimensions, board: result.board }));
     assert.deepEqual(result.errors, []);
+    // Même module dans un vrai viewport étroit, sans masquer les assertions du scénario large.
+    const narrowScript = `
+      (async () => {
+        const result = { errors: [] };
+        const check = (condition, message) => { if (!condition) result.errors.push(message); };
+        try {
+          await ready[0]();
+          const source = "Actor.test.Item.owned";
+          const persistedSlots = ${JSON.stringify(result.restoredSlots)};
+          const actor = { uuid: "Actor.test", name: "Narrow", type: "character", system: {},
+            testUserPermission: () => true, getSkillBonuses: () => [],
+            flags: { co2prism: { activePreset: 3, panels: { combat: false, competences: true }, presets: { 3: { slots: persistedSlots } } } },
+            getFlag(scope, key) { return key.split(".").reduce((value, part) => value?.[part], this.flags[scope]); },
+            async setFlag(scope, key, value) {
+              let target = this.flags[scope]; const parts = key.split(".");
+              for (const part of parts.slice(0, -1)) target = target[part] ??= {};
+              target[parts.at(-1)] = value;
+            }
+          };
+          const action = { source, indice: 0, actionName: "Native action" };
+          actor.items = new Map([["owned", { id: "owned", uuid: source, actions: [action] }]]);
+          actor.actions = [action];
+          canvas.tokens.controlled = [{ actor, document: { baseActor: actor } }];
+          bar.refreshActor();
+          bar.position = { x: innerWidth - 432, y: 350 }; bar.layout();
+          await bar.selectCombatPreset(3);
+          const root = document.getElementById("co2prism-bar"), scale = 430 / 724;
+          const [first, second] = bar.combatRows;
+          check(first.children.length === 3 && second.children.length === 4, "Restauration après relance du navigateur incorrecte");
+          check((731 + bar.combatRowWidths[1]) * scale + bar.panelOffset.x > innerWidth,
+            "Le manque de place n'est pas réel");
+          check(first.scrollWidth <= first.clientWidth && first.scrollLeft === 0, "Première ligne inutilement réduite");
+          check(second.scrollWidth > second.clientWidth, "Défilement nécessaire absent");
+          second.scrollLeft = second.scrollWidth;
+          const last = second.lastElementChild.getBoundingClientRect(), visible = second.getBoundingClientRect();
+          check(last.left >= visible.left - 0.1 && last.right <= visible.right + 1, "Dernière case inaccessible");
+          check(root.getBoundingClientRect().right <= innerWidth + 0.1, "Prism hors fenêtre étroite");
+          check(document.elementFromPoint(innerWidth - 2, innerHeight - 2)?.id === "board", "Canvas bloqué");
+          settings.size = "S"; bar.layout();
+          check(second.scrollWidth <= second.clientWidth && second.scrollLeft === 0, "Défilement conservé après retour à une taille adaptée");
+          result.viewport = innerWidth;
+        } catch (error) { result.errors.push(error.stack); }
+        const output = document.createElement("pre"); output.id = "co2prism-browser-result";
+        output.textContent = JSON.stringify(result); document.body.append(output);
+      })();</script></body></html>`;
+    const narrowFixture = join(directory, "narrow.html");
+    writeFileSync(narrowFixture, html.slice(0, html.indexOf("      (async () => {")) + narrowScript);
+    const narrowExecution = spawnSync(edge, ["--headless", "--no-sandbox", "--disable-gpu", "--in-process-gpu",
+      "--disable-software-rasterizer", "--no-first-run", "--no-default-browser-check", "--allow-file-access-from-files",
+      `--user-data-dir=${join(directory, "profile-narrow")}`, "--window-size=1000,1400", "--virtual-time-budget=4000",
+      "--dump-dom", pathToFileURL(narrowFixture).href], {
+      encoding: "utf8", timeout: 25000, maxBuffer: 2000000, windowsHide: true
+    });
+    assert.ifError(narrowExecution.error);
+    assert.equal(narrowExecution.status, 0, narrowExecution.stderr);
+    const narrowOutput = narrowExecution.stdout.match(/<pre id="co2prism-browser-result">([^<]+)<\/pre>/);
+    assert.ok(narrowOutput, "Résultat navigateur étroit manquant");
+    const narrowResult = JSON.parse(narrowOutput[1]);
+    console.log(JSON.stringify({ narrowViewport: narrowResult.viewport }));
+    assert.deepEqual(narrowResult.errors, []);
   } finally {
     // Vérifier la destination avant de supprimer le profil temporaire.
     const target = resolve(directory);

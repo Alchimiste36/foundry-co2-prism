@@ -27,12 +27,13 @@
   pointer-events: none;
 }
 .co2prism-piece {
+  transition: none;
   position: absolute;
   box-sizing: border-box;
-  left: calc(var(--x) * 100% / 724);
-  top: calc(var(--y) * 100% / 515);
-  width: calc(var(--w) * 100% / 724);
-  height: calc(var(--h) * 100% / 515);
+  left: calc(var(--x) * var(--co2prism-unit));
+  top: calc(var(--y) * var(--co2prism-unit));
+  width: calc(var(--w) * var(--co2prism-unit));
+  height: calc(var(--h) * var(--co2prism-unit));
   pointer-events: none;
 }
 .co2prism-diamond {
@@ -275,6 +276,8 @@
 .co2prism-combat .co2prism-dr { font-size: calc(36 * 100cqw / 724); }
 .co2prism-defense-control { font-size: calc(24 * 100cqw / 724); pointer-events: auto; cursor: default; }
 .co2prism-combat-slot {
+  position: relative; box-sizing: border-box; flex: 0 0 calc(198 * var(--co2prism-unit));
+  width: calc(198 * var(--co2prism-unit)); height: calc(198 * var(--co2prism-unit));
   border: calc(8 * 100cqw / 724) solid black; background: #dedede;
   display: flex; align-items: center; justify-content: center;
   pointer-events: auto; cursor: default; overflow: hidden;
@@ -301,3 +304,25 @@
 .co2prism-time-bar { display: flex; align-items: center; gap: calc(8 * 100cqw / 724); padding: calc(8 * 100cqw / 724); background: black; }
 .co2prism-time-indicator { width: calc(40 * 100cqw / 724); height: 100%; background: var(--co2prism-time-color); clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
 .co2prism-time-separator { height: 100%; margin: 0 calc(12 * 100cqw / 724); border-left: calc(5 * 100cqw / 724) dotted white; }
+
+.co2prism-combat-row {
+  z-index: 1;
+  display: flex; align-items: flex-start; gap: calc(11 * var(--co2prism-unit));
+  overflow-x: auto; overflow-y: hidden; pointer-events: auto;
+}
+.co2prism-budget-scroll { overflow-x: auto; overflow-y: hidden; pointer-events: auto; }
+.co2prism-budget-content { position: relative; width: calc(492 * var(--co2prism-unit)); height: calc(51 * var(--co2prism-unit)); }
+.co2prism-combat-row::-webkit-scrollbar, .co2prism-budget-scroll::-webkit-scrollbar { height: calc(6 * var(--co2prism-unit)); }
+.co2prism-combat-row::-webkit-scrollbar-thumb, .co2prism-budget-scroll::-webkit-scrollbar-thumb { background: #888; }
+.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost, .co2prism-slot-hand {
+  z-index: 1; color: white; background: #000e; padding: calc(4 * var(--co2prism-unit));
+  font-size: calc(30 * var(--co2prism-unit)); line-height: 1; pointer-events: none;
+}
+.co2prism-slot-time-L { background: #65318d; }
+.co2prism-slot-time-A { background: #ed1520; }
+.co2prism-slot-time-M { background: #25aae1; }
+.co2prism-slot-time-G { background: #198c48; }
+.co2prism-slot-hand { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: calc(18 * var(--co2prism-unit)); }
+.co2prism-slot-unavailable { background: #b7b0b0; }
+.co2prism-combat-slot.co2prism-drop-target { box-shadow: inset 0 0 0 calc(5 * var(--co2prism-unit)) #50baf0; }
+.co2prism-combat-slot.co2prism-drop-candidate { box-shadow: inset 0 0 0 calc(3 * var(--co2prism-unit)) #aaa; }

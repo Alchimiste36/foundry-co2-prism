@@ -548,6 +548,7 @@ function setupSkills() {
   a.getSkillBonuses = key => { reads.push(key); return bonuses[key] ?? []; };
   a.rollSkill = function (key, options) { rolls.push({ actor: this, key, options }); };
   select(a);
+  bar.position = { x: 300, y: 350 }; bar.layout();
   return { ...env, a, bonuses, reads, rolls };
 }
 
@@ -566,7 +567,7 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(a.flags.co2prism.panels.equipements, true);
   assert.deepEqual(base(), before);
   assert.ok(reads.length >= 7);
-  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1845 / 724) < 0.01);
+  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1512 / 724) < 0.01);
   await bar.setPanelState("competences", false);
   assert.deepEqual(base(), before);
   const count = reads.length;
@@ -723,4 +724,124 @@ test("Combat : effets natifs, effets CO2 et statuts sans doublons ni effet ficti
   assert.equal(result[3].img, "dead.svg");
   assert.equal(bar.readCombatEffects(actor("empty")).length, 0);
   assert.equal(bar.readCombatEffects(null).length, 0);
+});
+
+function setupShortcuts() {
+  const env = setupConfiguration();
+  const { bar, context, configuredActor, select } = env;
+  let sequence = 0;
+  const warnings = [];
+  context.foundry.utils.randomID = () => `test${++sequence}`;
+  context.ui.notifications.warn = text => warnings.push(text);
+  const create = id => {
+    const actor = configuredActor(id, { co2prism: { panels: { combat: true } } });
+    const item = { id: "item", uuid: `${actor.uuid}.Item.item`, type: "capacity", name: "Capacity", parent: actor,
+      system: { description: "Description" }, testUserPermission: () => true };
+    item.actions = [{ source: item.uuid, indice: 0, actionName: "Native action", actionImg: "native.webp",
+      iconFA: "fas fa-sword", actionTypeFinal: "a", hasCharges: true, charges: 3, manaCost: 2 }];
+    actor.items = new Map([[item.id, item]]);
+    Object.defineProperty(actor, "actions", { configurable: true, get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
+    return { actor, item };
+  };
+  const { actor: a, item } = create("shortcuts"); select(a);
+  const payload = () => ({ type: "co.action", source: item.uuid, indice: 0, name: "Ignored copy", img: "ignored.webp" });
+  const event = (data = payload()) => ({ dataTransfer: { types: ["text/plain"], getData: () => JSON.stringify(data) },
+    preventDefault() {}, stopPropagation() {} });
+  const node = { classList: { add() {}, remove() {} } };
+  return { ...env, a, item, create, warnings, payload, event, node };
+}
+
+test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante", async () => {
+  const { bar, a, payload } = setupShortcuts();
+  const ref = bar.shortcutFromDrop(a, payload());
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][1], ref);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  const empty = bar.slotRows()[0].at(-1);
+  await Promise.all([bar.saveShortcut(a, 1, empty, ref), bar.saveShortcut(a, 1, empty, ref)]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 1]);
+  assert.deepEqual(Array.from(bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal), slot => slot.order), [0, 1]);
+  await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), ref);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 2]);
+  assert.ok(bar.slotRows().every(row => row.filter(slot => slot.terminal).length === 1));
+  assert.equal(bar.slotRows()[0][0].hand, "left");
+  assert.equal(bar.slotRows()[0][1].hand, "right");
+});
+
+test("raccourcis : références natives seules, restauration, isolation et disparition", async () => {
+  const { bar, context, a, item, payload, create, select, writes } = setupShortcuts();
+  const original = structuredClone(a.system);
+  const ref = bar.shortcutFromDrop(a, payload());
+  await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
+  const slots = a.flags.co2prism.presets[1].slots;
+  const stored = Object.values(slots)[0];
+  assert.deepEqual(Object.keys(stored).sort(), ["source", "indice", "itemId", "row", "order", "hand"].sort());
+  assert.equal(stored.itemId, item.id);
+  assert.equal(bar.resolveShortcut(a, stored).action, item.actions[0]);
+  item.actions[0].manaCost = 7;
+  assert.equal(bar.resolveShortcut(a, stored).action.manaCost, 7);
+  a.items.delete(item.id);
+  assert.equal(bar.resolveShortcut(a, stored), null);
+  assert.equal(bar.slotRows()[0].length, 4);
+  assert.deepEqual(a.flags.co2prism.presets[1].slots, slots);
+  a.items.set(item.id, item);
+  await bar.setActivePreset(2);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  const { actor: b } = create("other"); select(b);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  select(a); await bar.setActivePreset(1);
+  assert.equal(bar.slotRows()[0].length, 4);
+  const reloaded = setupConfiguration();
+  reloaded.context.canvas.tokens.controlled = context.canvas.tokens.controlled;
+  reloaded.bar.refreshActor();
+  assert.equal(reloaded.bar.slotRows()[0].length, 4);
+  assert.deepEqual(a.system, original);
+  assert.ok(writes[0].key.startsWith("presets.1.slots."));
+});
+
+test("raccourcis : payloads refusés sans écriture ni croissance, droits et contexte de drag", async () => {
+  const { bar, a, item, payload, event, node, create, select, writes, warnings } = setupShortcuts();
+  const slot = bar.slotRows()[0].at(-1);
+  for (const data of [{ type: "Item", uuid: "external" }, { ...payload(), source: "Actor.other.Item.item" },
+    { ...payload(), indice: -1 }, { ...payload(), indice: "0" }, { ...payload(), indice: 999 }]) {
+    assert.equal(await bar.dropSlot(event(data), slot, node), false);
+  }
+  assert.equal(writes.length, 0);
+  assert.equal(bar.slotRows()[0].length, 3);
+  item.actions.push({ ...item.actions[0] });
+  assert.equal(await bar.dropSlot(event(), slot, node), false);
+  item.actions.pop();
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  assert.equal(await bar.dropSlot(event(), slot, node), false);
+  a.testUserPermission = () => true;
+  const drag = event(); bar.hoverSlot(drag, slot, node);
+  const { actor: b } = create("b"); select(b);
+  assert.equal(await bar.dropSlot(drag, slot, node), false);
+  select(a);
+  const next = event(); bar.hoverSlot(next, slot, node);
+  await bar.setActivePreset(2);
+  const count = writes.length;
+  assert.equal(await bar.dropSlot(next, slot, node), false);
+  assert.equal(writes.length, count);
+  assert.ok(warnings.length >= 8);
+});
+
+test("raccourcis : attaque de rencontre, action portée par acteur et acteur synthétique", async () => {
+  const { bar, a, item, context, token, hooks, payload } = setupShortcuts();
+  a.type = "encounter"; item.type = "attack";
+  assert.equal(bar.shortcutFromDrop(a, { type: "co.attack", uuid: item.uuid }).indice, 0);
+  const direct = { source: a.uuid, indice: 5, actionName: "Actor action" };
+  Object.defineProperty(a, "actions", { get: () => [direct], configurable: true });
+  assert.equal(bar.shortcutFromDrop(a, { type: "co.action", source: a.uuid, indice: 5 }).itemId, null);
+  assert.equal(bar.resolveShortcut(a, { source: a.uuid, indice: 5, itemId: null }).action, direct);
+  Object.defineProperty(a, "actions", { get: () => item.actions });
+  const base = { flags: { co2prism: {} } };
+  const synthetic = token(a); synthetic.document.baseActor = base;
+  a.uuid = "Scene.s.Token.t.Actor.a";
+  context.canvas.tokens.controlled = [synthetic]; hooks.get("controlToken")();
+  const ref = bar.shortcutFromDrop(a, payload());
+  await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), ref);
+  assert.equal(Object.keys(base.flags.co2prism).length, 0);
+  assert.equal(bar.slotRows()[1].length, 2);
 });
