@@ -1,5 +1,20 @@
-{
+﻿{
   "CO2PRISM": {
-    "Title": "CO2 Prism"
+    "Title": "CO2 Prism",
+    "Size": "Taille de la barre",
+    "SizeHint": "Choisir S, M, L ou XL. La modification est appliquée immédiatement.",
+    "Locked": "Verrouiller la position de la barre",
+    "LockedHint": "Déverrouiller pour déplacer la barre depuis sa poignée.",
+    "Lock": "Verrouiller la position",
+    "Unlock": "Déverrouiller la position",
+    "Move": "Déplacer la barre (lorsqu’elle est déverrouillée)",
+    "Unavailable": "—",
+    "NoActor": "Sélectionnez un seul token autorisé pour afficher son acteur.",
+    "Gauges": {
+      "recovery": "Dés de récupération",
+      "fortune": "Chance",
+      "mana": "Mana",
+      "hp": "Points de vie"
+    }
   }
 }

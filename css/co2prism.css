@@ -1,1 +1,90 @@
-/* Aucun style à cette étape. Les classes propres au module porteront le préfixe co2prism. */
+﻿/* Les coordonnées de la maquette (865 × 540) suivent une seule échelle. */
+.co2prism-bar {
+  position: fixed;
+  inset: auto;
+  z-index: 60;
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  flex: none;
+  container-type: inline-size;
+  user-select: none;
+  pointer-events: auto;
+}
+.co2prism-art { position: relative; width: 100%; height: 100%; }
+.co2prism-piece {
+  position: absolute;
+  box-sizing: border-box;
+  left: calc(var(--x) * 100% / 865);
+  top: calc(var(--y) * 100% / 540);
+  width: calc(var(--w) * 100% / 865);
+  height: calc(var(--h) * 100% / 540);
+}
+.co2prism-diamond { background: black; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.co2prism-presets { background: black; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.co2prism-gauge-base { background: black; clip-path: polygon(42.333% 0, 57.667% 0, 100% 100%, 0 100%); }
+.co2prism-portrait {
+  object-fit: cover;
+  border: 0;
+  border-radius: 0;
+  max-width: none;
+  clip-path: polygon(27.826% 0, 72.174% 0, 100% 27.746%, 100% 72.254%, 72.174% 100%, 27.826% 100%, 0 72.254%, 0 27.746%);
+}
+/* Le remplissage est borné en JS ; le gris conserve la partie non remplie. */
+.co2prism-gauge { background: #ddd; clip-path: polygon(calc(51 / var(--w) * 100%) 0, calc(100% - 51 / var(--w) * 100%) 0, 100% 100%, 0 100%); }
+.co2prism-gauge::before {
+  content: "";
+  position: absolute; left: 0; top: 0; height: 100%;
+  width: var(--fill, 0%);
+  background: var(--co2prism-gauge-color);
+}
+.co2prism-gauge-orange { --co2prism-gauge-color: #f45122; }
+.co2prism-gauge-resource { --co2prism-gauge-color: #d6e126; }
+.co2prism-gauge-purple { --co2prism-gauge-color: #84549c; }
+.co2prism-gauge-health { --co2prism-gauge-color: #099d49; }
+/* La zone tasse/lit reste indépendante des PV. */
+.co2prism-gauge-health::before { width: calc(var(--fill, 0%) * 0.7258); }
+.co2prism-gauge-health::after {
+  content: "";
+  position: absolute; left: 72.58%; top: 0; height: 100%;
+  width: calc(2 * 100cqw / 865); background: black;
+}
+.co2prism-value, .co2prism-number, .co2prism-icon { display: flex; align-items: center; justify-content: center; line-height: 1; }
+.co2prism-value {
+  font-family: Georgia, serif;
+  font-size: calc(var(--text-size, 40) * 100cqw / 865);
+  color: white;
+  white-space: nowrap;
+  -webkit-text-stroke: calc(2 * 100cqw / 865) black;
+  paint-order: stroke fill;
+}
+.co2prism-number { font: bold calc(36 * 100cqw / 865) / 1 Arial, sans-serif; color: black; background: #bbb; border-radius: 50%; }
+.co2prism-number-active { background: #f21326; }
+.co2prism-icon {
+  font-size: calc(32 * 100cqw / 865);
+  color: white;
+  -webkit-text-stroke: calc(1.5 * 100cqw / 865) black;
+  paint-order: stroke fill;
+}
+.co2prism-icon-large { font-size: calc(44 * 100cqw / 865); }
+.co2prism-icon-muted { color: #bbb; -webkit-text-stroke: 0; }
+.co2prism-icon-dark { color: black; -webkit-text-stroke: 0; }
+.co2prism-tools {
+  position: absolute; left: 1%; top: 5%; display: flex; gap: calc(6 * 100cqw / 865);
+}
+.co2prism-tools button {
+  all: unset; box-sizing: border-box; display: grid; place-items: center;
+  width: calc(52 * 100cqw / 865); height: calc(52 * 100cqw / 865);
+  border-radius: calc(8 * 100cqw / 865); border: 1px solid #aaa;
+  background: #111e; color: #eee; cursor: pointer; font-size: calc(28 * 100cqw / 865);
+}
+.co2prism-tools button:focus-visible { outline: 2px solid #ffcf60; outline-offset: 2px; }
+.co2prism-tools button:disabled { opacity: .5; cursor: default; }
+.co2prism-tools .co2prism-handle { touch-action: none; cursor: grab; }
+.co2prism-tools .co2prism-handle:active { cursor: grabbing; }

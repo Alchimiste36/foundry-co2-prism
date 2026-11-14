@@ -1,5 +1,20 @@
-{
+﻿{
   "CO2PRISM": {
-    "Title": "CO2 Prism"
+    "Title": "CO2 Prism",
+    "Size": "Bar size",
+    "SizeHint": "Choose S, M, L or XL. Changes apply immediately.",
+    "Locked": "Lock bar position",
+    "LockedHint": "Unlock to move the bar using its handle.",
+    "Lock": "Lock position",
+    "Unlock": "Unlock position",
+    "Move": "Move the bar (when unlocked)",
+    "Unavailable": "—",
+    "NoActor": "Select a single authorized token to display its actor.",
+    "Gauges": {
+      "recovery": "Recovery dice",
+      "fortune": "Fortune",
+      "mana": "Mana",
+      "hp": "Hit points"
+    }
   }
 }
