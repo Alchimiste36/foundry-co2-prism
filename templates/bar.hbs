@@ -8,7 +8,7 @@
     <button type="button" disabled class="co2prism-piece co2prism-number" style="--x:454;--y:61;--w:47;--h:47" data-co2prism-preset="2" aria-disabled="true">2</button>
     <button type="button" disabled class="co2prism-piece co2prism-number" style="--x:454;--y:133;--w:47;--h:47" data-co2prism-preset="3" aria-disabled="true">3</button>
     <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:237;--y:30;--w:48;--h:48" aria-hidden="true"><i class="fa-solid fa-suitcase" aria-hidden="true"></i></span>
-    <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:29;--y:234;--w:48;--h:48" aria-hidden="true"><i class="fa-solid fa-user" aria-hidden="true"></i></span>
+    <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-skills-toggle" style="--x:29;--y:234;--w:48;--h:48" aria-controls="co2prism-skills" aria-expanded="false"><i class="fa-solid fa-user" aria-hidden="true"></i></button>
     <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-action" style="--x:237;--y:444;--w:48;--h:48" data-co2prism-action="sheet"><i class="fa-solid fa-star" aria-hidden="true"></i></button>
     <button class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-lock" style="--x:443;--y:235;--w:48;--h:48" type="button"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
     <div class="co2prism-piece co2prism-gauge-border" style="--x:451;--y:255;--w:273;--h:63" ></div>
@@ -29,6 +29,136 @@
     <span class="co2prism-piece co2prism-icon " style="--x:668;--y:461;--w:38;--h:36" aria-hidden="true"><i class="fa-solid fa-heart" aria-hidden="true"></i></span>
     <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-dark co2prism-action" style="--x:329;--y:462;--w:42;--h:36" data-co2prism-action="fastRest"><i class="fa-solid fa-mug-saucer" aria-hidden="true"></i></button>
     <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-dark co2prism-action" style="--x:381;--y:462;--w:44;--h:36" data-co2prism-action="fullRest"><i class="fa-solid fa-bed" aria-hidden="true"></i></button>
+    <section id="co2prism-combat" class="co2prism-combat" hidden aria-label="{{localize 'CO2PRISM.Combat.Title'}}">
+      <div class="co2prism-piece co2prism-combat-line" style="--x:480;--y:253;--w:1128;--h:16" aria-hidden="true"></div>
+      <div class="co2prism-piece co2prism-combat-arrow" style="--x:1584;--y:232;--w:93;--h:57" aria-hidden="true"></div>
+      <div class="co2prism-piece co2prism-movement" style="--x:-122;--y:265;--w:237;--h:237" title="{{localize 'CO2PRISM.Combat.ReferenceMovement'}}">
+        <span class="co2prism-movement-label">{{localize 'CO2PRISM.Combat.Meters'}}</span>
+        <span class="co2prism-combat-number" data-co2prism-combat-value="meters">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-movement-label">{{localize 'CO2PRISM.Combat.Cells'}}</span>
+        <span class="co2prism-combat-number" data-co2prism-combat-value="cells">{{localize 'CO2PRISM.Unavailable'}}</span>
+      </div>
+      <div class="co2prism-piece co2prism-defense" style="--x:-9;--y:390;--w:257;--h:125"></div>
+      <span class="co2prism-piece co2prism-combat-number" style="--x:69;--y:414;--w:100;--h:65" data-co2prism-combat-value="def" title="{{localize 'CO2PRISM.Combat.Defense'}}">{{localize 'CO2PRISM.Unavailable'}}</span>
+      <span class="co2prism-piece co2prism-combat-number co2prism-dr" style="--x:151;--y:480;--w:38;--h:30" data-co2prism-combat-value="dr" title="{{localize 'CO2PRISM.Combat.Reduction'}}">{{localize 'CO2PRISM.Unavailable'}}</span>
+      <span class="co2prism-piece co2prism-icon" style="--x:185;--y:483;--w:28;--h:28" title="{{localize 'CO2PRISM.Combat.Reduction'}}"><i class="fa-solid fa-universal-access" aria-hidden="true"></i></span>
+      <span class="co2prism-piece co2prism-icon co2prism-defense-control" style="--x:28;--y:483;--w:24;--h:28" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.PartialDefense'}}"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+      <span class="co2prism-piece co2prism-icon co2prism-defense-control" style="--x:60;--y:483;--w:24;--h:28" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FullDefense'}}"><i class="fa-solid fa-shield" aria-hidden="true"></i></span>
+      <div class="co2prism-piece co2prism-effects" style="--x:731;--y:0;--w:824;--h:45" aria-label="{{localize 'CO2PRISM.Combat.Effects'}}"></div>
+      <div class="co2prism-combat-slots">
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:522;--y:49;--w:198;--h:198" data-co2prism-slot-index="0" data-co2prism-hand="left" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.LeftHand'}}" title="{{localize 'CO2PRISM.Combat.LeftHand'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:731;--y:49;--w:198;--h:198" data-co2prism-slot-index="1" data-co2prism-hand="right" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.RightHand'}}" title="{{localize 'CO2PRISM.Combat.RightHand'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:940;--y:49;--w:198;--h:198" data-co2prism-slot-index="2" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.EmptySlot'}}" title="{{localize 'CO2PRISM.Combat.EmptySlot'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:1149;--y:49;--w:198;--h:198" data-co2prism-slot-index="3" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.EmptySlot'}}" title="{{localize 'CO2PRISM.Combat.EmptySlot'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:1358;--y:49;--w:198;--h:198" data-co2prism-slot-index="4" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.EmptySlot'}}" title="{{localize 'CO2PRISM.Combat.EmptySlot'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:731;--y:255;--w:198;--h:198" data-co2prism-slot-index="5" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.EmptySlot'}}" title="{{localize 'CO2PRISM.Combat.EmptySlot'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:940;--y:255;--w:198;--h:198" data-co2prism-slot-index="6" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.EmptySlot'}}" title="{{localize 'CO2PRISM.Combat.EmptySlot'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+        <div class="co2prism-piece co2prism-combat-slot" style="--x:1149;--y:255;--w:198;--h:198" data-co2prism-slot-index="7" role="group" aria-disabled="true" aria-label="{{localize 'CO2PRISM.Combat.EmptySlot'}}" title="{{localize 'CO2PRISM.Combat.EmptySlot'}}">
+          <img class="co2prism-slot-image" hidden alt="" draggable="false">
+          <i class="co2prism-slot-type" hidden aria-hidden="true"></i>
+          <span class="co2prism-slot-time" hidden></span>
+          <span class="co2prism-slot-uses" hidden></span>
+          <span class="co2prism-slot-cost" hidden></span>
+          <span class="co2prism-slot-empty">{{localize 'CO2PRISM.Combat.EmptySlot'}}</span>
+        </div>
+      </div>
+      <span class="co2prism-piece co2prism-time co2prism-time-limited" style="--x:737;--y:459;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">L</span>
+      <span class="co2prism-piece co2prism-time co2prism-time-mixed" style="--x:792;--y:459;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">AM</span>
+      <span class="co2prism-piece co2prism-time co2prism-time-attack" style="--x:847;--y:459;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">A</span>
+      <span class="co2prism-piece co2prism-time co2prism-time-move" style="--x:902;--y:459;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">M</span>
+      <div class="co2prism-piece co2prism-time-bar" style="--x:966;--y:457;--w:257;--h:51" aria-label="{{localize 'CO2PRISM.Combat.FutureBudget'}}">
+        <span class="co2prism-time-indicator co2prism-time-limited"></span>
+        <span class="co2prism-time-separator"></span>
+        <span class="co2prism-time-indicator co2prism-time-mixed"></span>
+        <span class="co2prism-time-indicator co2prism-time-move"></span>
+      </div>
+    </section>
+    <section id="co2prism-skills" class="co2prism-skills" hidden aria-label="{{localize 'CO2PRISM.Skills'}}">
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="for" style="--x:-168;--y:-154;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.for'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="agi" style="--x:0;--y:-154;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.agi'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="con" style="--x:-84;--y:-237;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.con'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="cha" style="--x:-168;--y:13;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.cha'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="int" style="--x:-84;--y:97;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.int'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="vol" style="--x:0;--y:13;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.vol'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+      <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="per" style="--x:-84;--y:-70;--w:160;--h:160">
+        <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.per'}}</span>
+        <span class="co2prism-skill-value">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span class="co2prism-skill-count">({{localize 'CO2PRISM.Unavailable'}})</span>
+      </button>
+    </section>
   </div>
-  
+
 </div>

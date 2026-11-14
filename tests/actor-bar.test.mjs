@@ -123,7 +123,7 @@ test("déplacement depuis le portrait, verrouillage et position utilisateur", ()
   bar.handle = { setPointerCapture: id => capture.add(id), hasPointerCapture: id => capture.has(id),
     releasePointerCapture: id => capture.delete(id), classList: { toggle() {} } };
   bar.lock = { setAttribute() {} };
-  bar.element = { style: { left: "40px", top: "400px" }, getBoundingClientRect() {
+  bar.element = { style: { left: "40px", top: "400px", setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
     return { left: parseFloat(this.style.left), top: parseFloat(this.style.top), width: 430, height: 306 };
   } };
   const event = { button: 0, pointerId: 1, clientX: 50, clientY: 420, preventDefault() {}, stopPropagation() {} };
@@ -160,7 +160,7 @@ test("redimensionnement, bornage et restauration dans une petite fenêtre", () =
   };
   context.window = { innerWidth: 420, innerHeight: 300 };
   bar.position = settings.position;
-  bar.element = { style: {}, getBoundingClientRect() {
+  bar.element = { style: { setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
     return { left: parseFloat(this.style.left) || 0, top: parseFloat(this.style.top) || 0,
       width: parseFloat(this.style.width), height: parseFloat(this.style.height) };
   } };
@@ -518,4 +518,209 @@ test("tokens liés et synthétiques : écrire sur token.actor, jamais sur baseAc
   assert.equal(bar.configuration.activePreset, 1);
   hooks.get("canvasTearDown")();
   assert.ok(bar.presetButtons.every(button => button.disabled));
+});
+
+function setupSkills() {
+  const env = setupConfiguration();
+  const { bar, context, configuredActor, select } = env;
+  context.window = { innerWidth: 1600, innerHeight: 1200 };
+  bar.element = { style: { setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
+    return { left: parseFloat(this.style.left) || 0, top: parseFloat(this.style.top) || 0,
+      width: parseFloat(this.style.width) || 0, height: parseFloat(this.style.height) || 0 };
+  } };
+  context.game.settings = { get: () => "M", set() {} };
+  bar.layout();
+  bar.skillsPanel = { hidden: true };
+  bar.skillsToggle = { setAttribute(key, value) { this[key] = value; } };
+  const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
+  bar.skillNodes = ["for", "agi", "con", "cha", "int", "vol", "per"].map(key => ({ key,
+    value: node(), count: node(), button: { setAttribute(key, value) { this[key] = value; } } }));
+  // L'extraction HTML réelle est vérifiée dans Edge.
+  context.document = { createElement: () => {
+    const template = { innerHTML: "" };
+    template.content = { querySelectorAll: () => [], get textContent() { return template.innerHTML; } };
+    return template;
+  } };
+  const a = configuredActor("skills", { co2prism: { panels: { combat: true, equipements: true } } });
+  a.system.abilities = Object.fromEntries(["for", "agi", "con", "cha", "int", "vol", "per"].map((key, index) =>
+    [key, { value: [3, -1, 1, 2, 1, 0, 1][index] }]));
+  const bonuses = {}, reads = [], rolls = [];
+  a.getSkillBonuses = key => { reads.push(key); return bonuses[key] ?? []; };
+  a.rollSkill = function (key, options) { rolls.push({ actor: this, key, options }); };
+  select(a);
+  return { ...env, a, bonuses, reads, rolls };
+}
+
+test("Compétences : état persistant, géométrie ancrée et aucun calcul du volet fermé", async () => {
+  const { bar, a, reads, hooks } = setupSkills();
+  assert.equal(reads.length, 0);
+  const base = () => {
+    const r = bar.element.getBoundingClientRect();
+    return [r.left + bar.panelOffset.x, r.top + bar.panelOffset.y];
+  };
+  const before = base();
+  await bar.setPanelState("competences", true);
+  assert.equal(bar.skillsPanel.hidden, false);
+  assert.equal(a.flags.co2prism.panels.competences, true);
+  assert.equal(a.flags.co2prism.panels.combat, true);
+  assert.equal(a.flags.co2prism.panels.equipements, true);
+  assert.deepEqual(base(), before);
+  assert.ok(reads.length >= 7);
+  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1845 / 724) < 0.01);
+  await bar.setPanelState("competences", false);
+  assert.deepEqual(base(), before);
+  const count = reads.length;
+  hooks.get("updateActor")(a, { system: {} });
+  hooks.get("updateItem")({ parent: a });
+  assert.equal(reads.length, count);
+  await Promise.all([bar.writeConfiguration("panels.competences", value => !value),
+    bar.writeConfiguration("panels.competences", value => !value)]);
+  assert.equal(bar.skillsPanel.hidden, true);
+});
+
+test("Compétences : valeurs signées, compte des bonus et actualisations natives", async () => {
+  const { bar, a, bonuses, hooks } = setupSkills();
+  bonuses.for = [{ name: "Métier", value: 4, description: "Force", additionalInfos: "Seulement en montagne" },
+    { name: "Bonus général", value: 2 }];
+  await bar.setPanelState("competences", true);
+  assert.equal(bar.skillNodes[0].value.textContent, "+3");
+  assert.equal(bar.skillNodes[1].value.textContent, "-1");
+  assert.equal(bar.skillNodes[5].value.textContent, "+0");
+  assert.equal(bar.skillNodes[0].count.textContent, "(2)");
+  assert.equal(bar.skillNodes[1].count.textContent, "(0)");
+  assert.match(bar.skillNodes[0].button.title, /Métier — \+4/);
+  assert.match(bar.skillNodes[0].button.title, /Seulement en montagne/);
+  a.system.abilities.for.value = -2;
+  bonuses.for.push({ name: "Nouvelle capacité", value: 9 });
+  hooks.get("updateActiveEffect")({ parent: a });
+  assert.equal(bar.skillNodes[0].value.textContent, "-2");
+  assert.equal(bar.skillNodes[0].count.textContent, "(3)");
+  delete a.system.abilities.for;
+  hooks.get("updateActor")(a, { "system.abilities.for": null });
+  assert.equal(bar.skillNodes[0].value.textContent, "—");
+  assert.equal(bar.skillNodes[0].button.disabled, true);
+  delete a.getSkillBonuses;
+  bar.refreshActor();
+  assert.equal(bar.skillNodes[1].count.textContent, "(—)");
+});
+
+test("Compétences : sept jets CO2, rencontres, changement d'acteur et permissions", async () => {
+  const { bar, a, rolls, configuredActor, select, context, token, hooks } = setupSkills();
+  await bar.setPanelState("competences", true);
+  a.type = "encounter";
+  for (const { key } of bar.skillNodes) await bar.performAction(`skill:${key}`);
+  assert.equal(rolls.length, 7);
+  assert.deepEqual(rolls.map(roll => roll.key), ["for", "agi", "con", "cha", "int", "vol", "per"]);
+  assert.ok(rolls.every(roll => roll.actor === a && roll.options.withDialog === true));
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  await bar.performAction("skill:for");
+  assert.equal(rolls.length, 7);
+  assert.equal(bar.skillsToggle.disabled, true);
+  assert.ok(bar.skillNodes.every(node => node.button.disabled));
+  context.game.user.isGM = true;
+  await bar.performAction("skill:for");
+  assert.equal(rolls.length, 8);
+  const b = configuredActor("b"); select(b);
+  assert.equal(bar.skillsPanel.hidden, true);
+  await bar.performAction("skill:for");
+  assert.equal(rolls.length, 8);
+  const synthetic = token(a); synthetic.document.baseActor = b;
+  context.canvas.tokens.controlled = [synthetic]; hooks.get("controlToken")();
+  assert.equal(bar.skillsPanel.hidden, false);
+  await bar.performAction("skill:agi");
+  assert.equal(rolls.at(-1).actor, a);
+  await bar.performAction("skill:other");
+  assert.equal(rolls.length, 9);
+  hooks.get("canvasTearDown")();
+  assert.equal(bar.skillsPanel.hidden, true);
+});
+
+test("Combat : mouvement réel, conversion mètres/cases et données DEF/RD préparées", () => {
+  const { bar, context, actor, hooks, token } = setup();
+  const a = actor("combat");
+  a.system.attributes.movement = { value: 10, unit: "m" };
+  a.system.combat = { def: { value: 15 }, dr: { value: 4 } };
+  context.canvas.scene = { grid: { type: 1, distance: 2, units: "mètres" } };
+  const read = () => ({ ...bar.readCombatData(a) });
+  assert.deepEqual(read(), { meters: 10, cells: 5, def: 15, dr: 4 });
+  context.canvas.tokens.controlled = [token(a)];
+  let refreshed = 0;
+  const refresh = bar.refreshActor.bind(bar);
+  bar.refreshActor = (...args) => { refreshed++; refresh(...args); };
+  hooks.get("updateScene")({}, { grid: {} });
+  hooks.get("updateScene")(context.canvas.scene, { name: "changed" });
+  assert.equal(refreshed, 0);
+  context.canvas.scene.grid.distance = 1.5;
+  hooks.get("updateScene")(context.canvas.scene, { "grid.distance": 1.5 });
+  assert.equal(refreshed, 1);
+  assert.equal(read().cells, 10 / 1.5);
+  a.type = "encounter";
+  a.system.attributes.movement = { value: 30, unit: "ft" };
+  context.canvas.scene.grid = { type: 2, distance: 5, units: "ft" };
+  assert.ok(Math.abs(read().meters - 9.144) < 0.0001);
+  assert.ok(Math.abs(read().cells - 6) < 0.0001);
+  for (const grid of [{ type: 0, distance: 5, units: "ft" }, { type: 1, distance: 0, units: "m" },
+    { type: 1, distance: 1, units: "unknown" }, null]) {
+    context.canvas.scene.grid = grid;
+    assert.equal(read().cells, null);
+  }
+  a.system.attributes.movement = { value: 10, unit: "unknown" };
+  assert.equal(read().meters, null);
+  delete a.system.attributes.movement;
+  delete a.system.combat.dr;
+  assert.deepEqual(read(), { meters: null, cells: null, def: 15, dr: null });
+  context.canvas.ready = false;
+  assert.equal(read().cells, null);
+});
+
+test("Combat : presets ouvrent/replient sans modifier slots ni les autres volets", async () => {
+  const { bar, configuredActor, select, writes } = setupConfiguration();
+  const a = configuredActor("a", { co2prism: { panels: { competences: true, equipements: true },
+    presets: { 1: { slots: { untouched: { unknownReference: "kept" } } } }, extra: "kept" } });
+  const originalSlots = structuredClone(a.flags.co2prism.presets);
+  select(a);
+  await bar.selectCombatPreset(1);
+  assert.equal(bar.configuration.panels.combat, true);
+  assert.equal(bar.presetButtons[0]["aria-expanded"], "true");
+  await bar.selectCombatPreset(1);
+  assert.equal(bar.configuration.panels.combat, false);
+  await bar.selectCombatPreset(2);
+  assert.equal(bar.configuration.activePreset, 2);
+  assert.equal(bar.configuration.panels.combat, true);
+  await bar.selectCombatPreset(3);
+  assert.equal(bar.configuration.activePreset, 3);
+  assert.equal(bar.configuration.panels.combat, true);
+  assert.equal(bar.configuration.panels.competences, true);
+  assert.equal(bar.configuration.panels.equipements, true);
+  assert.deepEqual(a.flags.co2prism.presets, originalSlots);
+  assert.equal(a.flags.co2prism.extra, "kept");
+  const b = configuredActor("b"); select(b); await bar.selectCombatPreset(2);
+  select(a); assert.equal(bar.configuration.activePreset, 3);
+  assert.equal(bar.configuration.panels.combat, true);
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  const length = writes.length;
+  assert.equal(await bar.selectCombatPreset(1), false);
+  assert.equal(writes.length, length);
+  a.testUserPermission = () => true;
+  await Promise.all([bar.selectCombatPreset(3), bar.selectCombatPreset(3)]);
+  assert.equal(bar.configuration.panels.combat, true);
+});
+
+test("Combat : effets natifs, effets CO2 et statuts sans doublons ni effet fictif", () => {
+  const { bar, context, actor } = setup();
+  const a = actor("effects");
+  context.CONFIG = { statusEffects: [{ id: "dead", name: "Dead", img: "dead.svg" },
+    { id: "weakened", name: "Weakened", img: "weakened.svg" }] };
+  a.appliedEffects = [{ name: "Weakness", img: "weakness.svg", statuses: new Set(["weakened"]) }];
+  a.system.currentEffects = [{ name: "Active capacity", sourceParts: { item: { img: "capacity.webp" } } },
+    { name: "Missing source", get sourceParts() { throw Error("Deleted"); } }];
+  a.statuses = new Set(["weakened", "dead", "unknown-status"]);
+  const result = bar.readCombatEffects(a);
+  assert.equal(result.length, 5);
+  assert.deepEqual(Array.from(result, effect => effect.name), ["Weakness", "Active capacity", "Missing source", "Dead", "unknown-status"]);
+  assert.equal(result[1].img, "capacity.webp");
+  assert.equal(result[2].img, undefined);
+  assert.equal(result[3].img, "dead.svg");
+  assert.equal(bar.readCombatEffects(actor("empty")).length, 0);
+  assert.equal(bar.readCombatEffects(null).length, 0);
 });
