@@ -38,6 +38,11 @@
       "Row1": "Première ligne de raccourcis — défilement horizontal",
       "Row2": "Seconde ligne de raccourcis — défilement horizontal",
       "UnavailableSlot": "Action indisponible",
+      "ShortcutControls": "Clic : utiliser · Ctrl : chat · Alt : dommages seuls si disponibles · Shift : feuille du support",
+      "DamageUnavailable": "Cette action ne propose pas de jet de dommages seul.",
+      "Active": "Action activée",
+      "Inactive": "Action désactivée",
+      "ActorActionUnsupported": "Les API CO2 installées exigent un Item porteur pour utiliser ou publier cette action d’acteur.",
       "InvalidDrop": "Dépôt refusé : sélection modifiée, droits insuffisants ou action CO2 introuvable sur cet acteur.",
       "FutureBudget": "Temps d’action — présentation uniquement, gestion à venir",
       "UnresolvedSlots": "Des raccourcis sont enregistrés dans ce preset ; leur format de référence n’est pas encore pris en charge."

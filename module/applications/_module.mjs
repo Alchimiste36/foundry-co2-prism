@@ -333,7 +333,10 @@ class PrismBar {
         && (item || entry.source === reference.source)) ?? [];
       if (matches.length !== 1) return null;
       const action = matches[0];
-      return { action, item: item ?? [...(actor.items?.values() ?? [])].find(entry => entry.actions?.includes(action)) };
+      const support = item ?? [...(actor.items?.values() ?? [])].find(entry => entry.actions?.includes(action));
+      // activateAction indexe le tableau natif : ne jamais lancer une autre entrée déplacée.
+      if (support && support.actions[reference.indice] !== action) return null;
+      return { action, item: support };
     } catch { return null; }
   }
 
@@ -412,6 +415,23 @@ class PrismBar {
             const bolt = document.createElement("i"); bolt.className = "fa-solid fa-bolt"; badge.append(bolt);
           }
           node.title = [read("actionName") || item?.name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
+          node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ShortcutControls")}`;
+          node.classList.add("co2prism-slot-executable");
+          node.setAttribute("role", "button");
+          if (action.properties?.activable === true) {
+            node.setAttribute("aria-pressed", String(action.properties.enabled === true));
+            node.title += `\n${game.i18n.localize(action.properties.enabled ? "CO2PRISM.Combat.Active" : "CO2PRISM.Combat.Inactive")}`;
+            if (action.properties.temporary === true && action.properties.enabled === true) node.classList.add("co2prism-action-active");
+          }
+          const disabled = Boolean(this.busyAction) || !(game.user.isGM || this.actor.testUserPermission(game.user, "OWNER"));
+          node.setAttribute("aria-disabled", String(disabled));
+          node.tabIndex = disabled ? -1 : 0;
+          const context = { actor: this.actor, token: this.token, preset: this.configuration.activePreset,
+            key: slot.key, reference: slot.reference };
+          node.addEventListener("click", event => { void this.executeShortcut(event, context); });
+          node.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") void this.executeShortcut(event, context);
+          });
         } else add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.EmptySlot"));
         if (slot.hand) add("span", "co2prism-slot-hand", game.i18n.localize(`CO2PRISM.Combat.Hand_${slot.hand}`));
         node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
@@ -447,6 +467,74 @@ class PrismBar {
     event.preventDefault(); event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
     node.classList.add(raw ? "co2prism-drop-target" : "co2prism-drop-candidate");
+  }
+
+  async executeShortcut(event, context) {
+    event.preventDefault(); event.stopPropagation();
+    if ((event.button !== undefined && event.button !== 0) || event.detail > 1 || event.repeat
+      || this.busyAction || this.slotDrag) return false;
+    const mode = event.shiftKey ? "sheet" : event.ctrlKey ? "chat" : event.altKey ? "damage" : "use";
+    const warn = key => { ui.notifications.warn(game.i18n.localize(key)); return false; };
+    if (event.currentTarget?.isConnected === false) return warn("CO2PRISM.Combat.UnavailableSlot");
+    this.refreshActor();
+    const { actor, token, preset, key, reference } = context;
+    const current = this.configuration.presets[preset]?.slots[key];
+    if (actor !== this.actor || token !== this.token || preset !== this.configuration.activePreset
+      || !this.configuration.panels.combat || !current
+      || ["source", "indice", "itemId"].some(field => current[field] !== reference?.[field])
+      || !(game.user.isGM || actor?.testUserPermission(game.user, "OWNER"))) {
+      return warn("CO2PRISM.CommandUnavailable");
+    }
+    const resolved = this.resolveShortcut(actor, current);
+    if (!resolved) return warn("CO2PRISM.Combat.UnavailableSlot");
+    const { action, item } = resolved;
+    // Les API macros CO2 installées ciblent un Item, jamais un faux support acteur.
+    if (!item && (mode !== "sheet" || current.source !== actor.uuid || typeof actor.sheet?.render !== "function")) {
+      return warn("CO2PRISM.Combat.ActorActionUnsupported");
+    }
+    if (item && actor.items?.get(item.id) !== item) return warn("CO2PRISM.Combat.UnavailableSlot");
+    const api = game.system?.api?.macros;
+    const toggle = mode === "use" && action.properties?.activable === true && action.properties?.temporary === true;
+    if (toggle && typeof actor.activateAction !== "function") return warn("CO2PRISM.Combat.UnavailableSlot");
+    if (item && !toggle && typeof api?.[mode === "sheet" ? "openSheet" : mode === "chat" ? "sendToChat" : "useAction"] !== "function") {
+      return warn("CO2PRISM.Combat.UnavailableSlot");
+    }
+    this.busyAction = "shortcut";
+    this.updateActions();
+    try {
+      // UUID actuel du support, notamment pour les Items d'un acteur synthétique.
+      const source = item?.uuid;
+      const indice = action.indice;
+      if (mode === "sheet") {
+        if (item) await api.openSheet(source);
+        else await actor.sheet.render({ force: true });
+      } else if (mode === "chat") {
+        // Sans nom de repli : une disparition ne doit pas cibler un autre Item par homonymie.
+        await api.sendToChat(source, undefined, indice);
+      } else {
+        const temporary = action.properties?.temporary === true;
+        const auto = action.autoAttack === true;
+        const attack = ["melee", "ranged", "magical", "spell"].includes(action.type) && !auto && !temporary;
+        if (mode === "damage") {
+          if (!(attack && action.hasResolversWithDomage === true)) return warn("CO2PRISM.Combat.DamageUnavailable");
+          await api.useAction(source, indice, "damage");
+        } else if (toggle) {
+          // Comme la feuille CO2 : pas de type attaque/dommages pour une bascule temporaire.
+          const result = await actor.activateAction({ state: !action.properties.enabled, source, indice, type: undefined });
+          if (result === false) return false;
+        } else if (temporary) await api.useAction(source, indice);
+        else if (attack) await api.useAction(source, indice, "attack");
+        else await api.useAction(source, indice, item.type === "attack" && auto ? "auto" : action.type);
+      }
+      return true;
+    } catch (error) {
+      console.error("co2prism | Shortcut", error);
+      ui.notifications.error(game.i18n.localize("CO2PRISM.ActionError"));
+      return false;
+    } finally {
+      this.busyAction = null;
+      this.refreshActor();
+    }
   }
 
   async dropSlot(event, slot, node) {
@@ -629,6 +717,12 @@ class PrismBar {
   }
 
   updateActions() {
+    for (const node of this.combatSlots?.querySelectorAll(".co2prism-slot-executable") ?? []) {
+      const disabled = Boolean(this.busyAction) || !this.actor
+        || !(game.user.isGM || this.actor.testUserPermission(game.user, "OWNER"));
+      node.setAttribute("aria-disabled", String(disabled));
+      node.tabIndex = disabled ? -1 : 0;
+    }
     for (const { key, button } of this.skillNodes ?? []) {
       button.disabled = Boolean(this.busyAction) || !this.canUseAction(`skill:${key}`);
     }

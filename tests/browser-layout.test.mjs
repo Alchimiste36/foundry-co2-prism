@@ -25,7 +25,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       <style>${read("../css/co2prism.css")}</style></head>
       <body class="vtt game"><canvas id="board" aria-label="Canvas Board"></canvas><script>
       const ready = [];
-      const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on() {} };
+      const hooks = new Map();
+      const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on(name, fn) { hooks.set(name, fn); } };
       const settings = { size: "M", position: {}, locked: true };
       const warnings = [];
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
@@ -231,14 +232,30 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await bar.selectCombatPreset(1);
           check(!bar.skillsPanel.hidden && !bar.combatPanel.hidden && root.getBoundingClientRect().right <= innerWidth + 0.1,
             "Combat hors écran avec Compétences");
-          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "capacity",
+          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "capacity", parent: actor,
             system: { description: "<b>Description native</b>", hasFrequency: true, charges: { current: 3 } },
             testUserPermission: () => true };
           const nativeAction = { source: item.uuid, indice: 0, actionName: "Action réelle",
             actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "l",
+            type: "melee", properties: { temporary: false, enabled: false, activable: true }, autoAttack: false, hasResolversWithDomage: true,
             hasCharges: true, charges: 3, manaCost: 2 };
           item.actions = [nativeAction]; actor.items = new Map([[item.id, item]]);
           Object.defineProperty(actor, "actions", { get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
+          const shortcutCalls = [];
+          actor.activateAction = async options => {
+            shortcutCalls.push(["activateAction", options]);
+            nativeAction.properties.enabled = options.state;
+            hooks.get("updateItem")(item, { "system.actions": [] });
+          };
+          game.system.api = { macros: {
+            async useAction(...args) {
+              shortcutCalls.push(["useAction", ...args]);
+              nativeAction.charges = 2; item.system.charges.current = 2; nativeAction.properties.enabled = true;
+              actor.system.resources.mana.value = 17;
+            },
+            async sendToChat(...args) { shortcutCalls.push(["sendToChat", ...args]); },
+            async openSheet(...args) { shortcutCalls.push(["openSheet", ...args]); }
+          } };
           const payload = { type: "co.action", source: item.uuid, indice: 0, name: "Copie ignorée", img: "ignored" };
           const lengths = () => bar.combatRows.map(row => row.children.length).join(",");
           const dropAt = async (row, index, data = payload) => {
@@ -259,14 +276,109 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(occupied.querySelector(".co2prism-slot-time").textContent === "L"
             && occupied.querySelector(".co2prism-slot-uses").textContent === "3"
             && occupied.querySelector(".co2prism-slot-cost").textContent.trim() === "2", "Décorations natives");
+          const executeFlags = JSON.stringify(actor.flags);
+          const clickShortcut = async modifiers => {
+            bar.combatRows[0].children[0].dispatchEvent(new MouseEvent("click", {
+              bubbles: true, cancelable: true, button: 0, detail: 1, ...modifiers
+            }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+          };
+          for (const modifiers of [{}, { ctrlKey: true }, { altKey: true }, { shiftKey: true },
+            { shiftKey: true, ctrlKey: true, altKey: true }, { ctrlKey: true, altKey: true }]) await clickShortcut(modifiers);
+          check(JSON.stringify(shortcutCalls) === JSON.stringify([
+            ["useAction", item.uuid, 0, "attack"], ["sendToChat", item.uuid, undefined, 0],
+            ["useAction", item.uuid, 0, "damage"], ["openSheet", item.uuid], ["openSheet", item.uuid],
+            ["sendToChat", item.uuid, undefined, 0]
+          ]), "Raccourcis clavier CO2 incorrects");
+          check(JSON.stringify(actor.flags) === executeFlags, "Configuration modifiée par exécution");
+          check(bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent === "2"
+            && bar.gauges.mana.text.textContent === "17 / 18"
+            && bar.combatRows[0].children[0].getAttribute("aria-pressed") === "true", "Rafraîchissement après action natif absent");
+          let countCalls = shortcutCalls.length;
+          nativeAction.hasResolversWithDomage = false; await clickShortcut({ altKey: true });
+          check(shortcutCalls.length === countCalls, "Alt sans dommages a exécuté une action");
+          nativeAction.properties.temporary = true; await clickShortcut({});
+          check(shortcutCalls.at(-1)[0] === "activateAction" && shortcutCalls.at(-1)[1].state === false
+            && shortcutCalls.at(-1)[1].type === undefined, "Action temporaire active non désactivée nativement");
+          check(!bar.combatRows[0].children[0].classList.contains("co2prism-action-active"), "Effet actif conservé après désactivation");
+          countCalls = shortcutCalls.length; await clickShortcut({ altKey: true });
+          check(shortcutCalls.length === countCalls, "Alt temporaire a exécuté une action");
+          nativeAction.properties.temporary = false; nativeAction.type = "heal"; await clickShortcut({});
+          check(shortcutCalls.at(-1)[3] === "heal", "Soin forcé en attaque");
+          nativeAction.type = "melee"; nativeAction.hasResolversWithDomage = true;
+          for (let repeat = 0; repeat < 5; repeat++) bar.refreshActor();
+          countCalls = shortcutCalls.length; await clickShortcut({});
+          check(shortcutCalls.length === countCalls + 1, "Listeners de clic accumulés");
+          await clickShortcut({ detail: 2 });
+          check(shortcutCalls.length === countCalls + 1, "Double clic exécuté deux fois");
+          bar.combatRows[0].lastElementChild.click();
+          check(shortcutCalls.length === countCalls + 1, "Case vide exécutée");
+          countCalls = shortcutCalls.length;
+          let complete;
+          const nativeUseAction = game.system.api.macros.useAction;
+          game.system.api.macros.useAction = (...args) => new Promise(resolve => { shortcutCalls.push(["useAction", ...args]); complete = resolve; });
+          bar.combatRows[0].children[0].click(); bar.combatRows[0].children[0].click();
+          check(shortcutCalls.length === countCalls + 1 && bar.combatRows[0].children[0].getAttribute("aria-disabled") === "true",
+            "Clic pendant une opération en cours");
+          complete(); await new Promise(resolve => setTimeout(resolve, 0));
+          game.system.api.macros.useAction = nativeUseAction;
           await dropAt(1, 2); check(lengths() === "4,1", "Croissance ligne 1 incorrecte");
           await dropAt(2, 0); check(lengths() === "4,2", "Croissance ligne 2 incorrecte");
+          // Même modèle natif dans plusieurs cases, lignes et presets.
+          Object.assign(nativeAction.properties, { activable: true, temporary: true, enabled: false });
+          hooks.get("updateItem")(item, { "system.actions": [] });
+          const toggleFlags = JSON.stringify(actor.flags);
+          await clickShortcut({});
+          check(nativeAction.properties.enabled && root.querySelectorAll(".co2prism-action-active").length === 4,
+            "Activation non synchronisée entre raccourcis");
+          await clickShortcut({});
+          check(!nativeAction.properties.enabled && !root.querySelector(".co2prism-action-active"), "Second clic sans désactivation");
+          const geometry = () => JSON.stringify([...root.querySelectorAll(".co2prism-combat-slot")].map(node => {
+            const r = node.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
+          }).concat(bar.combatRows.map(row => [row.clientWidth, row.scrollWidth])));
+          for (const size of ["S", "M", "L", "XL"]) {
+            settings.size = size; bar.layout();
+            nativeAction.properties.enabled = false; hooks.get("updateItem")(item, { "system.actions": [] });
+            const before = geometry();
+            nativeAction.properties.enabled = true; hooks.get("updateItem")(item, { "system.actions": [] });
+            check(geometry() === before, size + " contour actif déplace ou élargit les cases");
+            for (const node of root.querySelectorAll(".co2prism-slot-executable")) {
+              check(node.classList.contains("co2prism-action-active") && node.getAttribute("aria-pressed") === "true", size + " état actif non restauré");
+              check(getComputedStyle(node, "::after").boxShadow !== "none" && getComputedStyle(node.querySelector("img")).filter === "brightness(1.08)",
+                size + " contour/éclaircissement absent");
+              check(Number(getComputedStyle(node.querySelector(".co2prism-slot-cost")).zIndex) > Number(getComputedStyle(node, "::after").zIndex),
+                size + " contour masque les indicateurs");
+            }
+          }
+          check(JSON.stringify(actor.flags) === toggleFlags, "État actif écrit dans les flags Prism");
+          const toggleReference = bar.shortcutFromDrop(actor, payload);
+          for (const preset of [2, 3]) {
+            await bar.saveShortcut(actor, preset, bar.slotRows(actor, preset)[0][0], toggleReference);
+            await bar.selectCombatPreset(preset);
+            check(root.querySelectorAll(".co2prism-action-active").length === 1, "État actif différent selon le preset");
+          }
+          nativeAction.properties.enabled = false; hooks.get("updateItem")(item, { "system.actions": [] });
+          check(!root.querySelector(".co2prism-action-active"), "Changement depuis feuille non synchronisé");
+          await bar.selectCombatPreset(1);
+          check(!root.querySelector(".co2prism-action-active"), "État précédent conservé au retour du preset");
+          const nativeToggle = actor.activateAction;
+          actor.activateAction = async () => false;
+          await clickShortcut({});
+          check(!nativeAction.properties.enabled && !root.querySelector(".co2prism-action-active"), "Refus affiché comme activation");
+          actor.activateAction = nativeToggle;
+          nativeAction.properties.activable = false; nativeAction.properties.enabled = true;
+          hooks.get("updateItem")(item, { "system.actions": [] });
+          check(!root.querySelector(".co2prism-action-active"), "Effet actif sans propriété activable");
+          nativeAction.properties.activable = true; nativeAction.properties.temporary = false;
+          hooks.get("updateItem")(item, { "system.actions": [] });
+          check(!root.querySelector(".co2prism-action-active"), "Effet actif sur action ordinaire");
           const invalidBefore = JSON.stringify(actor.flags);
           await dropAt(2, 1, { type: "Item", uuid: item.uuid });
           check(JSON.stringify(actor.flags) === invalidBefore && lengths() === "4,2" && warnings.length > 0, "Drop invalide accepté");
           const executeBefore = calls.length;
+          const staleBefore = shortcutCalls.length;
           for (const type of ["click", "contextmenu"]) occupied.dispatchEvent(new MouseEvent(type, { bubbles: true, ctrlKey: true }));
-          check(calls.length === executeBefore, "Raccourci exécuté");
+          check(calls.length === executeBefore && shortcutCalls.length === staleBefore, "Ancien carré exécuté");
           nativeAction.actionName = "Action modifiée"; nativeAction.charges = 0; nativeAction.hasCharges = false; item.system.charges.current = 0;
           bar.refreshActor();
           check(bar.combatRows[0].children[0].title.includes("Action modifiée")
@@ -340,6 +452,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           if (${Boolean(process.env.CO2PRISM_SCREENSHOT)}) {
             settings.size = "L"; bar.position = { x: 300, y: 350 }; bar.layout();
             actor.img = "file:///F:/FVTT_V14/public/icons/svg/mystery-man.svg";
+            Object.assign(nativeAction.properties, { activable: true, temporary: true, enabled: true });
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
             root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
           }

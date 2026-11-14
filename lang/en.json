@@ -38,6 +38,11 @@
       "Row1": "First shortcut row — horizontal scrolling",
       "Row2": "Second shortcut row — horizontal scrolling",
       "UnavailableSlot": "Action unavailable",
+      "ShortcutControls": "Click: use · Ctrl: chat · Alt: damage only when available · Shift: source sheet",
+      "DamageUnavailable": "This action does not provide a damage-only roll.",
+      "Active": "Action active",
+      "Inactive": "Action inactive",
+      "ActorActionUnsupported": "The installed CO2 APIs require an Item source to use or publish this actor action.",
       "InvalidDrop": "Drop rejected: selection changed, insufficient permissions, or CO2 action not found on this actor.",
       "FutureBudget": "Action times — display only, management coming later",
       "UnresolvedSlots": "This preset has saved shortcuts; their reference format is not supported yet."

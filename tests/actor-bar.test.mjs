@@ -845,3 +845,226 @@ test("raccourcis : attaque de rencontre, action portée par acteur et acteur syn
   assert.equal(Object.keys(base.flags.co2prism).length, 0);
   assert.equal(bar.slotRows()[1].length, 2);
 });
+
+async function setupExecution() {
+  const env = setupShortcuts();
+  const { bar, a, item, context } = env;
+  const action = item.actions[0];
+  Object.assign(action, { type: "melee", properties: { temporary: false, enabled: false },
+    autoAttack: false, hasResolversWithDomage: true });
+  const ref = bar.shortcutFromDrop(a, env.payload());
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  const calls = [];
+  context.game.system = { api: { macros: Object.fromEntries(["useAction", "sendToChat", "openSheet"].map(name =>
+    [name, async (...args) => { calls.push([name, ...args]); }])) } };
+  const click = modifiers => ({ button: 0, detail: 1, preventDefault() {}, stopPropagation() {}, ...modifiers });
+  const target = (key = "left-hand") => ({ actor: a, token: bar.token, preset: 1, key,
+    reference: bar.readConfiguration(a).presets[1].slots[key] });
+  return { ...env, action, calls, click, target };
+}
+
+test("exécution CO2 : attaque/dommages/chat/feuille et priorité Shift > Ctrl > Alt", async () => {
+  const { bar, item, calls, click, target, writes, a } = await setupExecution();
+  const count = writes.length, flags = JSON.stringify(a.flags);
+  for (const modifiers of [{}, { ctrlKey: true }, { altKey: true }, { shiftKey: true },
+    { shiftKey: true, ctrlKey: true, altKey: true }, { ctrlKey: true, altKey: true }]) {
+    assert.equal(await bar.executeShortcut(click(modifiers), target()), true);
+  }
+  assert.deepEqual(calls, [["useAction", item.uuid, 0, "attack"], ["sendToChat", item.uuid, undefined, 0],
+    ["useAction", item.uuid, 0, "damage"], ["openSheet", item.uuid], ["openSheet", item.uuid],
+    ["sendToChat", item.uuid, undefined, 0]]);
+  assert.equal(writes.length, count);
+  assert.equal(JSON.stringify(a.flags), flags);
+});
+
+test("exécution CO2 : Alt sans dommages ne déclenche rien, actions temporaires et autres types", async () => {
+  const { bar, item, action, calls, click, target, warnings } = await setupExecution();
+  action.hasResolversWithDomage = false;
+  assert.equal(await bar.executeShortcut(click({ altKey: true }), target()), false);
+  assert.equal(calls.length, 0);
+  await bar.executeShortcut(click(), target());
+  assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0, "attack"]);
+  action.properties.temporary = true; action.hasResolversWithDomage = true;
+  await bar.executeShortcut(click(), target());
+  assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0]);
+  assert.equal(await bar.executeShortcut(click({ altKey: true }), target()), false);
+  action.properties.temporary = false;
+  for (const type of ["heal", "buff", "debuff", "consumable"]) {
+    action.type = type;
+    await bar.executeShortcut(click(), target());
+    assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0, type]);
+    assert.equal(await bar.executeShortcut(click({ altKey: true }), target()), false);
+  }
+  action.type = "melee"; action.autoAttack = true;
+  await bar.executeShortcut(click(), target());
+  assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0, "melee"]);
+  item.type = "attack";
+  await bar.executeShortcut(click(), target());
+  assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0, "auto"]);
+  assert.equal(await bar.executeShortcut(click({ altKey: true }), target()), false);
+  assert.equal(warnings.at(-1), "CO2PRISM.Combat.DamageUnavailable");
+  assert.equal(calls.length, 0);
+});
+
+test("exécution CO2 : droits, références absentes, ancien token/preset/carré et API indisponible", async () => {
+  const { bar, a, item, action, context, calls, click, target, create, select } = await setupExecution();
+  const original = target();
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  assert.equal(await bar.executeShortcut(click(), original), false);
+  context.game.user.isGM = true;
+  assert.equal(await bar.executeShortcut(click(), original), true);
+  calls.length = 0; context.game.user.isGM = false; a.testUserPermission = () => true;
+  a.items.delete(item.id);
+  assert.equal(await bar.executeShortcut(click(), original), false);
+  a.items.set(item.id, item);
+  const { actor: b } = create("other"); select(b);
+  assert.equal(await bar.executeShortcut(click(), original), false);
+  select(a); await bar.setActivePreset(2);
+  assert.equal(await bar.executeShortcut(click(), original), false);
+  await bar.setActivePreset(1);
+  assert.equal(await bar.executeShortcut(click({ currentTarget: { isConnected: false } }), original), false);
+  const stored = a.flags.co2prism.presets[1].slots["left-hand"];
+  a.flags.co2prism.presets[1].slots["left-hand"] = { ...stored, indice: 9 };
+  assert.equal(await bar.executeShortcut(click(), original), false);
+  a.flags.co2prism.presets[1].slots["left-hand"] = stored;
+  action.indice = 1;
+  a.flags.co2prism.presets[1].slots["left-hand"] = { ...stored, indice: 1 };
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  action.indice = 0;
+  a.flags.co2prism.presets[1].slots["left-hand"] = stored;
+  context.game.system.api.macros.useAction = null;
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(calls.length, 0);
+});
+
+test("exécution CO2 : bon Item et indice, UUID synthétique frais, acteur sans Item explicitement géré", async () => {
+  const { bar, a, item, calls, click, target, context, hooks, token } = await setupExecution();
+  const second = { id: "second", uuid: `${a.uuid}.Item.second`, name: "Second", actions:
+    [0, 1, 2].map(indice => ({ source: `${a.uuid}.Item.second`, indice, type: "heal" })) };
+  a.items.set(second.id, second);
+  const reference = bar.shortcutFromDrop(a, { type: "co.action", source: second.uuid, indice: 2 });
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][1], reference);
+  await bar.executeShortcut(click(), target("right-hand"));
+  assert.deepEqual(calls.pop(), ["useAction", second.uuid, 2, "heal"]);
+  const synthetic = token(a); synthetic.document.baseActor = { uuid: "Actor.base" };
+  context.canvas.tokens.controlled = [synthetic]; hooks.get("controlToken")();
+  item.uuid = "Scene.s.Token.t.Actor.a.Item.item";
+  await bar.executeShortcut(click(), target());
+  assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0, "attack"]);
+  const direct = { source: a.uuid, indice: 5, type: "heal" };
+  Object.defineProperty(a, "actions", { get: () => [direct] });
+  a.flags.co2prism.presets[1].slots["left-hand"] = { source: a.uuid, indice: 5, itemId: null };
+  a.sheet = { render: options => calls.push(["actorSheet", options.force]) };
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(await bar.executeShortcut(click({ ctrlKey: true }), target()), false);
+  assert.equal(calls.length, 0);
+  assert.equal(await bar.executeShortcut(click({ shiftKey: true }), target()), true);
+  assert.deepEqual(calls.pop(), ["actorSheet", true]);
+});
+
+test("exécution CO2 : opération unique, double clic ignoré, erreurs récupérables et synchronisation native", async () => {
+  const { bar, context, a, action, calls, click, target, hooks, errors, writes } = await setupExecution();
+  for (const modifiers of [{ button: 2 }, { detail: 2 }, { repeat: true }]) {
+    assert.equal(await bar.executeShortcut(click(modifiers), target()), false);
+  }
+  let release;
+  context.game.system.api.macros.useAction = () => new Promise(resolve => { calls.push("pending"); release = resolve; });
+  const pending = bar.executeShortcut(click(), target());
+  assert.equal(bar.busyAction, "shortcut");
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  await bar.performAction("fortune");
+  assert.equal(calls.length, 1);
+  release(); assert.equal(await pending, true);
+  context.game.system.api.macros.useAction = async () => { throw Error("Native error"); };
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(errors.length, 1);
+  assert.equal(bar.busyAction, null);
+  const count = writes.length;
+  a.system.resources.mana = { value: 8, max: 10 };
+  context.game.system.api.macros.useAction = async () => {
+    a.system.resources.mana.value = 3; action.charges = 2; action.properties.enabled = true;
+    hooks.get("updateActor")(a, { "system.resources.mana.value": 3 });
+  };
+  assert.equal(await bar.executeShortcut(click(), target()), true);
+  assert.equal(bar.gauges.mana.text.textContent, "3 / 10");
+  assert.equal(bar.resolveShortcut(a, target().reference).action.charges, 2);
+  assert.equal(writes.length, count);
+});
+
+test("temporaires activables : vraie bascule CO2, état courant et aucune écriture de flag", async () => {
+  const { bar, a, item, action, click, target, hooks, calls, writes } = await setupExecution();
+  Object.assign(action.properties, { activable: true, temporary: true, enabled: false });
+  const states = [];
+  a.activateAction = async options => {
+    states.push({ ...options });
+    action.properties.enabled = options.state; // Simulation de la mise à jour native de l'Item.
+    hooks.get("updateItem")(item, { "system.actions": [] });
+  };
+  const flags = JSON.stringify(a.flags), count = writes.length;
+  assert.equal(await bar.executeShortcut(click(), target()), true);
+  assert.equal(action.properties.enabled, true);
+  assert.equal(await bar.executeShortcut(click(), target()), true);
+  assert.equal(action.properties.enabled, false);
+  action.properties.enabled = true; // Changement extérieur sans nouveau contexte de clic.
+  const captured = target();
+  assert.equal(await bar.executeShortcut(click(), captured), true);
+  assert.deepEqual(states, [true, false, false].map(state => ({ state, source: item.uuid, indice: 0, type: undefined })));
+  assert.equal(calls.length, 0);
+  assert.equal(writes.length, count);
+  assert.equal(JSON.stringify(a.flags), flags);
+});
+
+test("temporaires activables : modificateurs sans bascule, refus/erreurs et opération en cours", async () => {
+  const { bar, a, action, context, calls, click, target, errors } = await setupExecution();
+  Object.assign(action.properties, { activable: true, temporary: true, enabled: true });
+  let toggles = 0;
+  a.activateAction = async () => { toggles++; };
+  for (const modifiers of [{ ctrlKey: true }, { shiftKey: true }, { altKey: true },
+    { shiftKey: true, ctrlKey: true, altKey: true }, { ctrlKey: true, altKey: true }]) {
+    await bar.executeShortcut(click(modifiers), target());
+    assert.equal(action.properties.enabled, true);
+  }
+  assert.equal(toggles, 0);
+  assert.deepEqual(calls.map(call => call[0]), ["sendToChat", "openSheet", "openSheet", "sendToChat"]);
+  a.activateAction = async () => false;
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(action.properties.enabled, true);
+  a.activateAction = async () => { throw Error("Native refusal"); };
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(errors.length, 1);
+  assert.equal(action.properties.enabled, true);
+  a.activateAction = undefined;
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(action.properties.enabled, true);
+  let release;
+  a.activateAction = options => new Promise(resolve => {
+    release = () => { action.properties.enabled = options.state; resolve(); };
+  });
+  context.game.system.api.macros.useAction = null; // La bascule n'a pas besoin du wrapper de macro.
+  const pending = bar.executeShortcut(click(), target());
+  assert.equal(action.properties.enabled, true);
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  release(); assert.equal(await pending, true);
+  assert.equal(action.properties.enabled, false);
+});
+
+test("temporaires activables : acteur synthétique, sélection périmée, droits et suppression", async () => {
+  const { bar, a, item, action, context, token, hooks, click, target } = await setupExecution();
+  Object.assign(action.properties, { activable: true, temporary: true, enabled: false });
+  const activations = [];
+  a.activateAction = async function (options) { activations.push({ actor: this, options }); action.properties.enabled = options.state; };
+  const old = target();
+  const synthetic = token(a); synthetic.document.baseActor = { uuid: "Actor.base" };
+  item.uuid = "Scene.s.Token.t.Actor.a.Item.item";
+  context.canvas.tokens.controlled = [synthetic]; hooks.get("controlToken")();
+  assert.equal(await bar.executeShortcut(click(), old), false);
+  assert.equal(activations.length, 0);
+  assert.equal(await bar.executeShortcut(click(), target()), true);
+  assert.equal(activations[0].actor, a);
+  assert.equal(activations[0].options.source, item.uuid);
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  a.testUserPermission = () => true; a.items.delete(item.id);
+  assert.equal(await bar.executeShortcut(click(), target()), false);
+  assert.equal(activations.length, 1);
+});
