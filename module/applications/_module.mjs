@@ -1,4 +1,6 @@
-﻿const MODULE = "co2prism";
+﻿import { ActionEconomy } from "../combat/action-economy.mjs";
+
+const MODULE = "co2prism";
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
 const COMBAT_ROW_ORIGINS = [522, 731];
@@ -48,6 +50,20 @@ class PrismBar {
     this.combatLine = this.element.querySelector(".co2prism-combat-line");
     this.combatArrow = this.element.querySelector(".co2prism-combat-arrow");
     this.budgetScroll = this.element.querySelector(".co2prism-budget-scroll");
+    this.budgetContent = this.element.querySelector(".co2prism-budget-content");
+    this.budgetBar = this.element.querySelector(".co2prism-time-bar");
+    this.budgetCommands = [...this.element.querySelectorAll("[data-co2prism-time]")];
+    this.budgetReset = this.element.querySelector(".co2prism-budget-reset");
+    for (const button of this.budgetCommands) {
+      for (const eventName of ["click", "contextmenu"]) button.addEventListener(eventName, event => {
+        event.preventDefault(); event.stopPropagation();
+        if (eventName === "click" && button.dataset.co2prismTime === "am") return;
+        void this.changeEconomy(eventName === "contextmenu" ? "grant" : "spend", button.dataset.co2prismTime);
+      });
+    }
+    this.budgetReset.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation(); void this.changeEconomy("reset");
+    });
     // Observer le début/la fin du drag, sans intercepter les dépôts hors Prism.
     document.addEventListener("dragstart", event => {
       if (this.combatSlots.contains(event.target)) return;
@@ -285,9 +301,12 @@ class PrismBar {
     this.combatPanel.hidden = !open;
     if (!open) return changed;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
+    const economy = new ActionEconomy(this.actor).getSnapshot();
     for (const [key, value] of Object.entries(this.readCombatData())) {
       const node = this.combatValues[key];
-      node.textContent = value === null || !Number.isFinite(value) ? unavailable : String(Math.round(value * 100) / 100);
+      const format = number => Number.isFinite(number) ? String(Math.round(number * 100) / 100) : unavailable;
+      node.textContent = ["meters", "cells"].includes(key) && value !== null
+        ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
       node.style.setProperty("--co2prism-combat-size", Math.min(key === "def" ? 68 : 48, 115 / (node.textContent.length * 0.58)));
     }
     const effects = this.readCombatEffects();
@@ -304,8 +323,86 @@ class PrismBar {
     });
     this.combatEffects.replaceChildren(...elements);
     this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
+    const budgetChanged = this.renderEconomy(economy);
     const resized = this.renderCombatSlots();
-    return changed || resized;
+    return changed || resized || budgetChanged;
+  }
+
+  async changeEconomy(operation, type) {
+    if (this.busyAction || (operation === "spend" && type === "am")) return false;
+    this.refreshActor();
+    const actor = this.actor;
+    if (!this.canConfigure(actor) || !this.configuration.panels.combat
+      || !["spend", "grant", "reset"].includes(operation)) return false;
+    try {
+      const engine = new ActionEconomy(actor);
+      const result = await engine[operation](type);
+      if (!result.success && result.reason !== "unavailable") ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.EconomyError"));
+      return result.success;
+    } catch (error) {
+      console.error("co2prism | Action economy", error);
+      ui.notifications.error(game.i18n.localize("CO2PRISM.Combat.EconomyError"));
+      return false;
+    } finally { this.refreshActor(); }
+  }
+
+  updateEconomyCommands(state) {
+    const canEdit = this.canConfigure();
+    for (const button of this.budgetCommands ?? []) {
+      const type = button.dataset.co2prismTime;
+      button.disabled = !canEdit;
+      button.setAttribute("aria-disabled", String(!canEdit));
+      button.parentElement.classList.toggle("co2prism-time-available", type !== "am" && canEdit && !this.busyAction && state.canSpend[type]);
+      button.title = `${type.toUpperCase()} — ${game.i18n.localize(type === "am" ? "CO2PRISM.Combat.MixedTimeControls" : "CO2PRISM.Combat.TimeControls")}`
+        + (type !== "am" && !state.canSpend[type] ? `\n${game.i18n.localize("CO2PRISM.Combat.TimeUnavailable")}` : "");
+      button.setAttribute("aria-label", button.title);
+    }
+    if (this.budgetReset) this.budgetReset.disabled = !canEdit;
+  }
+
+  renderEconomy(state) {
+    if (!this.budgetBar) return false;
+    this.updateEconomyCommands(state);
+    const labels = { l: "L", a: "A", am: "AM", m: "M" };
+    const colors = { l: "limited", a: "attack", am: "mixed", m: "move" };
+    const nodes = [], widths = [];
+    const add = (type, bonus = false, count = 1) => {
+      const node = document.createElement("span");
+      node.className = `co2prism-time-indicator co2prism-time-${colors[type]}${bonus ? " co2prism-time-bonus" : ""}`;
+      node.textContent = `${bonus ? "+" : ""}${labels[type]}${count > 1 ? ` ×${count}` : ""}`;
+      node.title = `${game.i18n.localize(bonus ? "CO2PRISM.Combat.BonusTime" : "CO2PRISM.Combat.NormalTime")} : ${labels[type]}${count > 1 ? ` ×${count}` : ""}`;
+      node.dataset.co2prismBudgetType = type;
+      if (bonus) node.dataset.co2prismBonus = String(count);
+      const width = count > 1 ? Math.max(88, node.textContent.length * 13) : 40;
+      node.style.setProperty("--budget-icon-width", width);
+      nodes.push(node); widths.push(width);
+    };
+    state.normalAlternatives.forEach((branch, index) => {
+      if (index) {
+        const separator = document.createElement("span"); separator.className = "co2prism-time-separator";
+        separator.textContent = game.i18n.localize("CO2PRISM.Combat.TimeOr"); nodes.push(separator); widths.push(36);
+      }
+      branch.forEach(type => add(type));
+    });
+    for (const type of ["l", "a", "m", "am"]) {
+      const count = state.bonus[type];
+      // Les très grandes quantités restent lisibles sans créer des milliers de nœuds.
+      if (count > 24) add(type, true, count);
+      else for (let index = 0; index < count; index++) add(type, true);
+    }
+    if (!nodes.length) {
+      const empty = document.createElement("span"); empty.textContent = game.i18n.localize("CO2PRISM.Unavailable");
+      nodes.push(empty); widths.push(40);
+    }
+    const barWidth = widths.reduce((sum, width) => sum + width, 16) + (nodes.length - 1) * 8;
+    this.budgetBar.replaceChildren(...nodes);
+    this.budgetBar.style.setProperty("--w", barWidth);
+    this.budgetReset.style.setProperty("--x", 235 + barWidth + 6);
+    const width = Math.max(492, 235 + barWidth + 48);
+    const changed = width !== this.budgetWidth;
+    this.budgetWidth = width;
+    this.budgetContent.style.setProperty("--budget-width", width);
+    return changed;
   }
 
   slotRows(actor = this.actor, preset = this.configuration.activePreset) {
@@ -548,7 +645,7 @@ class PrismBar {
       this.combatRows[index].scrollLeft = scroll;
     }
     const widths = rows.map(row => Math.max(0, row.length * 209 - 11));
-    const extent = Math.max(1223, ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
+    const extent = Math.max(731 + (this.budgetWidth ?? 492), ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
     // Une ligne peut grandir sans changer l'extrémité globale du volet.
     const resized = extent !== this.combatExtent || widths.some((width, index) => width !== this.combatRowWidths?.[index]);
     this.combatExtent = extent;
@@ -582,7 +679,12 @@ class PrismBar {
     if ((event.button !== undefined && event.button !== 0) || event.detail > 1 || event.repeat
       || this.busyAction || this.slotDrag || this.suppressShortcutClick) return false;
     const mode = event.shiftKey ? "sheet" : event.ctrlKey ? "chat" : event.altKey ? "damage" : "use";
-    const warn = key => { ui.notifications.warn(game.i18n.localize(key)); return false; };
+    const warn = key => {
+      if (this.shortcutWarning?.key !== key || Date.now() - this.shortcutWarning.time > 1500) {
+        ui.notifications.warn(game.i18n.localize(key)); this.shortcutWarning = { key, time: Date.now() };
+      }
+      return false;
+    };
     if (event.currentTarget?.isConnected === false) return warn("CO2PRISM.Combat.UnavailableSlot");
     this.refreshActor();
     const { actor, token, preset, key, reference } = context;
@@ -609,6 +711,7 @@ class PrismBar {
     }
     this.busyAction = "shortcut";
     this.updateActions();
+    let beforeActivation, afterActivation;
     try {
       if (["use", "damage"].includes(mode) && typeof action.isVisible === "function"
         && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
@@ -621,6 +724,48 @@ class PrismBar {
       // UUID actuel du support, notamment pour les Items d'un acteur synthétique.
       const source = item?.uuid;
       const indice = action.indice;
+      const deactivating = toggle && action.properties.enabled === true;
+      const time = action.actionTypeFinal;
+      const charged = mode === "use" && !deactivating && ["l", "a", "m"].includes(time);
+      const economy = new ActionEconomy(actor);
+      const ready = () => {
+        const config = this.readConfiguration(actor);
+        return this.actor === actor && this.token === token && config.activePreset === preset && config.panels.combat
+          && (game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
+          && ["source", "indice", "itemId"].every(field => config.presets[preset].slots[key]?.[field] === reference?.[field])
+          && this.resolveShortcut(actor, config.presets[preset].slots[key])?.action === action
+          && action.actionTypeFinal === time && !(toggle && action.properties.enabled === true)
+          && this.shortcutUses(action, item)?.value !== 0;
+      };
+      if (mode === "use" && !deactivating) {
+        if (!["l", "a", "m", "f", "none"].includes(time)) return warn("CO2PRISM.Combat.UnknownActionTime");
+        if (this.shortcutUses(action, item)?.value === 0) return warn("CO2PRISM.Combat.ActionExhausted");
+        if (charged && !economy.getSnapshot().canSpend[time]) return warn("CO2PRISM.Combat.NoActionTime");
+      }
+      let confirmed = false, rejected = false, starts = 0, ambiguous = false, expectedType;
+      if (charged) {
+        const matches = (target, details) => target === actor && details.item === item
+          && details.indice === indice && details.state === true && details.type === expectedType;
+        beforeActivation = (target, details) => {
+          if (!matches(target, details)) return;
+          if (++starts > 1) ambiguous = true;
+          details.guard((async () => {
+            if (typeof action.isVisible === "function" && !await action.isVisible(item, actor)) {
+              rejected = "CO2PRISM.Combat.ConditionsUnavailable"; return false;
+            }
+            if (!ready()) { rejected = "CO2PRISM.CommandUnavailable"; return false; }
+            if (!economy.getSnapshot().canSpend[time]) { rejected = "CO2PRISM.Combat.NoActionTime"; return false; }
+            return true;
+          })());
+        };
+        afterActivation = (target, details) => {
+          if (matches(target, details) && starts === 1 && !ambiguous && details.success === true) confirmed = true;
+        };
+        // Le wrapper macro renvoie undefined, même si un resolver est annulé.
+        Hooks.on("co2.preActivateAction", beforeActivation);
+        Hooks.on("co2.postActivateAction", afterActivation);
+      }
+      let nativeResult;
       if (mode === "sheet") {
         if (item) await api.openSheet(source);
         else await actor.sheet.render({ force: true });
@@ -631,16 +776,26 @@ class PrismBar {
         const temporary = action.properties?.temporary === true;
         const auto = action.autoAttack === true;
         const attack = ["melee", "ranged", "magical", "spell"].includes(action.type) && !auto && !temporary;
+        expectedType = temporary ? (toggle ? undefined : "attack") : attack ? "attack" : item.type === "attack" && auto ? "auto" : action.type;
         if (mode === "damage") {
           if (!(attack && action.hasResolversWithDomage === true)) return warn("CO2PRISM.Combat.DamageUnavailable");
           await api.useAction(source, indice, "damage");
         } else if (toggle) {
           // Comme la feuille CO2 : pas de type attaque/dommages pour une bascule temporaire.
-          const result = await actor.activateAction({ state: !action.properties.enabled, source, indice, type: undefined });
-          if (result === false) return false;
-        } else if (temporary) await api.useAction(source, indice);
-        else if (attack) await api.useAction(source, indice, "attack");
-        else await api.useAction(source, indice, item.type === "attack" && auto ? "auto" : action.type);
+          nativeResult = await actor.activateAction({ state: !action.properties.enabled, source, indice, type: undefined });
+        } else if (temporary) nativeResult = await api.useAction(source, indice);
+        else nativeResult = await api.useAction(source, indice, expectedType);
+      }
+      if (rejected) return warn(rejected);
+      if (mode === "use" && nativeResult === false) return false;
+      if (charged) {
+        if (!confirmed || ambiguous) {
+          if (starts === 0 || ambiguous) warn("CO2PRISM.Combat.ExecutionUnconfirmed");
+          return false;
+        }
+        // Dépense après confirmation, toujours sur l'acteur qui a exécuté l'action.
+        const spent = await economy.spend(time);
+        if (!spent.success) return warn("CO2PRISM.Combat.ActionTimeConflict");
       }
       return true;
     } catch (error) {
@@ -648,6 +803,8 @@ class PrismBar {
       ui.notifications.error(game.i18n.localize("CO2PRISM.ActionError"));
       return false;
     } finally {
+      if (beforeActivation) Hooks.off("co2.preActivateAction", beforeActivation);
+      if (afterActivation) Hooks.off("co2.postActivateAction", afterActivation);
       this.busyAction = null;
       this.refreshActor();
     }
@@ -894,6 +1051,7 @@ class PrismBar {
   }
 
   updateActions() {
+    if (this.budgetBar) this.updateEconomyCommands(new ActionEconomy(this.actor).getSnapshot());
     for (const node of this.combatSlots?.querySelectorAll(".co2prism-slot-executable") ?? []) {
       const disabled = Boolean(this.busyAction) || !this.actor
         || !(game.user.isGM || this.actor.testUserPermission(game.user, "OWNER"));
@@ -1001,7 +1159,7 @@ class PrismBar {
     for (const [index, row] of (this.combatRows ?? []).entries()) {
       row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? 198, Math.max(1, right - COMBAT_ROW_ORIGINS[index])));
     }
-    this.budgetScroll?.style.setProperty("--w", Math.min(492, Math.max(1, right - 731)));
+    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 492, Math.max(1, right - 731)));
     this.combatEffects?.style.setProperty("--w", Math.min(824, Math.max(1, right - 731)));
     this.combatLine?.style.setProperty("--w", Math.max(0, right - 480 - 60));
     this.combatArrow?.style.setProperty("--x", right - 93);

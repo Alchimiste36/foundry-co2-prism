@@ -26,18 +26,20 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       <body class="vtt game"><canvas id="board" aria-label="Canvas Board"></canvas><script>
       const ready = [];
       const hooks = new Map();
-      const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on(name, fn) { hooks.set(name, fn); } };
+      const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } };
       const settings = { size: "M", position: {}, locked: false };
       const warnings = [];
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
-      const game = { system: { id: "co2" }, user: {},
+      const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
+      const game = globalThis.game = { system: { id: "co2" }, user: {},
         settings: { get: (_, key) => settings[key], set: (_, key, value) => settings[key] = value },
-        i18n: { localize: key => key } };
+        i18n: { localize: key => budgetTranslations[key] ?? key } };
       let sequence = 0;
       const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
         applications: { handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
-      ${read("../module/applications/_module.mjs")}
+      ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
+      ${read("../module/applications/_module.mjs").replace(/import \{ ActionEconomy \} from [^;]+;/, "")}
       (async () => {
         const result = { dimensions: [], errors: [] };
         const check = (condition, message) => { if (!condition) result.errors.push(message); };
@@ -192,7 +194,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(!bar.combatPanel.hidden && actor.flags.co2prism.activePreset === 1, size + " Combat fermé");
             check(Math.abs(r.width - width * 1466 / 724) < 0.1, size + " étendue Combat");
             check(Math.abs(before.x - after.x) < 0.1 && Math.abs(before.y - after.y) < 0.1, size + " base déplacée par Combat");
-            check(bar.combatValues.meters.textContent === "10" && bar.combatValues.cells.textContent === "5"
+            check(bar.combatValues.meters.textContent === "20 / 20" && bar.combatValues.cells.textContent === "10 / 10"
               && bar.combatValues.def.textContent === "15" && bar.combatValues.dr.textContent === "4", "Valeurs Combat");
             const slots = [...root.querySelectorAll(".co2prism-combat-slot")];
             check(slots.length === 4, "Nombre de cases");
@@ -202,12 +204,14 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               && slots.slice(3).every(slot => slot.getBoundingClientRect().y === secondY) && secondY > firstY, "Disposition 5/3");
             check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.title === "Native effect", "Effets réels");
             const count = calls.length, original = JSON.stringify(actor.system);
-            for (const node of [...slots, ...root.querySelectorAll(".co2prism-time, .co2prism-defense-control")]) {
+            for (const node of [...slots, ...root.querySelectorAll(".co2prism-defense-control")]) {
               node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
               node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 }));
             }
             check(calls.length === count && JSON.stringify(actor.system) === original, "Commande Combat exécutée");
-            check([...root.querySelectorAll(".co2prism-time")].map(node => node.textContent).join(",") === "L,AM,A,M", "Ordre des temps");
+            check([...root.querySelectorAll(".co2prism-time")].map(node => node.textContent).join(",") === "L,A,M,AM", "Ordre des temps");
+            check(bar.budgetCommands.map(node => node.parentElement.style.getPropertyValue('--x')).join(',') === '6,61,116,171', size + ' visual command order');
+            check(bar.budgetCommands.every(node => Math.abs(node.getBoundingClientRect().height - 47 * width / 724) < 1), size + ' command dimensions');
             for (const button of bar.actions) {
               const b = button.getBoundingClientRect(), hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
               check(button.contains(hit), size + " commande de base recouverte: " + button.dataset.co2prismAction + " par " + hit?.className);
@@ -240,7 +244,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             system: { description: "<b>Description native</b>", hasFrequency: true, frequency: "daily", charges: { current: 3 } },
             testUserPermission: () => true };
           const nativeAction = { source: item.uuid, indice: 0, actionName: "Action réelle",
-            actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "l",
+            actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "f",
             type: "melee", properties: { temporary: false, enabled: false, activable: true }, autoAttack: false, hasResolversWithDomage: true,
             hasCharges: true, charges: 3, manaCost: 2 };
           item.actions = [nativeAction]; actor.items = new Map([[item.id, item]]);
@@ -277,7 +281,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(lengths() === "3,1", "Les mains font croître la ligne");
           const occupied = bar.combatRows[0].children[0];
           check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.title.includes("Description native"), "Image ou description copiée incorrectement");
-          check(occupied.querySelector(".co2prism-slot-time").textContent === "L"
+          check(occupied.querySelector(".co2prism-slot-time").textContent === "G"
             && occupied.querySelector(".co2prism-slot-uses").textContent.trim() === "3"
             && occupied.querySelector(".co2prism-slot-cost").textContent.trim() === "2", "Décorations natives");
           const executeFlags = JSON.stringify(actor.flags);
@@ -518,6 +522,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           lockedNode.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer }));
           await Promise.resolve();
           check(JSON.stringify(actor.flags) === lockedFlags, 'Locked external drop wrote flags');
+          item.system.charges.current = 2;
           bar.combatRows[0].children[2].click(); await new Promise(resolve => setTimeout(resolve, 0));
           check(shortcutCalls.length > lockedCalls, 'Locked execution blocked');
           item.system.charges.current = 0; item.system.frequency = 'daily'; nativeAction.properties.noChargesUsed = false;
@@ -651,6 +656,163 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(lengths() === '4,2' && !root.querySelector('.co2prism-hand-empty'), 'Unlock hand slots');
               check(JSON.stringify(actor.flags) === flags, 'Visual hand placeholder wrote flags');
             }
+          }
+          const economy = new ActionEconomy(actor);
+          const budgetTypes = () => [...bar.budgetBar.querySelectorAll('[data-co2prism-budget-type]')].map(node => node.dataset.co2prismBudgetType).join(',');
+          const command = async (type, bonus = false) => {
+            const button = root.querySelector('[data-co2prism-time="' + type + '"]');
+            const event = new MouseEvent(bonus ? 'contextmenu' : 'click', { bubbles: true, cancelable: true, button: bonus ? 2 : 0 });
+            button.dispatchEvent(event); await new Promise(resolve => setTimeout(resolve, 0));
+            if (bonus) check(event.defaultPrevented, 'Native context menu not prevented');
+          };
+          const resetBudget = async () => { bar.budgetReset.click(); await new Promise(resolve => setTimeout(resolve, 0)); };
+          const halos = () => bar.budgetCommands.filter(button => button.parentElement.classList.contains('co2prism-time-available')).map(button => button.dataset.co2prismTime).join(',');
+          const mixedGeometry = () => {
+            for (const node of [root.querySelector('[data-co2prism-time="am"]'), ...bar.budgetBar.querySelectorAll('.co2prism-time-mixed')]) {
+              const red = getComputedStyle(node, '::after');
+              check(red.clipPath === 'polygon(25% 0px, 75% 100%, 25% 100%, 0px 50%)' && red.backgroundColor === 'rgb(237, 21, 32)', 'AM red lower-left polygon');
+              const blue = node.matches('button') ? getComputedStyle(node, '::before') : getComputedStyle(node);
+              check(blue.backgroundColor === 'rgb(37, 170, 225)' && blue.backgroundImage === 'none', 'AM solid upper-right blue');
+              check(!node.textContent.includes('A+M') && node.textContent.includes('AM'), 'AM text');
+            }
+          };
+          const movement = (meters, cells) => check(bar.combatValues.meters.textContent === meters && bar.combatValues.cells.textContent === cells, 'Budget movement ' + meters + ' / ' + cells);
+          settings.locked = true; bar.updateLock(); canvas.scene.grid = { type: 1, distance: 2, units: 'm' };
+          await resetBudget(); movement('20 / 20', '10 / 10');
+          check(halos() === 'l,a,m', 'Initial availability halos'); mixedGeometry();
+          const beforeMixedClick = JSON.stringify(actor.flags);
+          await command('am');
+          const mixedButton = root.querySelector('[data-co2prism-time="am"]');
+          for (const key of ['Enter', ' ']) {
+            mixedButton.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            mixedButton.click();
+            mixedButton.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+          }
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(JSON.stringify(actor.flags) === beforeMixedClick, 'AM left/keyboard spent budget');
+          await command('am', true); mixedGeometry();
+          check(economy.getSnapshot().bonus.am === 1 && halos() === 'l,a,m', 'AM right bonus or halo');
+          await resetBudget();
+          check(budgetTypes() === 'l,m,am' && bar.budgetBar.querySelector('.co2prism-time-separator'), 'Initial alternative');
+          check([...bar.budgetBar.children].every(node => node.getBoundingClientRect().right <= bar.budgetBar.getBoundingClientRect().right + 1), 'Initial budget contents clipped');
+          await command('a'); movement('10 / 20', '5 / 10'); check(budgetTypes() === 'm', 'Normal A branch');
+          check(halos() === 'm', 'A spend halo');
+          await resetBudget(); await command('m'); movement('10 / 20', '5 / 10'); check(budgetTypes() === 'am', 'Normal M branch');
+          check(halos() === 'a,m', 'M spend polyvalent halos');
+          await command('m'); movement('0 / 20', '0 / 10');
+          const emptyBudget = JSON.stringify(actor.flags.co2prism.actionEconomy), warningCount = warnings.length;
+          await command('m'); await command('m');
+          check(JSON.stringify(actor.flags.co2prism.actionEconomy) === emptyBudget && warnings.length === warningCount, 'Impossible spend mutated or spammed');
+          check(bar.budgetCommands.every(button => !button.disabled) && bar.budgetCommands.find(button => button.dataset.co2prismTime === 'm').title.includes('Aucun temps compatible'), 'Spent command disabled');
+          await resetBudget(); await command('l'); movement('0 / 20', '0 / 10');
+          check(halos() === '', 'Limited spend halos');
+          await command('a', true); check(halos() === 'a', 'A bonus restores halo');
+          await command('am', true); check(halos() === 'a,m', 'AM bonus restores specialized halos');
+          await resetBudget(); await command('m', true); movement('30 / 30', '15 / 15');
+          await command('m'); movement('20 / 30', '10 / 15'); check(economy.getSnapshot().branch === 'undecided', 'Bonus M priority');
+          await resetBudget(); await command('a', true); movement('20 / 20', '10 / 10');
+          check(bar.budgetBar.querySelector('.co2prism-time-bonus.co2prism-time-attack'), 'Red bonus A missing');
+          await command('a'); check(economy.getSnapshot().branch === 'undecided' && budgetTypes() === 'l,m,am', 'Bonus A priority');
+          for (const type of ['a', 'm', 'am']) {
+            await resetBudget(); await command('am', true); await command(type);
+            const state = economy.getSnapshot();
+            check(type === 'a' ? state.bonus.am === 0 && state.branch === 'undecided'
+              : type === 'm' ? state.bonus.am === 1 && !state.normal.m : state.bonus.am === 1 && state.branch === 'undecided', 'Bonus AM consumption ' + type);
+          }
+          await resetBudget(); await command('l', true); await command('l');
+          check(economy.getSnapshot().branch === 'undecided', 'Bonus L closed branch');
+          await command('m', true); await command('l'); movement('10 / 30', '5 / 15');
+          canvas.scene.grid.distance = 5; hooks.get('updateScene')(canvas.scene, { grid: {} }); movement('10 / 30', '2 / 6');
+          const scene = canvas.scene; canvas.scene = undefined; bar.refreshActor(); movement('10 / 30', 'CO2PRISM.Unavailable'); canvas.scene = scene;
+          await resetBudget(); movement('20 / 20', '4 / 4');
+          const persistedBudget = JSON.stringify(actor.flags.co2prism.actionEconomy);
+          for (const preset of [1, 2, 3]) { await bar.selectCombatPreset(preset); if (bar.combatPanel.hidden) await bar.selectCombatPreset(preset); }
+          check(JSON.stringify(actor.flags.co2prism.actionEconomy) === persistedBudget, 'Preset reset economy');
+          const shortcutBudget = JSON.stringify(economy.getSnapshot());
+          bar.combatRows[0].children[0].click(); await new Promise(resolve => setTimeout(resolve, 0));
+          check(JSON.stringify(economy.getSnapshot()) === shortcutBudget, 'Free shortcut spent time');
+          actor.testUserPermission = (_, level) => level === 'OBSERVER'; bar.refreshActor();
+          check(bar.budgetCommands.every(button => button.disabled) && bar.budgetReset.disabled, 'Observer budget writable');
+          check(halos() === '', 'Observer spending halo');
+          check(await bar.changeEconomy('grant', 'm') === false, 'Observer command accepted');
+          actor.testUserPermission = () => true; bar.refreshActor();
+          // Débordement maîtrisé du cadre, puis retour au budget initial.
+          await economy.grant('m', 16); bar.refreshActor();
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.position = { x: innerWidth - 300, y: 300 }; bar.layout();
+            check(root.getBoundingClientRect().right <= innerWidth + 1, size + ' budget outside viewport');
+            if (bar.budgetScroll.scrollWidth <= bar.budgetScroll.clientWidth + 1) {
+              check(bar.budgetReset.getBoundingClientRect().right <= bar.budgetScroll.getBoundingClientRect().right + 1, size + ' reset clipped');
+            } else {
+              bar.budgetScroll.scrollLeft = bar.budgetScroll.scrollWidth;
+              check(bar.budgetReset.getBoundingClientRect().right <= bar.budgetScroll.getBoundingClientRect().right + 1, size + ' budget end inaccessible');
+            }
+          }
+          await resetBudget();
+          // Exécution payante : le wrapper ne retourne rien, les hooks natifs confirment.
+          nativeAction.actionTypeFinal = 'm'; nativeAction.type = 'heal';
+          nativeAction.properties.temporary = false; nativeAction.properties.activable = true;
+          let nativeOutcome = true, nativeExecutions = 0;
+          const activateTimed = async options => {
+            check(halos() === '', 'Spending halo during native execution');
+            const guards = [];
+            const details = { item, ...options, guard: promise => guards.push(Promise.resolve(promise)) };
+            hooks.get('co2.preActivateAction')?.(actor, details);
+            if ((await Promise.all(guards)).some(value => value === false)) return false;
+            nativeExecutions++;
+            if (nativeOutcome && nativeAction.properties.temporary) nativeAction.properties.enabled = options.state;
+            hooks.get('co2.postActivateAction')?.(actor, { ...details, success: nativeOutcome });
+            hooks.get('updateItem')(item, {});
+            return true;
+          };
+          game.system.api.macros.useAction = async (source, indice, type = 'attack') => {
+            check(source === item.uuid && indice === 0, 'Timed native support');
+            await activateTimed({ state: true, source, indice, type });
+          };
+          actor.activateAction = activateTimed;
+          const paidClick = async () => {
+            bar.combatRows[0].querySelector('.co2prism-slot-executable').click();
+            await new Promise(resolve => setTimeout(resolve, 0));
+          };
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; await resetBudget(); await command('m', true);
+            await paidClick(); movement('20 / 30', '4 / 6');
+            check(halos() === 'l,a,m', size + ' automatic bonus spend halos');
+            check(economy.getSnapshot().branch === 'undecided', size + ' timed M bonus priority');
+            await paidClick(); movement('10 / 30', '2 / 6');
+            check(halos() === 'a,m', size + ' automatic normal M spend halos');
+            await paidClick(); movement('0 / 30', '0 / 6');
+            check(halos() === '', size + ' automatic exhaustion halos');
+            const executions = nativeExecutions; await paidClick();
+            check(nativeExecutions === executions, size + ' exhausted budget executed');
+          }
+          await resetBudget(); nativeAction.actionTypeFinal = 'a'; nativeOutcome = false;
+          await paidClick(); movement('20 / 20', '4 / 4');
+          nativeOutcome = true; await paidClick(); movement('10 / 20', '2 / 4');
+          check(budgetTypes() === 'm', 'Paid attack budget not rendered');
+          await resetBudget(); nativeAction.properties.temporary = true; nativeAction.properties.enabled = false;
+          await paidClick();
+          check(bar.combatRows[0].querySelector('.co2prism-action-active') && !economy.getSnapshot().normal.am, 'Paid temporary activation');
+          const activatedBudget = JSON.stringify(actor.flags.co2prism.actionEconomy);
+          await paidClick();
+          check(!bar.combatRows[0].querySelector('.co2prism-action-active') && JSON.stringify(actor.flags.co2prism.actionEconomy) === activatedBudget, 'Temporary deactivation spent time');
+          check(!hooks.has('co2.preActivateAction') && !hooks.has('co2.postActivateAction'), 'Timed listeners leaked');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; await resetBudget(); await command('am', true);
+            bar.position = { x: innerWidth - 300, y: 300 }; bar.layout(); mixedGeometry();
+            check(halos() === 'l,a,m', size + ' halo after reset');
+            const viewport = bar.budgetScroll.getBoundingClientRect();
+            const scale = parseFloat(root.style.getPropertyValue('--co2prism-unit'));
+            for (const button of bar.budgetCommands) {
+              const rect = button.getBoundingClientRect(), wrapper = button.parentElement;
+              check(Math.abs(wrapper.getBoundingClientRect().width - rect.width) < 1, size + ' halo wrapper geometry');
+              check(rect.top - viewport.top >= 8 * scale - 1 && viewport.bottom - rect.bottom >= 8 * scale - 1, size + ' halo clipped vertically');
+              check(getComputedStyle(wrapper).pointerEvents === 'none', size + ' halo hit surface');
+              const hit = document.elementFromPoint(rect.left + scale, rect.top + scale);
+              check(!button.contains(hit), size + ' hexagon corner interactive');
+              check(button.dataset.co2prismTime === 'am' ? getComputedStyle(wrapper).filter === 'none' : getComputedStyle(wrapper).filter.includes('drop-shadow'), size + ' silhouette halo');
+            }
+            check(bar.budgetScroll.scrollWidth <= bar.budgetScroll.clientWidth + 1, size + ' halo artificial scroll');
           }
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }

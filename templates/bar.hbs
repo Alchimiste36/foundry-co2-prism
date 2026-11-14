@@ -32,7 +32,7 @@
     <section id="co2prism-combat" class="co2prism-combat" hidden aria-label="{{localize 'CO2PRISM.Combat.Title'}}">
       <div class="co2prism-piece co2prism-combat-line" style="--x:480;--y:253;--w:1128;--h:16" aria-hidden="true"></div>
       <div class="co2prism-piece co2prism-combat-arrow" style="--x:1584;--y:232;--w:93;--h:57" aria-hidden="true"></div>
-      <div class="co2prism-piece co2prism-movement" style="--x:-122;--y:265;--w:237;--h:237" title="{{localize 'CO2PRISM.Combat.ReferenceMovement'}}">
+      <div class="co2prism-piece co2prism-movement" style="--x:-122;--y:265;--w:237;--h:237" title="{{localize 'CO2PRISM.Combat.RemainingMovement'}}">
         <span class="co2prism-movement-label">{{localize 'CO2PRISM.Combat.Meters'}}</span>
         <span class="co2prism-combat-number" data-co2prism-combat-value="meters">{{localize 'CO2PRISM.Unavailable'}}</span>
         <span class="co2prism-movement-label">{{localize 'CO2PRISM.Combat.Cells'}}</span>
@@ -49,18 +49,14 @@
         <div class="co2prism-piece co2prism-combat-row" style="--x:522;--y:49;--w:616;--h:204" tabindex="0" role="region" aria-label="{{localize 'CO2PRISM.Combat.Row1'}}"></div>
         <div class="co2prism-piece co2prism-combat-row" style="--x:731;--y:255;--w:198;--h:204" tabindex="0" role="region" aria-label="{{localize 'CO2PRISM.Combat.Row2'}}"></div>
       </div>
-      <div class="co2prism-piece co2prism-budget-scroll" style="--x:731;--y:457;--w:492;--h:57" tabindex="0" role="region" aria-label="{{localize 'CO2PRISM.Combat.FutureBudget'}}">
+      <div class="co2prism-piece co2prism-budget-scroll" style="--x:731;--y:457;--w:492;--h:57" tabindex="0" role="region" aria-label="{{localize 'CO2PRISM.Combat.ActionBudget'}}">
         <div class="co2prism-budget-content">
-      <span class="co2prism-piece co2prism-time co2prism-time-limited" style="--x:6;--y:2;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">L</span>
-      <span class="co2prism-piece co2prism-time co2prism-time-mixed" style="--x:61;--y:2;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">AM</span>
-      <span class="co2prism-piece co2prism-time co2prism-time-attack" style="--x:116;--y:2;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">A</span>
-      <span class="co2prism-piece co2prism-time co2prism-time-move" style="--x:171;--y:2;--w:51;--h:47" aria-disabled="true" title="{{localize 'CO2PRISM.Combat.FutureBudget'}}">M</span>
-      <div class="co2prism-piece co2prism-time-bar" style="--x:235;--y:0;--w:257;--h:51" aria-label="{{localize 'CO2PRISM.Combat.FutureBudget'}}">
-        <span class="co2prism-time-indicator co2prism-time-limited"></span>
-        <span class="co2prism-time-separator"></span>
-        <span class="co2prism-time-indicator co2prism-time-mixed"></span>
-        <span class="co2prism-time-indicator co2prism-time-move"></span>
-      </div>
+      <span class="co2prism-piece co2prism-time-command" style="--x:6;--y:2;--w:51;--h:47"><button type="button" disabled class="co2prism-time co2prism-time-limited" data-co2prism-time="l">L</button></span>
+      <span class="co2prism-piece co2prism-time-command" style="--x:61;--y:2;--w:51;--h:47"><button type="button" disabled class="co2prism-time co2prism-time-attack" data-co2prism-time="a">A</button></span>
+      <span class="co2prism-piece co2prism-time-command" style="--x:116;--y:2;--w:51;--h:47"><button type="button" disabled class="co2prism-time co2prism-time-move" data-co2prism-time="m">M</button></span>
+      <span class="co2prism-piece co2prism-time-command" style="--x:171;--y:2;--w:51;--h:47"><button type="button" disabled class="co2prism-time co2prism-time-mixed" data-co2prism-time="am">AM</button></span>
+      <div class="co2prism-piece co2prism-time-bar" style="--x:235;--y:0;--w:196;--h:51" role="group" aria-label="{{localize 'CO2PRISM.Combat.ActionBudget'}}"></div>
+      <button type="button" disabled class="co2prism-piece co2prism-budget-reset" style="--x:437;--y:2;--w:40;--h:47" title="{{localize 'CO2PRISM.Combat.ResetBudget'}}" aria-label="{{localize 'CO2PRISM.Combat.ResetBudget'}}"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button>
         </div>
       </div>
     </section>

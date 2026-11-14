@@ -7,11 +7,13 @@ import assert from "node:assert/strict";
 function setup() {
   const hooks = new Map();
   const context = vm.createContext({
-    Hooks: { once() {}, on(name, fn) { hooks.set(name, fn); } },
+    structuredClone,
+    Hooks: { once() {}, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
     game: { user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
     canvas: { ready: true, tokens: { controlled: [] } }
   });
-  vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8")
+  vm.runInContext('globalThis.ActionEconomy = (() => {' + readFileSync(new URL('../module/combat/action-economy.mjs', import.meta.url), 'utf8').replace('export class ActionEconomy', 'class ActionEconomy') + '; return ActionEconomy; })()', context);
+  vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{ ActionEconomy \} from [^;]+;/, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
   const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
@@ -855,7 +857,7 @@ async function setupExecution() {
   const env = setupShortcuts();
   const { bar, a, item, context } = env;
   const action = item.actions[0];
-  Object.assign(action, { type: "melee", properties: { temporary: false, enabled: false },
+  Object.assign(action, { actionTypeFinal: "none", type: "melee", properties: { temporary: false, enabled: false },
     autoAttack: false, hasResolversWithDomage: true });
   const ref = bar.shortcutFromDrop(a, env.payload());
   await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
@@ -945,7 +947,7 @@ test("exécution CO2 : droits, références absentes, ancien token/preset/carré
 test("exécution CO2 : bon Item et indice, UUID synthétique frais, acteur sans Item explicitement géré", async () => {
   const { bar, a, item, calls, click, target, context, hooks, token } = await setupExecution();
   const second = { id: "second", uuid: `${a.uuid}.Item.second`, name: "Second", actions:
-    [0, 1, 2].map(indice => ({ source: `${a.uuid}.Item.second`, indice, type: "heal" })) };
+    [0, 1, 2].map(indice => ({ source: `${a.uuid}.Item.second`, indice, type: "heal", actionTypeFinal: "none" })) };
   a.items.set(second.id, second);
   const reference = bar.shortcutFromDrop(a, { type: "co.action", source: second.uuid, indice: 2 });
   await bar.saveShortcut(a, 1, bar.slotRows()[0][1], reference);
@@ -1287,4 +1289,212 @@ test("conditions natives : résultat tardif après changement d'acteur ou réfé
   select(a);
   const second = bar.executeShortcut(click(), target()); delete a.flags.co2prism.presets[1].slots['left-hand']; release(true);
   assert.equal(await second, false); assert.equal(calls.length, 0);
+});
+
+test("interface économie : file moteur, verrou indépendant, presets et acteur synthétique", async () => {
+  const { bar, a, context, create, select, writes } = setupShortcuts();
+  context.game.settings.get = () => true;
+  const presets = JSON.stringify(bar.readConfiguration().presets);
+  await Promise.all([bar.changeEconomy("grant", "m"), bar.changeEconomy("grant", "m"), bar.changeEconomy("spend", "m")]);
+  assert.equal(a.flags.co2prism.actionEconomy.bonus.m, 1);
+  assert.equal(a.flags.co2prism.actionEconomy.branch, "undecided");
+  assert.equal(JSON.stringify(bar.readConfiguration().presets), presets);
+  await bar.selectCombatPreset(2);
+  assert.equal(a.flags.co2prism.actionEconomy.bonus.m, 1);
+  const b = create("synthetic").actor; b.baseActor = a; select(b);
+  await bar.changeEconomy("spend", "l");
+  assert.equal(b.flags.co2prism.actionEconomy.branch, "limited");
+  assert.equal(a.flags.co2prism.actionEconomy.branch, "undecided");
+  select(a);
+  const count = writes.length;
+  a.testUserPermission = (_user, level) => level === "OBSERVER";
+  assert.equal(await bar.changeEconomy("grant", "m"), false);
+  assert.equal(writes.length, count);
+  a.testUserPermission = () => true;
+  assert.equal(await bar.changeEconomy("reset"), true);
+  assert.equal(a.flags.co2prism.actionEconomy.bonus.m, 0);
+});
+
+async function setupTimedExecution(time = "a") {
+  const env = await setupExecution();
+  const { a, item, action, context, hooks, calls, bar, click, target } = env;
+  action.actionTypeFinal = time;
+  const behavior = { result: "success" };
+  const economy = new context.ActionEconomy(a);
+  const activate = async options => {
+    if (behavior.beforeActivate) await behavior.beforeActivate();
+    const guards = [];
+    const details = { item, ...options, guard: promise => guards.push(Promise.resolve(promise)) };
+    hooks.get("co2.preActivateAction")?.(a, details);
+    if ((await Promise.all(guards)).some(value => value === false)) return false;
+    if (behavior.dialog) await behavior.dialog();
+    if (behavior.result === "error") throw Error("Native error");
+    if (behavior.result === "false") return false;
+    if (behavior.result === "undefined") return;
+    if (behavior.result === "success" && action.properties.temporary) action.properties.enabled = options.state;
+    hooks.get("co2.postActivateAction")?.(a, { ...details, success: behavior.result === "success" });
+    hooks.get("updateItem")(item, {});
+    return true; // activateAction retourne true même si success est faux.
+  };
+  a.activateAction = activate;
+  context.game.system.api.macros.useAction = async (source, indice, type = "attack") => {
+    calls.push(["useAction", source, indice, type]);
+    await activate({ state: true, source, indice, type }); // Le wrapper ne retourne rien.
+  };
+  const run = modifiers => bar.executeShortcut(click(modifiers), target());
+  return { ...env, economy, behavior, run };
+}
+
+test("12C M : bonus spécialisé, M normal, AM ; gratuit sans budget", async () => {
+  const { economy, run, calls, action, writes } = await setupTimedExecution("m");
+  await economy.grant("m");
+  for (const [branch, remaining] of [["undecided", 2], ["split", 1], ["split", 0]]) {
+    assert.equal(await run(), true);
+    assert.equal(economy.getSnapshot().branch, branch);
+    assert.equal(economy.getSnapshot().movementsRemaining, remaining);
+    assert.equal(economy.getSnapshot().movementsMaximum, 3);
+  }
+  const count = writes.length;
+  assert.equal(await run(), false); assert.equal(calls.length, 3); assert.equal(writes.length, count);
+  for (const type of ["f", "none"]) {
+    action.actionTypeFinal = type; assert.equal(await run(), true);
+  }
+  assert.equal(writes.length, count);
+});
+
+test("12C A/L : budget polyvalent et bonus indépendants", async () => {
+  const { economy, run, action } = await setupTimedExecution();
+  await economy.grant("a"); await economy.grant("m");
+  assert.equal(await run(), true); assert.equal(economy.getSnapshot().branch, "undecided");
+  assert.equal(economy.getSnapshot().movementsRemaining, 3);
+  assert.equal(await run(), true); assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  await economy.reset(); await economy.grant("m");
+  action.actionTypeFinal = "l";
+  assert.equal(await run(), true); assert.equal(economy.getSnapshot().branch, "limited");
+  assert.equal(economy.getSnapshot().bonus.m, 1);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+});
+
+test("12C consultations, dommages seuls et désactivation temporaire sans débit", async () => {
+  const { economy, run, action, writes } = await setupTimedExecution();
+  const count = writes.length;
+  for (const modifier of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }]) assert.equal(await run(modifier), true);
+  assert.equal(writes.length, count);
+  Object.assign(action.properties, { activable: true, temporary: true, enabled: false });
+  assert.equal(await run(), true); assert.equal(action.properties.enabled, true);
+  assert.equal(economy.getSnapshot().normal.am, false);
+  const after = writes.length;
+  assert.equal(await run(), true); assert.equal(action.properties.enabled, false);
+  assert.equal(writes.length, after);
+});
+
+test("12C annulation, refus et undefined sans preuve : aucun débit", async () => {
+  const { economy, run, behavior, writes, hooks } = await setupTimedExecution();
+  const before = JSON.stringify(economy.getSnapshot()), count = writes.length;
+  for (const result of ["cancel", "false", "undefined", "error"]) {
+    behavior.result = result;
+    assert.equal(await run(), false);
+    assert.equal(JSON.stringify(economy.getSnapshot()), before); assert.equal(writes.length, count);
+    assert.equal(hooks.has("co2.preActivateAction"), false); assert.equal(hooks.has("co2.postActivateAction"), false);
+  }
+  behavior.result = "success"; // Le résultat du dé n'intervient pas dans le booléen des resolvers.
+  assert.equal(await run(), true); assert.equal(economy.getSnapshot().normal.am, false);
+});
+
+test("12C refus avant API : budget, épuisement, conditions, droits et temps inconnu", async () => {
+  const { economy, run, calls, action, a, item, writes } = await setupTimedExecution();
+  await economy.spend("l"); const count = writes.length;
+  assert.equal(await run(), false); assert.equal(calls.length, 0); assert.equal(writes.length, count);
+  await economy.reset();
+  for (const time of [undefined, "", "am", "unexpected"]) { action.actionTypeFinal = time; assert.equal(await run(), false); }
+  action.actionTypeFinal = "a"; action.isVisible = async () => false; assert.equal(await run(), false);
+  action.isVisible = async () => true; a.testUserPermission = (_user, level) => level === "OBSERVER";
+  assert.equal(await run(), false); a.testUserPermission = () => true;
+  item.system.frequency = "daily"; item.system.charges = { current: 0 };
+  assert.equal(await run(), false); assert.equal(calls.length, 0);
+});
+
+test("12C garde native après attente : acteur, conditions et temps revérifiés", async () => {
+  const { run, behavior, select, create, a, action, economy, calls } = await setupTimedExecution();
+  behavior.beforeActivate = async () => { select(create("other").actor); };
+  assert.equal(await run(), false); assert.equal(economy.getSnapshot().normal.am, true);
+  select(a); behavior.beforeActivate = async () => { action.actionTypeFinal = "m"; };
+  assert.equal(await run(), false); assert.equal(economy.getSnapshot().normal.am, true);
+  action.actionTypeFinal = "a"; behavior.beforeActivate = async () => { action.isVisible = async () => false; };
+  assert.equal(await run(), false); assert.equal(economy.getSnapshot().normal.am, true);
+  assert.equal(calls.length, 3);
+});
+
+test("12C dialogue : double clic et commandes manuelles bloqués, débit sur acteur d'origine", async () => {
+  const { run, behavior, bar, economy, select, create, calls } = await setupTimedExecution();
+  let release, opened;
+  const started = new Promise(resolve => { opened = resolve; });
+  behavior.dialog = () => { opened(); return new Promise(resolve => { release = resolve; }); };
+  const pending = run(); await started;
+  assert.equal(await run(), false); assert.equal(await bar.changeEconomy("spend", "m"), false);
+  assert.equal(economy.getSnapshot().normal.am, true);
+  const other = create("other").actor; select(other);
+  release(); assert.equal(await pending, true);
+  assert.equal(economy.getSnapshot().normal.am, false);
+  assert.equal(other.flags.co2prism.actionEconomy, undefined); assert.equal(calls.length, 1);
+});
+
+test("12C concurrence externe : action confirmée mais débit impossible signalé sans négatif", async () => {
+  const { run, behavior, economy, warnings } = await setupTimedExecution();
+  behavior.dialog = async () => { await economy.spend("l"); };
+  assert.equal(await run(), false);
+  assert.equal(economy.getSnapshot().branch, "limited");
+  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.ok(warnings.includes("CO2PRISM.Combat.ActionTimeConflict"));
+});
+
+test("12C temporaire via macro : type attack par défaut natif et dépense unique", async () => {
+  const { action, run, economy } = await setupTimedExecution("m");
+  Object.assign(action.properties, { temporary: true, activable: false });
+  assert.equal(await run(), true);
+  assert.equal(economy.getSnapshot().normal.m, false);
+});
+
+test("12C plusieurs hooks de fin ne débitent qu'une fois ; erreur de flag signalée", async () => {
+  const { behavior, run, hooks, a, item, economy, warnings } = await setupTimedExecution();
+  behavior.dialog = async () => {
+    for (let index = 0; index < 3; index++) hooks.get("co2.postActivateAction")(a, { item, indice: 0, state: true, type: "attack", success: true });
+  };
+  assert.equal(await run(), true); assert.equal(economy.getSnapshot().normal.m, true);
+  assert.equal(economy.getSnapshot().normal.am, false);
+  await economy.reset();
+  a.setFlag = async () => { throw Error("offline"); };
+  assert.equal(await run(), false);
+  assert.ok(warnings.includes("CO2PRISM.Combat.ActionTimeConflict"));
+  assert.equal(economy.getSnapshot().normal.am, true);
+});
+
+test("12C garde native : budget changé avant activation et hooks étrangers ignorés", async () => {
+  const { run, behavior, economy, hooks, a, item } = await setupTimedExecution();
+  behavior.beforeActivate = async () => { await economy.spend("l"); };
+  assert.equal(await run(), false);
+  assert.equal(economy.getSnapshot().branch, "limited");
+  await economy.reset(); behavior.beforeActivate = undefined; behavior.result = "cancel";
+  behavior.dialog = async () => {
+    const valid = { item, indice: 0, state: true, type: "attack", success: true };
+    for (const [actor, detail] of [[{}, valid], [a, { ...valid, item: {} }], [a, { ...valid, indice: 1 }],
+      [a, { ...valid, type: "damage" }], [a, { ...valid, state: false }]]) {
+      hooks.get("co2.postActivateAction")(actor, detail);
+    }
+  };
+  assert.equal(await run(), false);
+  assert.equal(economy.getSnapshot().normal.am, true);
+});
+
+test("12D commande AM : ajout permis, dépense UI refusée, moteur polyvalent préservé", async () => {
+  const { bar, a, context, writes } = setupShortcuts();
+  context.game.settings.get = () => true;
+  const count = writes.length;
+  assert.equal(await bar.changeEconomy("spend", "am"), false);
+  assert.equal(writes.length, count);
+  assert.equal(await bar.changeEconomy("grant", "am"), true);
+  assert.equal(a.flags.co2prism.actionEconomy.bonus.am, 1);
+  assert.equal(await bar.changeEconomy("spend", "a"), true);
+  assert.equal(a.flags.co2prism.actionEconomy.bonus.am, 0);
+  assert.equal(a.flags.co2prism.actionEconomy.branch, "undecided");
 });
