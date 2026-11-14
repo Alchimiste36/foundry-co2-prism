@@ -27,7 +27,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const ready = [];
       const hooks = new Map();
       const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on(name, fn) { hooks.set(name, fn); } };
-      const settings = { size: "M", position: {}, locked: true };
+      const settings = { size: "M", position: {}, locked: false };
       const warnings = [];
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
@@ -54,6 +54,10 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             async setFlag(scope, key, value) {
               this.flags[scope] ??= {}; let target = this.flags[scope]; const parts = key.split(".");
               for (const part of parts.slice(0, -1)) target = target[part] ??= {};
+              if (value && typeof value === "object") {
+                value = structuredClone(value);
+                for (const key of Object.keys(value)) if (key.startsWith("-=")) { delete value[key.slice(2)]; delete value[key]; }
+              }
               target[parts.at(-1)] = value;
             },
             getSkillBonuses: key => key === "for" ? [{ name: "Métier", value: 3,
@@ -233,7 +237,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(!bar.skillsPanel.hidden && !bar.combatPanel.hidden && root.getBoundingClientRect().right <= innerWidth + 0.1,
             "Combat hors écran avec Compétences");
           const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "capacity", parent: actor,
-            system: { description: "<b>Description native</b>", hasFrequency: true, charges: { current: 3 } },
+            system: { description: "<b>Description native</b>", hasFrequency: true, frequency: "daily", charges: { current: 3 } },
             testUserPermission: () => true };
           const nativeAction = { source: item.uuid, indice: 0, actionName: "Action réelle",
             actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "l",
@@ -274,7 +278,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const occupied = bar.combatRows[0].children[0];
           check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.title.includes("Description native"), "Image ou description copiée incorrectement");
           check(occupied.querySelector(".co2prism-slot-time").textContent === "L"
-            && occupied.querySelector(".co2prism-slot-uses").textContent === "3"
+            && occupied.querySelector(".co2prism-slot-uses").textContent.trim() === "3"
             && occupied.querySelector(".co2prism-slot-cost").textContent.trim() === "2", "Décorations natives");
           const executeFlags = JSON.stringify(actor.flags);
           const clickShortcut = async modifiers => {
@@ -291,7 +295,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             ["sendToChat", item.uuid, undefined, 0]
           ]), "Raccourcis clavier CO2 incorrects");
           check(JSON.stringify(actor.flags) === executeFlags, "Configuration modifiée par exécution");
-          check(bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent === "2"
+          check(bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent.trim() === "2"
             && bar.gauges.mana.text.textContent === "17 / 18"
             && bar.combatRows[0].children[0].getAttribute("aria-pressed") === "true", "Rafraîchissement après action natif absent");
           let countCalls = shortcutCalls.length;
@@ -382,9 +386,11 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           nativeAction.actionName = "Action modifiée"; nativeAction.charges = 0; nativeAction.hasCharges = false; item.system.charges.current = 0;
           bar.refreshActor();
           check(bar.combatRows[0].children[0].title.includes("Action modifiée")
-            && bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent === "0", "Données non actualisées");
-          actor.items.delete(item.id); bar.refreshActor();
-          check(bar.combatRows[0].children[0].classList.contains("co2prism-slot-unavailable") && lengths() === "4,2", "Action supprimée non conservée");
+            && bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent.trim() === "0", "Données non actualisées");
+          const removedSlots = structuredClone(actor.flags.co2prism.presets[1].slots);
+          actor.items.delete(item.id); bar.refreshActor(); await bar.configWrites.get(actor);
+          check(lengths() === "3,1" && Object.keys(actor.flags.co2prism.presets[1].slots).length === 0, "Raccourcis supprimés non nettoyés");
+          actor.flags.co2prism.presets[1].slots = removedSlots;
           actor.items.set(item.id, item); bar.refreshActor();
           await bar.selectCombatPreset(2); check(lengths() === "3,1", "Slots mélangés entre presets");
           await bar.selectCombatPreset(1); check(lengths() === "4,2", "Ordre non restauré");
@@ -458,6 +464,194 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           }
           const board = document.getElementById("board").getBoundingClientRect();
           result.board = { width: board.width, height: board.height };
+
+          // Repartir avec un preset court pour les interactions de configuration.
+          actor.flags.co2prism.activePreset = 1; actor.flags.co2prism.panels.combat = true;
+          actor.flags.co2prism.presets[1].slots = {}; settings.locked = false; bar.refreshActor();
+          for (let i = 0; i < 3; i++) await dropAt(1, bar.combatRows[0].children.length - 1);
+          const orderKeys = row => bar.slotRows()[row].filter(s => !s.hand && !s.terminal).map(s => s.key);
+          const initialKeys = orderKeys(0);
+          const move = async (sourceRow, sourceIndex, targetRow, targetIndex) => {
+            const transfer = new DataTransfer(); const sourceNode = bar.combatRows[sourceRow].children[sourceIndex];
+            sourceNode.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+            check(JSON.parse(transfer.getData('text/plain')).type === 'co2prism.shortcut', 'Internal drag payload');
+            const target = bar.combatRows[targetRow].children[targetIndex];
+            target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+            check(target.classList.contains('co2prism-drop-insert'), 'Insertion indicator');
+            target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+            await bar.configWrites.get(actor);
+            sourceNode.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: transfer }));
+            await new Promise(resolve => setTimeout(resolve, 0));
+          };
+          const beforeMoveCalls = shortcutCalls.length;
+          await move(0, 4, 0, 2);
+          check(orderKeys(0).join() === [initialKeys[2], initialKeys[0], initialKeys[1]].join(), 'Internal insertion order');
+          await move(0, 2, 1, 0);
+          check(orderKeys(1)[0] === initialKeys[2] && orderKeys(0).length === 2, 'Cross-row move');
+          check(shortcutCalls.length === beforeMoveCalls, 'Drag executed action');
+          await dropAt(1, bar.combatRows[0].children.length - 1);
+          check(orderKeys(0).length === 3, 'External drop after internal move');
+          const deleteButton = bar.combatRows[0].children[2].querySelector('.co2prism-slot-remove');
+          deleteButton.click(); await bar.configWrites.get(actor);
+          check(orderKeys(0).length === 2 && actor.items.get(item.id) === item, 'Delete reference only');
+          await dropAt(1, 0);
+          check(!bar.combatRows[0].children[0].draggable, 'Hand draggable');
+          bar.combatRows[0].children[0].querySelector('.co2prism-slot-remove').click(); await bar.configWrites.get(actor);
+          check(!bar.slotRows()[0][0].reference && bar.combatRows[0].children.length === 5, 'Permanent hand removal');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; settings.locked = false; bar.refreshActor(); bar.layout();
+            const widths = [...bar.combatRowWidths];
+            check(root.querySelectorAll('.co2prism-slot-remove').length === 3, size + ' unlocked trash');
+            settings.locked = true; bar.updateLock();
+            check(lengths() === '4,1' && root.querySelectorAll('.co2prism-slot-remove').length === 0, size + ' locked visibility');
+            check(bar.combatRowWidths[0] === widths[0] - 209 && bar.combatRowWidths[1] === widths[1] - 209, size + ' actual width shrink');
+            check(!bar.combatRows[0].children[0].draggable, size + ' locked drag');
+            check(bar.combatRows.every(r => r.scrollWidth <= r.clientWidth + 1), size + ' artificial scroll');
+          }
+          const lockedCalls = shortcutCalls.length;
+          const lockedFlags = JSON.stringify(actor.flags);
+          const lockedTransfer = new DataTransfer(); lockedTransfer.setData('text/plain', JSON.stringify(payload));
+          const lockedNode = bar.combatRows[0].children[2];
+          const lockedHover = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer });
+          lockedNode.dispatchEvent(lockedHover);
+          check(!lockedHover.defaultPrevented && !lockedNode.classList.contains('co2prism-drop-target'), 'Locked hover accepted');
+          lockedNode.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer }));
+          await Promise.resolve();
+          check(JSON.stringify(actor.flags) === lockedFlags, 'Locked external drop wrote flags');
+          bar.combatRows[0].children[2].click(); await new Promise(resolve => setTimeout(resolve, 0));
+          check(shortcutCalls.length > lockedCalls, 'Locked execution blocked');
+          item.system.charges.current = 0; item.system.frequency = 'daily'; nativeAction.properties.noChargesUsed = false;
+          hooks.get('updateItem')(item, {});
+          const exhausted = bar.combatRows[0].children[2];
+          check(exhausted.classList.contains('co2prism-action-exhausted') && exhausted.querySelector('.fa-sun'), 'Daily zero exhausted');
+          item.system.frequency = 'combat'; hooks.get('updateItem')(item, {});
+          check(bar.combatRows[0].children[2].querySelector('.fa-swords'), 'Combat icon');
+          item.type = 'equipment'; item.system.subtype = 'consumable'; item.system.quantity = { current: 0 }; nativeAction.type = 'consumable';
+          hooks.get('updateItem')(item, {});
+          check(bar.combatRows[0].children[2].querySelector('.fa-sack') && bar.combatRows[0].children[2].classList.contains('co2prism-action-exhausted'), 'Quantity zero');
+          item.system.quantity.current = 2; hooks.get('updateItem')(item, {});
+          check(!bar.combatRows[0].children[2].classList.contains('co2prism-action-exhausted'), 'Quantity refresh');
+          delete item.system.quantity; hooks.get('updateItem')(item, {});
+          check(!bar.combatRows[0].children[2].querySelector('.co2prism-slot-uses'), 'Missing quantity shown');
+          // Une résolution de consommation en seconde position suffit, même hors sous-type consommable.
+          item.system.subtype = 'misc'; item.system.properties = { reloadable: true };
+          item.system.charges.current = 8; item.system.quantity = { current: 3, destroyIfEmpty: false };
+          nativeAction.type = 'heal'; nativeAction.properties.temporary = false;
+          nativeAction.resolvers = [{ type: 'heal' }, { type: 'consumable' }];
+          hooks.get('updateItem')(item, {});
+          const consumedCard = () => bar.combatRows[0].children[2];
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const badge = consumedCard().querySelector('.co2prism-slot-uses');
+            check(badge.textContent.trim() === '3' && badge.querySelector('.fa-flask-round-potion'), size + ' potion counter');
+            check(consumedCard().querySelectorAll('.co2prism-slot-uses').length === 1, size + ' overlapping counters');
+            const cardRect = consumedCard().getBoundingClientRect(), badgeRect = badge.getBoundingClientRect();
+            check(Math.abs(cardRect.left + parseFloat(getComputedStyle(consumedCard()).borderLeftWidth) - badgeRect.left) < 1
+              && badgeRect.bottom <= cardRect.bottom, size + ' potion bottom left');
+          }
+          const flagsBeforeConsumption = JSON.stringify(actor.flags);
+          // Simuler le prédicat natif asynchrone sans le réimplémenter dans Prism.
+          let equipped = false;
+          nativeAction.isVisible = async (source, owner) => {
+            check(source === item && owner === actor, 'Native condition arguments'); return equipped;
+          };
+          nativeAction.type = 'ranged'; nativeAction.properties.temporary = true; nativeAction.properties.enabled = true;
+          hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));
+          check(consumedCard().classList.contains('co2prism-condition-unavailable')
+            && consumedCard().classList.contains('co2prism-action-active'), 'Condition state lost active glow');
+          check(consumedCard().getAttribute('aria-disabled') === 'true' && consumedCard().title.includes('ConditionsUnavailable'), 'Condition accessibility');
+          const beforeUnavailable = shortcutCalls.length;
+          consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
+          consumedCard().dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(shortcutCalls.length === beforeUnavailable, 'Unavailable execution');
+          consumedCard().dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+          await new Promise(resolve => setTimeout(resolve, 0));
+          consumedCard().dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(shortcutCalls.length === beforeUnavailable + 2, 'Unavailable consultation blocked');
+          equipped = true; hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));
+          check(!consumedCard().classList.contains('co2prism-condition-unavailable') && consumedCard().getAttribute('aria-disabled') === 'false', 'Equipped availability not restored');
+          const completions = [];
+          nativeAction.isVisible = () => new Promise(resolve => completions.push(resolve));
+          bar.refreshActor(); await Promise.resolve();
+          nativeAction.isVisible = async () => true;
+          await bar.selectCombatPreset(2); await new Promise(resolve => setTimeout(resolve, 0));
+          for (const resolve of completions) resolve(false);
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(!root.querySelector('.co2prism-condition-unavailable'), 'Late condition applied to new preset');
+          await bar.selectCombatPreset(1); await new Promise(resolve => setTimeout(resolve, 0));
+          check(JSON.stringify(actor.flags) === flagsBeforeConsumption, 'False conditions removed shortcut');
+          nativeAction.type = 'heal'; nativeAction.properties.temporary = false;
+          hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));
+          const previousUse = game.system.api.macros.useAction;
+          let consumeCalls = 0;
+          game.system.api.macros.useAction = async (source, indice) => {
+            check(source === item.uuid && indice === 0, 'Consumption support');
+            consumeCalls++;
+            // Simulation du resolver CO2 : aucun calcul de consommation ajouté à Prism.
+            item.system.quantity.current--;
+            if (item.system.quantity.current === 0 && item.system.quantity.destroyIfEmpty) {
+              actor.items.delete(item.id); hooks.get('deleteItem')(item, {});
+            } else hooks.get('updateItem')(item, {});
+          };
+          for (const value of [2, 1, 0]) {
+            consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
+            check(item.system.quantity.current === value && consumedCard().querySelector('.co2prism-slot-uses').textContent.trim() === String(value), 'Consumption refresh ' + value);
+          }
+          check(consumeCalls === 3 && consumedCard().classList.contains('co2prism-action-exhausted')
+            && consumedCard().querySelector('.fa-flask-round-potion'), 'Potion zero exhausted');
+          item.system.quantity.current = 3; hooks.get('updateItem')(item, {});
+          check(!consumedCard().classList.contains('co2prism-action-exhausted') && consumedCard().querySelector('.co2prism-slot-uses').textContent.trim() === '3', 'Sheet quantity update');
+          nativeAction.resolvers = [{ type: 'heal' }]; nativeAction.type = 'consumable'; hooks.get('updateItem')(item, {});
+          check(!consumedCard().querySelector('.fa-flask-round-potion'), 'Action type mistaken for resolver');
+          nativeAction.resolvers.push({ type: 'consumable' }); nativeAction.type = 'heal';
+          item.system.quantity = { current: 1, destroyIfEmpty: true }; hooks.get('updateItem')(item, {});
+          consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
+          await bar.configWrites.get(actor);
+          check(!actor.items.has(item.id) && bar.combatRows[0].children.length === 2 && bar.combatRows[1].children.length === 0, 'Destroyed Item reference removed');
+          check(Object.keys(actor.flags.co2prism.presets[1].slots).length === 0, 'Destroyed references persisted');
+          game.system.api.macros.useAction = previousUse;
+          // Matrice mains vides/occupées : mêmes positions, aucune écriture au verrouillage.
+          actor.items.set(item.id, item); item.system.quantity.current = 3;
+          const handReference = Object.values(removedSlots)[0];
+          for (const preset of [1, 2, 3]) for (const size of ['S', 'M', 'L', 'XL']) {
+            for (const occupiedHands of [[], ['left-hand'], ['right-hand'], ['left-hand', 'right-hand']]) {
+              actor.flags.co2prism.activePreset = preset;
+              const slots = {
+                'ordinary-first': { ...handReference, row: 1, order: 0, hand: null },
+                'ordinary-second': { ...handReference, row: 2, order: 0, hand: null }
+              };
+              for (const key of occupiedHands) slots[key] = { ...handReference, row: 1, hand: key.split('-')[0] };
+              actor.flags.co2prism.presets[preset] = { slots };
+              settings.size = size; settings.locked = false; bar.refreshActor(); bar.layout();
+              const flags = JSON.stringify(actor.flags);
+              const before = [...bar.combatRows[0].children].slice(0, 3).map(node => node.getBoundingClientRect());
+              settings.locked = true; bar.updateLock();
+              check(lengths() === '3,1', size + ' reserved hand count');
+              check(root.querySelectorAll('.co2prism-hand-empty').length === 2 - occupiedHands.length, size + ' hand placeholder count');
+              [...bar.combatRows[0].children].forEach((node, index) => {
+                const rect = node.getBoundingClientRect();
+                check(['left', 'top', 'width', 'height'].every(key => Math.abs(rect[key] - before[index][key]) < 1), size + ' hand position changed');
+                if (index >= 2) return;
+                if (occupiedHands.includes(index === 0 ? 'left-hand' : 'right-hand')) {
+                  check(node.classList.contains('co2prism-slot-executable') && !node.classList.contains('co2prism-hand-empty'), 'Occupied hand hidden');
+                } else {
+                  const style = getComputedStyle(node), icon = node.querySelector('.fa-solid.fa-hand');
+                  check(icon && Number(getComputedStyle(icon).opacity) < 1 && style.pointerEvents === 'none', 'Hand icon interactivity');
+                  check(style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderLeftColor === 'rgba(0, 0, 0, 0)', 'Empty hand square visible');
+                  check(!node.draggable && !node.querySelector('.co2prism-slot-remove, .co2prism-slot-empty, .co2prism-slot-hand'), 'Empty hand controls');
+                  const callCount = shortcutCalls.length;
+                  node.click(); node.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer }));
+                  check(shortcutCalls.length === callCount, 'Empty hand action');
+                }
+              });
+              check(bar.combatRows.every(row => row.scrollWidth <= row.clientWidth + 1), size + ' placeholder artificial scroll');
+              settings.locked = false; bar.updateLock();
+              check(lengths() === '4,2' && !root.querySelector('.co2prism-hand-empty'), 'Unlock hand slots');
+              check(JSON.stringify(actor.flags) === flags, 'Visual hand placeholder wrote flags');
+            }
+          }
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";

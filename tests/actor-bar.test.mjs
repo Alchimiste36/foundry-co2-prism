@@ -341,6 +341,7 @@ function setupConfiguration() {
   const { bar, context, actor, token, hooks } = env;
   const writes = [], errors = [];
   context.foundry = { utils: { deepClone: structuredClone } };
+  context.game.settings ??= { get: () => false };
   context.ui = { notifications: { error: message => errors.push(message) } };
   context.console = { error() {} };
   bar.presetButtons = [1, 2, 3].map(number => ({ dataset: { co2prismPreset: String(number) },
@@ -362,6 +363,10 @@ function setupConfiguration() {
       for (const part of parts.slice(0, -1)) {
         if (!target[part] || typeof target[part] !== "object" || Array.isArray(target[part])) target[part] = {};
         target = target[part];
+      }
+      if (value && typeof value === "object") {
+        value = structuredClone(value);
+        for (const key of Object.keys(value)) if (key.startsWith("-=")) { delete value[key.slice(2)]; delete value[key]; }
       }
       target[parts.at(-1)] = value;
       hooks.get("updateActor")(a, { [`flags.${scope}.${key}`]: value });
@@ -1067,4 +1072,219 @@ test("temporaires activables : acteur synthétique, sélection périmée, droits
   a.testUserPermission = () => true; a.items.delete(item.id);
   assert.equal(await bar.executeShortcut(click(), target()), false);
   assert.equal(activations.length, 1);
+});
+
+
+test("gestion : insertion continue entre lignes, clés et autres presets préservés", async () => {
+  const { bar, a, payload } = setupShortcuts();
+  const ref = bar.shortcutFromDrop(a, payload());
+  for (let i = 0; i < 3; i++) await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
+  await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), ref);
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  await bar.saveShortcut(a, 2, bar.slotRows(a, 2)[0][0], ref);
+  const other = JSON.stringify(bar.readConfiguration().presets[2]);
+  const hands = JSON.stringify(bar.readConfiguration().presets[1].slots['left-hand']);
+  const keys = row => Array.from(bar.slotRows()[row].filter(s => !s.hand && !s.terminal), s => s.key);
+  const initial = keys(0), second = keys(1);
+  const capture = key => ({ actor: a, token: bar.token, preset: 1, key, reference: bar.readConfiguration().presets[1].slots[key] });
+  assert.equal(await bar.manageShortcut(capture(initial[2]), bar.slotRows()[0][2]), true);
+  assert.deepEqual(keys(0), [initial[2], initial[0], initial[1]]);
+  assert.equal(await bar.manageShortcut(capture(initial[0]), bar.slotRows()[1][0]), true);
+  assert.deepEqual(keys(1), [initial[0], second[0]]);
+  assert.equal(await bar.manageShortcut(capture(second[0]), bar.slotRows()[1][0]), true);
+  assert.deepEqual(keys(1), [second[0], initial[0]]);
+  assert.equal(await bar.manageShortcut(capture(initial[0]), bar.slotRows()[0].at(-1)), true);
+  assert.deepEqual(keys(0), [initial[2], initial[1], initial[0]]);
+  for (const row of bar.slotRows()) assert.deepEqual(Array.from(row.filter(s => !s.hand && !s.terminal), s => s.order), Array.from(row.filter(s => !s.hand && !s.terminal), (_, i) => i));
+  assert.equal(JSON.stringify(bar.readConfiguration().presets[2]), other);
+  assert.equal(JSON.stringify(bar.readConfiguration().presets[1].slots['left-hand']), hands);
+  assert.equal(await bar.manageShortcut(capture('left-hand'), bar.slotRows()[1].at(-1)), false);
+  assert.equal(await bar.manageShortcut(capture(initial[0]), bar.slotRows()[0][0]), false);
+});
+
+test("gestion : suppression compacte, mains permanentes, verrou et contexte périmé", async () => {
+  const { bar, a, item, payload, context, create, select } = setupShortcuts();
+  let locked = false; context.game.settings.get = () => locked;
+  const ref = bar.shortcutFromDrop(a, payload());
+  for (let i = 0; i < 2; i++) await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  const capture = slot => ({ actor: a, token: bar.token, preset: 1, key: slot.key, reference: slot.reference });
+  const first = capture(bar.slotRows()[0][2]);
+  locked = true; assert.equal(await bar.manageShortcut(first), false);
+  locked = false; a.testUserPermission = () => false; assert.equal(await bar.manageShortcut(first), false);
+  a.testUserPermission = () => true;
+  await bar.setActivePreset(2); assert.equal(await bar.manageShortcut(first), false); await bar.setActivePreset(1);
+  const b = create('other').actor; select(b); assert.equal(await bar.manageShortcut(first), false); select(a);
+  assert.equal(await bar.manageShortcut(capture(bar.slotRows()[0][2])), true);
+  assert.deepEqual(Array.from(bar.slotRows()[0].filter(s => !s.hand && !s.terminal), s => s.order), [0]);
+  assert.equal(await bar.manageShortcut(capture(bar.slotRows()[0][0])), true);
+  assert.equal(bar.slotRows()[0][0].key, 'left-hand'); assert.equal(bar.slotRows()[0][0].reference, undefined);
+  assert.equal(a.items.get(item.id), item); assert.equal(item.actions.length, 1);
+  const reloaded = setupShortcuts(); const restored = reloaded.configuredActor('restored', a.flags); reloaded.select(restored);
+  assert.equal(reloaded.bar.slotRows()[0].length, 4);
+});
+
+test("compteurs : fréquences natives, quantités et munitions, zéro et absence fiable", () => {
+  const { bar } = setupShortcuts();
+  const action = { type: 'consumable', properties: {} };
+  const item = { type: 'capacity', system: { frequency: 'daily', charges: { current: 0 } } };
+  assert.equal(bar.shortcutUses(action, item).value, 0); assert.equal(bar.shortcutUses(action, item).icon, 'sun');
+  item.system.frequency = 'combat'; item.system.charges.current = 3;
+  assert.equal(bar.shortcutUses(action, item).icon, 'swords');
+  action.properties.noChargesUsed = true; assert.equal(bar.shortcutUses(action, item), null);
+  action.properties.noChargesUsed = false; item.system.frequency = 'none'; assert.equal(bar.shortcutUses(action, item), null);
+  item.type = 'equipment'; item.system = { subtype: 'consumable', quantity: { current: 0 } };
+  assert.equal(bar.shortcutUses(action, item).type, 'quantity');
+  action.type = 'ranged'; assert.equal(bar.shortcutUses(action, item), null);
+  item.system = { properties: { reloadable: true }, charges: { current: 4 } };
+  assert.equal(bar.shortcutUses(action, item).value, 4);
+  item.type = 'attack'; action.autoAttack = true; assert.equal(bar.shortcutUses(action, item).icon, 'sack');
+  item.system.charges.current = undefined; assert.equal(bar.shortcutUses(action, item), null);
+  item.system.charges.current = -1; assert.equal(bar.shortcutUses(action, item), null);
+});
+
+test("gestion : écriture en attente revérifiée, faux payload interne et erreur sans perte", async () => {
+  const { bar, a, payload, event, node, context, writes, errors } = setupShortcuts();
+  const ref = bar.shortcutFromDrop(a, payload());
+  await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
+  const slot = bar.slotRows()[0][2];
+  const capture = { actor: a, token: bar.token, preset: 1, key: slot.key, reference: slot.reference };
+  let release;
+  const pending = bar.queueConfiguration(a, () => new Promise(resolve => { release = resolve; }));
+  await Promise.resolve();
+  const deletion = bar.manageShortcut(capture);
+  context.game.settings.get = () => true;
+  release(true); await pending;
+  assert.equal(await deletion, false);
+  context.game.settings.get = () => false;
+  const before = JSON.stringify(a.flags), count = writes.length;
+  assert.equal(await bar.dropSlot(event({ type: "co2prism.shortcut", key: slot.key }), bar.slotRows()[1].at(-1), node), false);
+  assert.equal(writes.length, count);
+  const save = a.setFlag;
+  a.setFlag = async () => { throw Error("Persistence unavailable"); };
+  assert.equal(await bar.manageShortcut(capture), false);
+  assert.equal(errors.length, 1);
+  assert.equal(JSON.stringify(a.flags), before);
+  a.setFlag = save;
+  assert.equal(await bar.manageShortcut(capture), true);
+});
+
+test("quantité consommée : résolution quelconque, priorité ciblée et repli inchangé", () => {
+  const { bar } = setupShortcuts();
+  const action = { type: "ranged", properties: {}, resolvers: [{ type: "heal" }, { type: "consumable" }] };
+  const item = { type: "equipment", system: { subtype: "misc", properties: { reloadable: true },
+    quantity: { current: 3 }, charges: { current: 8 } } };
+  for (const value of [3, 2, 1, 0]) {
+    item.system.quantity.current = value;
+    const uses = bar.shortcutUses(action, item);
+    assert.equal(uses.value, value);
+    assert.equal(uses.icon, "flask-round-potion");
+    assert.equal(uses.type, "consumable");
+  }
+  for (const missing of [undefined, null, "3", NaN, -1]) {
+    item.system.quantity.current = missing;
+    assert.equal(bar.shortcutUses(action, item).icon, "sack");
+    assert.equal(bar.shortcutUses(action, item).value, 8);
+  }
+  item.system.quantity.current = 3;
+  action.resolvers = [{ type: "heal" }];
+  assert.equal(bar.shortcutUses(action, item).value, 8);
+  action.type = "consumable";
+  assert.equal(bar.shortcutUses(action, item), null);
+  item.system.subtype = "consumable";
+  assert.equal(bar.shortcutUses(action, item).icon, "sack");
+  action.resolvers = [null, { type: "consumable" }];
+  item.type = "capacity";
+  assert.equal(bar.shortcutUses(action, item), null);
+  assert.equal(bar.shortcutUses(action, undefined), null);
+});
+
+test("verrou : dépôts externes, sauvegarde directe et écriture différée refusés", async () => {
+  const { bar, a, item, payload, event, node, context, writes } = setupShortcuts();
+  const ref = bar.shortcutFromDrop(a, payload()), slot = bar.slotRows()[0][0];
+  let locked = true; context.game.settings.get = () => locked;
+  bar.hoverSlot(event(), slot, node);
+  assert.equal(await bar.dropSlot(event(), slot, node), false);
+  assert.equal(await bar.saveShortcut(a, 1, slot, ref), false);
+  assert.equal(writes.length, 0);
+  locked = false;
+  let release;
+  const pending = bar.queueConfiguration(a, () => new Promise(resolve => { release = resolve; }));
+  await Promise.resolve();
+  const saved = bar.saveShortcut(a, 1, slot, ref); locked = true;
+  release(true); await pending;
+  assert.equal(await saved, false); assert.equal(writes.length, 0);
+  assert.equal(a.items.get(item.id), item);
+});
+
+test("nettoyage : absence certaine, compaction, mains et isolation du preset", async () => {
+  const { bar, a, item, payload } = setupShortcuts();
+  const ref = bar.shortcutFromDrop(a, payload());
+  item.system.actions = item.actions;
+  for (let i = 0; i < 3; i++) await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  await bar.saveShortcut(a, 2, bar.slotRows(a, 2)[0][0], ref);
+  const other = JSON.stringify(bar.readConfiguration().presets[2]);
+  const ordinary = bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal);
+  a.flags.co2prism.presets[1].slots[ordinary[1].key].itemId = 'deleted';
+  bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
+  assert.deepEqual(Array.from(bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal), slot => slot.order), [0, 1]);
+  assert.equal(JSON.stringify(bar.readConfiguration().presets[2]), other);
+  item.actions = []; item.system.actions = [];
+  bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
+  assert.equal(Object.keys(bar.readConfiguration().presets[1].slots).length, 0);
+  assert.equal(bar.slotRows()[0][0].key, 'left-hand');
+  assert.equal(a.items.get(item.id), item);
+});
+
+test("nettoyage prudent : conditions, droits, chargement et sélection en attente", async () => {
+  const { bar, a, item, payload, create, select, writes } = setupShortcuts();
+  const ref = bar.shortcutFromDrop(a, payload());
+  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  item.system.actions = item.actions; item.actions[0].isVisible = async () => false;
+  const count = writes.length;
+  bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
+  item.system.actions = undefined; item.actions = [];
+  bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
+  item.system.actions = []; item.testUserPermission = () => false;
+  bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
+  item.testUserPermission = () => true; a.testUserPermission = () => false;
+  bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
+  a.testUserPermission = () => true;
+  let release;
+  const pending = bar.queueConfiguration(a, () => new Promise(resolve => { release = resolve; }));
+  await Promise.resolve(); bar.pruneShortcuts(bar.slotRows());
+  const cleanup = bar.configWrites.get(a); select(create('other').actor); release(true); await pending; await cleanup;
+  assert.equal(writes.length, count);
+  select(a); bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
+  assert.equal(Object.keys(bar.readConfiguration().presets[1].slots).length, 0);
+});
+
+test("conditions natives : blocage utilisation/dommages, consultations et retour disponible", async () => {
+  const { bar, a, item, action, calls, click, target } = await setupExecution();
+  let visible = false, evaluations = 0;
+  const run = modifiers => bar.executeShortcut(click(modifiers), target());
+  action.isVisible = async (source, actor) => { assert.equal(source, item); assert.equal(actor, a); evaluations++; return visible; };
+  assert.equal(await run(), false);
+  assert.equal(await run({ altKey: true }), false);
+  assert.equal(calls.length, 0);
+  assert.equal(await run({ ctrlKey: true }), true);
+  assert.equal(await run({ shiftKey: true }), true);
+  assert.equal(evaluations, 2);
+  assert.ok(bar.readConfiguration().presets[1].slots['left-hand']);
+  visible = true;
+  assert.equal(await run(), true);
+  assert.equal(await run({ altKey: true }), true);
+  assert.equal(calls.length, 4);
+});
+
+test("conditions natives : résultat tardif après changement d'acteur ou référence", async () => {
+  const { bar, a, action, calls, click, target, create, select } = await setupExecution();
+  let release;
+  action.isVisible = () => new Promise(resolve => { release = resolve; });
+  const pending = bar.executeShortcut(click(), target()); select(create('other').actor); release(true);
+  assert.equal(await pending, false); assert.equal(calls.length, 0);
+  select(a);
+  const second = bar.executeShortcut(click(), target()); delete a.flags.co2prism.presets[1].slots['left-hand']; release(true);
+  assert.equal(await second, false); assert.equal(calls.length, 0);
 });
