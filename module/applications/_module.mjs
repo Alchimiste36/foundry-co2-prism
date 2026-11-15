@@ -1,9 +1,14 @@
 ﻿import { ActionEconomy } from "../combat/action-economy.mjs";
 
+import { MovementTracker, roundMovementCells, movementThreshold } from "../movement/movement-tracker.mjs";
+import { MovementNotifications } from "../movement/movement-notifications.mjs";
+
 const MODULE = "co2prism";
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
 const COMBAT_ROW_ORIGINS = [522, 731];
+const BUDGET_ORIGIN = 522;
+const BASE_BOTTOM = 569;
 let bar;
 
 function economyEnabled() {
@@ -46,6 +51,16 @@ Hooks.once("ready", async () => {
 });
 
 class PrismBar {
+  constructor() {
+    this.movementTracker = new MovementTracker({ readMovement: token => this.readCombatData(token.actor, token.parent) });
+    this.movementErrors = new WeakMap();
+    this.movementResets = new WeakSet();
+    this.movementValidations = new WeakSet();
+    this.movementResults = new WeakMap();
+    this.movementNotifications = new MovementNotifications();
+    this.movementContextVersion = 0;
+  }
+
   async render() {
     if (document.getElementById("co2prism-bar")) return;
     const markup = await foundry.applications.handlebars.renderTemplate(
@@ -71,6 +86,21 @@ class PrismBar {
     this.budgetBar = this.element.querySelector(".co2prism-time-bar");
     this.budgetCommands = [...this.element.querySelectorAll("[data-co2prism-time]")];
     this.budgetReset = this.element.querySelector(".co2prism-budget-reset");
+    this.movementToggle = this.element.querySelector(".co2prism-movement-toggle");
+    this.movementPanel = this.element.querySelector(".co2prism-movement-panel");
+    this.movementReset = this.movementPanel.querySelector(".co2prism-movement-reset");
+    this.movementRadios = [...this.movementPanel.querySelectorAll('input[type="radio"]')];
+    this.movementToggle.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      if (event.detail > 1) return;
+      void this.toggleMovement();
+    });
+    this.movementReset.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation(); void this.resetMovement();
+    });
+    for (const radio of this.movementRadios) radio.addEventListener("change", () => {
+      if (radio.checked) this.changeMovementMode(radio.value);
+    });
     for (const button of this.budgetCommands) {
       for (const eventName of ["click", "contextmenu"]) button.addEventListener(eventName, event => {
         event.preventDefault(); event.stopPropagation();
@@ -146,19 +176,42 @@ class PrismBar {
   }
 
   connectActor() {
+    this.movementNotifications.connect();
     for (const event of ["createCombat", "updateCombat", "deleteCombat", "combatTurnChange"]) {
-      Hooks.on(event, () => this.refreshActor());
+      Hooks.on(event, (combat, changed) => {
+        if (event !== "createCombat" && (event !== "updateCombat" || ["round", "turn", "active"].some(key => key in (changed ?? {})))) this.movementContextVersion++;
+        this.refreshActor();
+      });
     }
     // L'instance vit avec le monde ; ces hooks ne sont installés qu'au premier rendu.
     Hooks.on("controlToken", () => this.refreshActor());
     Hooks.on("canvasReady", () => this.refreshActor());
-    Hooks.on("canvasTearDown", () => this.refreshActor(false));
+    Hooks.on("canvasTearDown", canvas => {
+      this.movementTracker.closeScene(canvas?.scene ?? globalThis.canvas?.scene);
+      this.refreshActor(false);
+    });
+    Hooks.on("moveToken", (token, movement) => {
+      this.movementTracker.update(token, movement);
+      if (token === this.token?.document) this.refreshActor();
+    });
+    Hooks.on("recordToken", token => {
+      this.movementTracker.refresh(token);
+      if (token === this.token?.document) this.refreshActor();
+    });
+    Hooks.on("deleteScene", scene => {
+      this.movementTracker.closeScene(scene);
+      if (scene === this.token?.document?.parent) this.refreshActor(false);
+    });
     Hooks.on("updateScene", (scene, changed) => {
       if (scene === globalThis.canvas?.scene && Object.keys(changed).some(key => key === "grid" || key.startsWith("grid."))) {
         this.refreshActor();
       }
     });
     Hooks.on("updateActor", (actor, changed) => {
+      if (Object.keys(changed).some(key => key === "flags" || key.startsWith("flags.co2prism"))) {
+        const budget = new ActionEconomy(actor).getSnapshot();
+        if (budget.branch === "undecided" && Object.values(budget.granted).every(value => value === 0)) this.movementContextVersion++;
+      }
       const relevant = Object.keys(changed).some(key => ["system", "img", "name", "ownership", "flags"].includes(key)
         || key.startsWith("system.") || key.startsWith("ownership.")
         || key === "flags.co2prism" || key === "flags.-=co2prism" || key.startsWith("flags.co2prism."));
@@ -168,11 +221,12 @@ class PrismBar {
       if (this.concernsActor(actor)) this.refreshActor(false);
     });
     Hooks.on("updateToken", (token, changed) => {
-      const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta"].includes(key)
+      const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta", "ownership"].includes(key)
         || key.startsWith("delta."));
       if (relevant && token === this.token?.document) this.refreshActor();
     });
     Hooks.on("deleteToken", token => {
+      this.movementTracker.deleteToken(token);
       if (token === this.token?.document) this.refreshActor(false);
     });
     // Les objets et effets peuvent modifier les valeurs préparées sans updateActor.
@@ -232,7 +286,200 @@ class PrismBar {
     this.updatePresets();
     const skillsChanged = this.updateSkills();
     const combatChanged = this.updateCombat();
-    if (skillsChanged || combatChanged) this.layout({ preserveAnchor: true });
+    const movementChanged = this.updateMovementPanel();
+    if (skillsChanged || combatChanged || movementChanged) this.layout({ preserveAnchor: true });
+  }
+
+  movementToken() {
+    const token = this.token?.document;
+    return this.actor && token?.parent === globalThis.canvas?.scene && token?.parent?.tokens?.get(token.id) === token
+      && token.canUserModify?.(game.user, "update") ? token : null;
+  }
+
+  movementView(token) {
+    const state = this.movementTracker.getSnapshot(token).state;
+    if (!state) return null;
+    const budgetActive = economyEnabled();
+    const available = budgetActive ? new ActionEconomy(token.actor).getSnapshot().movementsRemaining : null;
+    let valid = state.measurementValid && Number.isFinite(state.cellsPerActionRaw) && state.cellsPerActionRaw > 0
+      && Number.isSafeInteger(state.cellsPerAction) && state.cellsPerAction >= 0
+      && Number.isSafeInteger(state.cellsUsed) && Number.isSafeInteger(state.theoreticalActions);
+    let capacity = valid && budgetActive ? movementThreshold(state.cellsPerActionRaw, available, state.rounding) : null;
+    if (budgetActive && !Number.isSafeInteger(capacity)) { valid = false; capacity = null; }
+    return { state, budgetActive, available, valid, capacity,
+      blocks: valid ? budgetActive ? available : 1 : 0,
+      excess: valid && budgetActive && state.mode === "exact" ? Math.max(0, state.cellsUsed - capacity) : 0 };
+  }
+
+  toggleMovement() {
+    this.refreshActor();
+    const token = this.movementToken();
+    if (!token || !this.configuration.panels.combat || this.movementResets.has(token) || this.movementValidations.has(token)) return false;
+    const active = this.movementTracker.getSnapshot(token).success;
+    if (active) return this.validateMovement(token);
+    this.movementResults.delete(token);
+    const result = this.movementTracker.start(token);
+    if (result.success) this.movementErrors.delete(token);
+    else this.movementErrors.set(token, result.reason);
+    this.refreshActor();
+    return result.success;
+  }
+
+  async validateMovement(token) {
+    if (this.movementValidations.has(token)) return false;
+    this.movementValidations.add(token);
+    this.movementErrors.delete(token);
+    this.refreshActor();
+    const actor = token.actor, engine = new ActionEconomy(actor);
+    let result = this.movementResults.get(token);
+    if (result?.success && result.sessionId !== this.movementTracker.getSnapshot(token).state?.sessionId) {
+      this.movementResults.delete(token); result = null;
+    }
+    if (result?.success === false) result = null;
+    try {
+      if (!result) {
+        const view = this.movementView(token);
+        if (!view) return false;
+        const state = view.state;
+        if (["pending", "paused", "planned"].includes(token.movement?.state)) {
+          this.movementErrors.set(token, "movement-in-progress"); return false;
+        }
+        if (state.mode === "exact" && view.budgetActive && !view.valid) {
+          this.movementErrors.set(token, "invalid-measurement"); return false;
+        }
+        const required = state.mode === "exact" && view.budgetActive ? state.theoreticalActions : 0;
+        const version = this.movementContextVersion, resetVersion = engine.getResetVersion();
+        const valid = () => {
+          const current = this.movementTracker.getSnapshot(token).state;
+          return current && token.parent?.tokens?.get(token.id) === token && token.actor === actor
+            && (!game.scenes || game.scenes.get(token.parent.id) === token.parent)
+            && token.canUserModify?.(game.user, "update") && (required === 0 || game.user.isGM || actor?.testUserPermission?.(game.user, "OWNER"))
+            && this.movementContextVersion === version && engine.getResetVersion() === resetVersion
+            && economyEnabled() === view.budgetActive && current.sessionId === state.sessionId && current.mode === state.mode
+            && current.segmentCount === state.segmentCount && current.cellsUsed === state.cellsUsed
+            && current.cellsPerActionRaw === state.cellsPerActionRaw && current.gridSignature === state.gridSignature
+            && current.rounding === state.rounding && !["pending", "paused", "planned"].includes(token.movement?.state);
+        };
+        if (!valid()) { this.movementErrors.set(token, "context-changed"); return false; }
+        result = required > 0 ? await engine.spendMovements(required, { validate: valid })
+          : { success: true, consumedCount: 0, missingCount: 0, availableBefore: view.available };
+        if (!result.success) {
+          this.movementErrors.set(token, result.reason === "context-changed" ? "context-changed" : "validation-failed");
+          this.movementResults.set(token, { ...result, consumedCount: 0 });
+          return false;
+        }
+        result = { ...result, requiredCount: required,
+          sessionId: state.sessionId,
+          excess: required > 0 ? Math.max(0, state.cellsUsed - movementThreshold(state.cellsPerActionRaw, result.availableBefore, state.rounding)) : 0,
+          notified: false };
+        // Conserver le règlement confirmé si la fermeture devient impossible après l'écriture.
+        this.movementResults.set(token, result);
+      }
+      const finished = this.movementTracker.finish(token);
+      if (!finished.success) { this.movementErrors.set(token, "closure-pending"); return false; }
+      if (result.excess > 0 && !result.notified) {
+        result.notified = true;
+        if (!this.movementNotifications.broadcast(token, result.excess)) {
+          ui.notifications.warn(game.i18n.localize("CO2PRISM.Movement.NotificationFailed"));
+        }
+      }
+      return true;
+    } catch {
+      this.movementErrors.set(token, "validation-failed"); return false;
+    } finally {
+      this.movementValidations.delete(token); this.refreshActor();
+    }
+  }
+
+  changeMovementMode(mode) {
+    this.refreshActor();
+    const token = this.movementToken();
+    if (!token || this.movementResets.has(token) || this.movementValidations.has(token) || this.movementResults.get(token)?.success) return false;
+    const result = this.movementTracker.setMode(token, mode);
+    if (result.success) this.movementErrors.delete(token);
+    this.refreshActor();
+    return result.success;
+  }
+
+  async resetMovement() {
+    this.refreshActor();
+    const token = this.movementToken();
+    if (!token || this.movementResets.has(token) || this.movementValidations.has(token) || this.movementResults.get(token)?.success || !this.movementTracker.getSnapshot(token).success) return false;
+    this.movementResets.add(token); this.movementErrors.delete(token); this.refreshActor();
+    try {
+      const result = await this.movementTracker.reset(token);
+      if (!result.success) this.movementErrors.set(token, result.reason);
+      return result.success;
+    } catch {
+      this.movementErrors.set(token, "return-failed"); return false;
+    } finally {
+      this.movementResets.delete(token); this.refreshActor();
+    }
+  }
+
+  updateMovementPanel() {
+    if (!this.movementPanel) return false;
+    const token = this.movementToken(), view = token ? this.movementView(token) : null;
+    const open = Boolean(view && this.configuration.panels.combat);
+    const validating = Boolean(token && this.movementValidations.has(token));
+    const settled = Boolean(token && this.movementResults.get(token)?.success);
+    const busy = Boolean(token && (this.movementResets.has(token) || validating));
+    const error = token ? this.movementErrors.get(token) : null;
+    const signature = JSON.stringify([open, token?.uuid ?? token?.id, view, busy, settled, validating, error]);
+    if (signature === this.movementSignature) return false;
+    this.movementSignature = signature;
+    const localize = key => game.i18n.localize(`CO2PRISM.Movement.${key}`);
+    const format = (key, data) => game.i18n.format(`CO2PRISM.Movement.${key}`, data);
+    this.movementPanel.hidden = !open;
+    this.movementToggle.disabled = !token || busy;
+    this.movementToggle.textContent = view ? localize("Validate") : game.i18n.localize("CO2PRISM.Combat.Movement");
+    this.movementToggle.setAttribute("aria-pressed", String(Boolean(view)));
+    this.movementToggle.setAttribute("aria-expanded", String(open));
+    this.movementToggle.title = localize(validating ? "Validating" : !view && error ? error === "movement-in-progress" ? "Busy" : "ReturnFailed" : view ? "Finish" : "Start");
+    if (!open) return true;
+    const { state, valid, budgetActive, available, capacity, blocks, excess } = view;
+    this.movementReset.disabled = busy || settled;
+    for (const radio of this.movementRadios) { radio.checked = radio.value === state.mode; radio.disabled = busy || settled; }
+    const query = selector => this.movementPanel.querySelector(`.co2prism-movement-${selector}`);
+    const data = { used: state.cellsUsed, capacity, actions: state.theoreticalActions, available, cells: state.cellsPerAction, excess };
+    query("summary").textContent = !valid ? localize("Unavailable") : state.mode === "free"
+      ? format("FreeSummary", data) : format(budgetActive ? "ExactSummary" : "InformativeSummary", data);
+    query("speed").textContent = Number.isFinite(state.cellsPerActionRaw) && state.cellsPerActionRaw > 0 ? format("Speed", data) : localize("SpeedUnavailable");
+    const message = query("message");
+    message.textContent = state.mode === "free" ? localize("FreeNotice") : !valid ? localize("Unavailable")
+      : format(!budgetActive ? "InformativeNotice" : excess > 0 ? "Excess" : "WithinCapacity", data);
+    message.classList.toggle("co2prism-movement-excess", excess > 0);
+    query("error").hidden = !error;
+    const errorKey = { "movement-in-progress": "Busy", "invalid-measurement": "InvalidValidation", "context-changed": "ContextChanged", "validation-failed": "ValidationFailed", "closure-pending": "ClosurePending" }[error] ?? "ReturnFailed";
+    query("error").textContent = error ? format(errorKey, { consumed: this.movementResults.get(token)?.consumedCount ?? 0 }) : "";
+    const nodes = [];
+    // Les valeurs extrêmes restent représentées par des groupes étiquetés, sans millions de nœuds.
+    const renderedBlocks = Math.min(blocks, 120);
+    for (let blockIndex = 0; blockIndex < renderedBlocks; blockIndex++) {
+      const lower = movementThreshold(state.cellsPerActionRaw, blockIndex, state.rounding);
+      const upper = movementThreshold(state.cellsPerActionRaw, blockIndex + 1, state.rounding);
+      const size = upper - lower;
+      const stride = Math.max(1, Math.ceil(size / 60));
+      const block = document.createElement("div"); block.className = "co2prism-movement-block";
+      block.dataset.cells = String(size);
+      if (size === 0) block.textContent = format("ZeroBlock", { action: blockIndex + 1 });
+      for (let index = 0; index < size; index += stride) {
+        const count = Math.min(stride, size - index);
+        const used = state.mode === "exact" ? Math.max(0, Math.min(count, state.cellsUsed - lower - index)) : 0;
+        const cell = document.createElement("span"); cell.className = "co2prism-movement-cell";
+        cell.style.setProperty("--co2prism-used", `${100 * used / count}%`);
+        cell.dataset.used = String(used); cell.dataset.count = String(count);
+        if (count > 1) cell.textContent = String(count);
+        block.append(cell);
+      }
+      nodes.push(block);
+    }
+    if (blocks > renderedBlocks) {
+      const remainder = document.createElement("span"); remainder.className = "co2prism-movement-more";
+      remainder.textContent = format("MoreBlocks", { count: blocks - renderedBlocks }); nodes.push(remainder);
+    }
+    query("blocks").replaceChildren(...nodes);
+    return true;
   }
 
   updateSkills() {
@@ -273,7 +520,7 @@ class PrismBar {
     return changed;
   }
 
-  readCombatData(actor = this.actor) {
+  readCombatData(actor = this.actor, scene = globalThis.canvas?.ready ? canvas.scene : null) {
     const movement = actor?.system?.attributes?.movement;
     const unitFactor = unit => {
       const name = typeof unit === "string" ? unit.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
@@ -283,7 +530,7 @@ class PrismBar {
     };
     const factor = unitFactor(movement?.unit);
     const meters = Number.isFinite(movement?.value) && movement.value >= 0 && factor !== null ? movement.value * factor : null;
-    const grid = globalThis.canvas?.ready ? canvas.scene?.grid : null;
+    const grid = scene?.grid;
     const gridFactor = unitFactor(grid?.units);
     const cells = meters !== null && Number.isInteger(grid?.type) && grid.type > 0
       && Number.isFinite(grid.distance) && grid.distance > 0 && gridFactor !== null
@@ -327,11 +574,7 @@ class PrismBar {
       const format = number => {
         if (!Number.isFinite(number) || (key === "cells" && number < 0)) return unavailable;
         if (key !== "cells") return String(Math.round(number * 100) / 100);
-        // Corriger seulement le bruit flottant autour d'un entier théorique.
-        const integer = Math.round(number);
-        if (Math.abs(number - integer) <= Number.EPSILON * 8 * Math.max(1, number)) number = integer;
-        const mode = game.settings?.get(MODULE, "movementRounding");
-        return String((mode === "up" ? Math.ceil : mode === "down" ? Math.floor : Math.round)(number));
+        return String(roundMovementCells(number, game.settings?.get(MODULE, "movementRounding")));
       };
       node.textContent = economyEnabled() && ["meters", "cells"].includes(key) && value !== null
         ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
@@ -682,7 +925,8 @@ class PrismBar {
       this.combatRows[index].scrollLeft = scroll;
     }
     const widths = rows.map(row => Math.max(0, row.length * 209 - 11));
-    const extent = Math.max(731 + (this.budgetWidth ?? 492), ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
+    const extent = Math.max(economyEnabled() ? BUDGET_ORIGIN + (this.budgetWidth ?? 492) : 0,
+      ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
     // Une ligne peut grandir sans changer l'extrémité globale du volet.
     const resized = extent !== this.combatExtent || widths.some((width, index) => width !== this.combatRowWidths?.[index]);
     this.combatExtent = extent;
@@ -1202,20 +1446,30 @@ class PrismBar {
     const previous = this.element.getBoundingClientRect();
     const anchor = { x: previous.left + (this.panelOffset?.x ?? 0), y: previous.top + (this.panelOffset?.y ?? 0) };
     // Le même dessin conserve ses proportions, même dans une petite fenêtre.
-    const width = Math.max(1, Math.min(WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M,
-      window.innerWidth - 8, (window.innerHeight - 8) * 724 / 515));
-    // Borner explicitement la racine à la barre, sans surface plein écran.
     const open = Boolean(this.actor && this.configuration?.panels.competences);
     const combat = Boolean(this.actor && this.configuration?.panels.combat);
-    this.panelOffset = { x: width * (open ? 168 : combat ? 122 : 0) / 724, y: open ? width * 237 / 724 : 0 };
+    let top = open ? 237 : combat && economyEnabled() ? 32 : 0;
+    const left = open ? 168 : combat ? 122 : 0;
+    const movementOpen = this.movementPanel?.hidden === false;
+    const reserve = movementOpen ? Math.min(180, (window.innerHeight - 8) * 0.4) : 0;
+    const width = Math.max(1, Math.min(WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M,
+      (window.innerWidth - 8) * 724 / ((combat ? 732 : 724) + left),
+      (window.innerHeight - 8 - reserve) * 724 / (BASE_BOTTOM + Math.max(top, movementOpen ? 44 : 0))));
+    // Les réserves haute et basse suivent l'ancrage du dessin d'origine.
     const scale = width / 724;
     const right = combat ? Math.min(this.combatExtent ?? 1344,
-      Math.max(732, (window.innerWidth - this.panelOffset.x - 8) / scale)) : 724;
+      Math.max(732, (window.innerWidth - width * left / 724 - 8) / scale)) : 724;
     this.element.style.setProperty("--co2prism-unit", `${scale}px`);
+    if (movementOpen) {
+      this.movementPanel.style.width = `${Math.min(940, Math.max(1, right - 319)) * scale}px`;
+      this.movementPanel.style.maxHeight = `${Math.max(1, window.innerHeight - 8 - (BASE_BOTTOM + 44) * scale)}px`;
+      top = Math.max(top, this.movementPanel.getBoundingClientRect().height / scale + 44);
+    }
+    this.panelOffset = { x: width * left / 724, y: width * top / 724 };
     for (const [index, row] of (this.combatRows ?? []).entries()) {
       row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? 198, Math.max(1, right - COMBAT_ROW_ORIGINS[index])));
     }
-    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 492, Math.max(1, right - 731)));
+    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 492, Math.max(1, right - BUDGET_ORIGIN - 8)));
     this.combatEffects?.style.setProperty("--w", Math.min(824, Math.max(1, right - 731)));
     this.combatLine?.style.setProperty("--w", Math.max(0, right - 480 - 60));
     this.combatArrow?.style.setProperty("--x", right - 93);
@@ -1224,11 +1478,11 @@ class PrismBar {
     this.element.style.setProperty("--co2prism-offset-x", `${this.panelOffset.x}px`);
     this.element.style.setProperty("--co2prism-offset-y", `${this.panelOffset.y}px`);
     this.element.style.width = `${width * right / 724 + this.panelOffset.x}px`;
-    this.element.style.height = `${width * 515 / 724 + this.panelOffset.y}px`;
+    this.element.style.height = `${width * BASE_BOTTOM / 724 + this.panelOffset.y}px`;
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
     const x = preserveAnchor ? anchor.x : valid ? saved.x : 40;
-    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * 515 / 724 - 40;
+    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * BASE_BOTTOM / 724 - 40;
     // Le maintien du portrait ne peut pas laisser le volet déplié hors écran.
     this.place(x - this.panelOffset.x, y - this.panelOffset.y);
     for (const row of this.combatRows ?? []) {

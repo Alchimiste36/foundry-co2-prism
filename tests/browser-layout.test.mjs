@@ -32,14 +32,19 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
       const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
+      Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Movement).map(([key, value]) => [`CO2PRISM.Movement.${key}`, value])))});
+      budgetTranslations['CO2PRISM.Combat.Movement'] = ${JSON.stringify(translations.CO2PRISM.Combat.Movement)};
       const game = globalThis.game = { system: { id: "co2" }, user: {},
         settings: { get: (_, key) => settings[key], set: (_, key, value) => settings[key] = value },
-        i18n: { localize: key => budgetTranslations[key] ?? key } };
+        i18n: { localize: key => budgetTranslations[key] ?? key,
+          format: (key, data) => (budgetTranslations[key] ?? key).replace(/\\{(\\w+)\\}/g, (_, name) => data[name]) } };
       let sequence = 0;
       const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
         applications: { api: { DialogV2: { confirm: async () => false } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
-      ${read("../module/applications/_module.mjs").replace(/import \{ ActionEconomy \} from [^;]+;/, "")}
+      ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
+      ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
+      ${read("../module/applications/_module.mjs").replace(/import \{[^}]+\} from [^;]+;/g, "")}
       (async () => {
         const result = { dimensions: [], errors: [] };
         const check = (condition, message) => { if (!condition) result.errors.push(message); };
@@ -97,7 +102,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const r = root.getBoundingClientRect();
             result.dimensions.push({ size, width: r.width, height: r.height });
             check(Math.abs(r.width - width) < 0.1, size + " largeur");
-            check(Math.abs(r.height - width * 515 / 724) < 0.1, size + " hauteur");
+            check(Math.abs(r.height - width * 569 / 724) < 0.1, size + " hauteur");
             check(Math.abs(r.left - 40) < 0.1 && Math.abs(innerHeight - r.bottom - 40) < 0.1, size + " marges");
             for (const [x, y] of [[r.left + 2, r.top + 2], [r.right - 2, r.top + 2],
               [r.left + r.width / 2, r.top - 10], [r.right + 10, r.top + 10], [r.left - 10, r.bottom - 10]]) {
@@ -154,7 +159,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(!bar.skillsPanel.hidden && actor.flags.co2prism.panels.competences, size + " ouverture non persistée");
             const r = root.getBoundingClientRect();
             skillsDimensions.push({ size, width: r.width, height: r.height });
-            check(Math.abs(r.width - width * 892 / 724) < 0.1 && Math.abs(r.height - width * 752 / 724) < 0.1,
+            check(Math.abs(r.width - width * 892 / 724) < 0.1 && Math.abs(r.height - width * 806 / 724) < 0.1,
               size + " dimensions volet");
             check(document.elementFromPoint(r.x + 1, r.y + 1)?.id === "board", size + " coin transparent volet");
             check(document.elementFromPoint(r.x + 1, r.bottom - 10)?.id === "board", size + " sous le volet");
@@ -192,7 +197,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const r = root.getBoundingClientRect(), after = bar.portrait.getBoundingClientRect();
             combatDimensions.push({ size, width: r.width, height: r.height });
             check(!bar.combatPanel.hidden && actor.flags.co2prism.activePreset === 1, size + " Combat fermé");
-            check(Math.abs(r.width - width * 1466 / 724) < 0.1, size + " étendue Combat");
+            check(Math.abs(r.width - width * 1381 / 724) < 0.1, size + " étendue Combat");
             check(Math.abs(before.x - after.x) < 0.1 && Math.abs(before.y - after.y) < 0.1, size + " base déplacée par Combat");
             check(bar.combatValues.meters.textContent === "20 / 20" && bar.combatValues.cells.textContent === "10 / 10"
               && bar.combatValues.def.textContent === "15" && bar.combatValues.dr.textContent === "4", "Valeurs Combat");
@@ -222,7 +227,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               const b = node.getBoundingClientRect();
               check(node.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)), size + " collision de volets " + node.className + " à " + b.x + "," + b.y);
             }
-            check(document.elementFromPoint(r.x + 2, r.y + 2)?.id === "board", size + " coin transparent Combat");
+            const combined = root.getBoundingClientRect();
+            check(document.elementFromPoint(combined.x + 2, combined.y + 2)?.id === "board", size + " coin transparent Combat");
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
             root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
           }
@@ -850,6 +856,190 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1, size + ' rounded cells bounds');
             }
           }
+          const originalName = actor.name, originalEffects = actor.appliedEffects;
+          actor.name = 'Alexandrine des Marches lointaines, gardienne du dernier passage';
+          actor.appliedEffects = Array.from({ length: 80 }, (_, index) => ({ name: 'Effet ' + index,
+            img: 'file:///F:/FVTT_V14/public/icons/svg/shield.svg', statuses: new Set() }));
+          const movementButton = root.querySelector('.co2prism-movement-toggle');
+          const movementPanel = root.querySelector('#co2prism-movement-panel');
+          const intersects = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            for (const enabled of [true, false]) {
+              settings.size = size; settings.economyMode = enabled ? 'always' : 'off';
+              actor.flags.co2prism.panels.competences = false;
+              bar.refreshActor();
+              for (const position of [{ x: 0, y: 0 }, { x: innerWidth - 5, y: innerHeight - 5 }]) {
+                bar.position = position; bar.layout();
+                const bounds = root.getBoundingClientRect(), name = bar.name.getBoundingClientRect();
+                const portrait = bar.portrait.getBoundingClientRect(), star = root.querySelector('[data-co2prism-action="sheet"]').getBoundingClientRect();
+                const toggle = movementButton.getBoundingClientRect(), preset = bar.presetButtons[0].getBoundingClientRect();
+                const first = bar.combatRows[0].getBoundingClientRect(), second = bar.combatRows[1].getBoundingClientRect();
+                const effects = bar.combatEffects.getBoundingClientRect();
+                check(bounds.left >= -0.1 && bounds.top >= -0.1 && bounds.right <= innerWidth + 0.1 && bounds.bottom <= innerHeight + 0.1, size + ' 15A screen bounds');
+                check(name.top > star.bottom && name.bottom <= bounds.bottom + 0.1 && Math.abs(name.left + name.width / 2 - portrait.left - portrait.width / 2) < 1, size + ' 15A name axis');
+                check(bar.name.title === actor.name && getComputedStyle(bar.name).textOverflow === 'ellipsis', size + ' 15A long name');
+                check(toggle.bottom < preset.top && movementButton.disabled && toggle.width > 0, size + ' 15A movement command');
+                check(movementPanel.hidden && movementPanel.getClientRects().length === 0, size + ' 15A closed movement panel');
+                check(effects.top > second.bottom && !intersects(effects, name) && bar.combatEffects.children.length === 80, size + ' 15A effects position');
+                bar.combatEffects.scrollLeft = bar.combatEffects.scrollWidth;
+                const last = bar.combatEffects.lastElementChild.getBoundingClientRect();
+                check(last.right <= effects.right + 1 && last.right > effects.left, size + ' 15A effects accessible');
+                const image = bar.combatEffects.lastElementChild.querySelector('img').getBoundingClientRect();
+                check(image.top >= effects.top - 0.1 && image.bottom <= effects.bottom + 0.1, size + ' 15A effect image clipped ' + JSON.stringify({ top: image.top, bottom: image.bottom, areaTop: effects.top, areaBottom: effects.bottom }));
+                if (enabled) {
+                  const budget = bar.budgetScroll.getBoundingClientRect();
+                  check(budget.bottom < first.top && budget.top >= bounds.top - 0.1 && !intersects(budget, toggle), size + ' 15A budget position');
+                } else check(bar.budgetScroll.getClientRects().length === 0 && bar.panelOffset.y === 0, size + ' 15A hidden budget space');
+                for (const row of bar.combatRows) check(!intersects(row.getBoundingClientRect(), toggle), size + ' 15A row collision');
+                const flags = JSON.stringify(actor.flags);
+                movementButton.click();
+                check(JSON.stringify(actor.flags) === flags, size + ' 15A inactive movement changed flags');
+                const clearX = bounds.left + 2, clearY = bounds.bottom - 2;
+                check(document.elementFromPoint(clearX, clearY)?.id === 'board', size + ' 15A transparent lower corner');
+              }
+              actor.flags.co2prism.panels.competences = true; bar.refreshActor();
+              const b = root.getBoundingClientRect();
+              check(b.top >= -0.1 && b.bottom <= innerHeight + 0.1, size + ' 15A combined bounds');
+            }
+          }
+          actor.name = originalName; actor.appliedEffects = originalEffects;
+          actor.flags.co2prism.panels.competences = false; settings.economyMode = 'always'; bar.refreshActor();
+          // Raccorder un vrai double de TokenDocument pour les interactions 15C.
+          const selectedToken = canvas.tokens.controlled[0], tracked = selectedToken.document;
+          const movementScene = canvas.scene;
+          movementScene.id = 'movement-scene'; movementScene.tokens = new Map();
+          Object.assign(tracked, { id: 'movement-token', uuid: 'Scene.s.Token.t', parent: movementScene,
+            actor, x: 0, y: 0, elevation: 0, width: 1, height: 1, depth: 0, shape: 1, level: 'level', movementHistory: [],
+            testUserPermission: () => true, canUserModify: () => true });
+          movementScene.tokens.set(tracked.id, tracked);
+          movementScene.grid = { type: 1, distance: 2, units: 'm' };
+          await economy.reset(); await economy.grant('m', 3); hooks.get('updateActor')(actor, { flags: {} });
+          let moveSerial = 0;
+          const trackedMove = (spaces, target = tracked) => {
+            const origin = { x: target.x, y: target.y, elevation: target.elevation };
+            target.x += spaces * 100;
+            hooks.get('moveToken')(target, { id: 'tracked-' + (++moveSerial), origin, method: 'keyboard',
+              passed: { waypoints: [{ x: target.x, y: target.y, elevation: target.elevation }], spaces, distance: spaces * 2, cost: spaces } });
+          };
+          let failReturn = false;
+          tracked.update = async data => {
+            if (failReturn) throw Error('Return rejected');
+            Object.assign(tracked, Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'action')));
+            trackedMove(0); return tracked;
+          };
+          bar.refreshActor();
+          const previewFlag = JSON.stringify(actor.flags.co2prism.actionEconomy), notificationCount = warnings.length;
+          check(!movementButton.disabled, '15C eligible token');
+          check(movementButton.textContent === 'Mouvement', 'Archive6 inactive movement label');
+          movementButton.click();
+          check(!movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'true', '15C session opened');
+          const radios = [...movementPanel.querySelectorAll('input[type="radio"]')];
+          check(radios.length === 2 && radios[1].checked, 'Archive6 two radios and native exact default');
+          check(movementButton.textContent === 'Valider', 'Archive6 active validation label');
+          radios[0].click();
+          trackedMove(7);
+          check(movementPanel.querySelectorAll('[data-used="1"]').length === 0, '15C free keeps blue squares');
+          radios[1].click();
+          check(radios[1].checked && !radios[0].checked, '15C radio exclusivity');
+          const blocks = () => [...movementPanel.querySelectorAll('.co2prism-movement-block')];
+          const grey = () => [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, node) => sum + Number(node.dataset.used), 0);
+          check(blocks().length === 5 && grey() === 7 && blocks().every(block => block.children.length === 5), '15C five blocks and seven grey cells');
+          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('2 / 5'), '15C theoretical actions');
+          check(blocks().slice(0, 3).every(node => Math.abs(node.getBoundingClientRect().top - blocks()[0].getBoundingClientRect().top) < 1)
+            && blocks()[3].getBoundingClientRect().top > blocks()[0].getBoundingClientRect().top, '15C maximum three blocks per row');
+          trackedMove(22);
+          check(grey() === 25 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 25, '15C excess adds no cells');
+          check(movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('4 cases'), '15C immediate red excess');
+          radios[0].click(); check(!movementPanel.querySelector('.co2prism-movement-excess') && grey() === 0, '15C free removes excess');
+          radios[1].click();
+          await economy.grant('am'); hooks.get('updateActor')(actor, { flags: {} });
+          check(blocks().length === 6 && !movementPanel.querySelector('.co2prism-movement-excess'), '15C bonus updates capacity');
+          await economy.spend('m'); hooks.get('updateActor')(actor, { flags: {} });
+          check(blocks().length === 5 && movementPanel.querySelector('.co2prism-movement-excess'), '15C external spend updates capacity');
+          settings.economyMode = 'off'; bar.refreshActor();
+          check(blocks().length === 1 && !movementPanel.querySelector('.co2prism-movement-excess'), '15C inactive budget single block');
+          settings.economyMode = 'always'; bar.refreshActor();
+          const beforeReturn = JSON.stringify(actor.flags.co2prism.actionEconomy);
+          failReturn = true; await bar.resetMovement();
+          check(!movementPanel.querySelector('.co2prism-movement-error').hidden && grey() === 25, '15C return failure preserves path');
+          failReturn = false; movementPanel.querySelector('.co2prism-movement-reset').click();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(tracked.x === 0 && grey() === 0 && !movementPanel.hidden && radios[1].checked, '15C successful return keeps session and mode');
+          check(movementButton.textContent === 'Valider', 'Archive6 label after reset');
+          check(JSON.stringify(actor.flags.co2prism.actionEconomy) === beforeReturn, '15C return did not mutate budget');
+          const secondDocument = { ...tracked, id: 'second-token', uuid: 'Scene.s.Token.second', x: 500 };
+          movementScene.tokens.set(secondDocument.id, secondDocument);
+          canvas.tokens.controlled = [{ actor, document: secondDocument }]; hooks.get('controlToken')();
+          check(movementPanel.hidden, '15C selection hides previous session');
+          check(movementButton.textContent === 'Mouvement', 'Archive6 label after selection');
+          movementButton.click(); trackedMove(1, secondDocument);
+          canvas.tokens.controlled = [selectedToken]; hooks.get('controlToken')();
+          check(!movementPanel.hidden && radios[1].checked && grey() === 0, '15C return selection restores own session');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.position = { x: innerWidth - 1, y: 0 }; bar.layout();
+            const bounds = root.getBoundingClientRect(), panel = movementPanel.getBoundingClientRect();
+            const base = movementButton.getBoundingClientRect();
+            check(bounds.right <= innerWidth + 1 && bounds.top >= -0.1 && bounds.bottom <= innerHeight + 1
+              && panel.top >= -0.1 && panel.bottom < base.top, size + ' 15C panel bounds');
+            const blankX = bounds.left + 2, blankY = panel.top + 2;
+            check(document.elementFromPoint(blankX, blankY)?.id === 'board', size + ' 15C canvas remains accessible');
+            for (const radio of radios) {
+              const rect = radio.getBoundingClientRect();
+              check(radio === document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2), size + ' 15C radios clickable');
+            }
+          }
+          movementScene.grid.type = 0; hooks.get('updateScene')(movementScene, { grid: {} });
+          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('indisponible') && blocks().length === 0, '15C gridless explicit');
+          movementScene.grid.type = 1; hooks.get('updateScene')(movementScene, { grid: {} });
+          const realHeight = innerHeight;
+          Object.defineProperty(window, 'innerHeight', { value: 500, configurable: true });
+          bar.layout();
+          const smallPanel = movementPanel.getBoundingClientRect(), smallBounds = root.getBoundingClientRect();
+          check(smallPanel.height >= 150 && smallPanel.top >= -0.1 && smallBounds.bottom <= 500.1, '15C small viewport keeps usable panel');
+          Object.defineProperty(window, 'innerHeight', { value: realHeight, configurable: true }); bar.layout();
+          trackedMove(11);
+          const beforeFinish = JSON.stringify(actor.flags.co2prism.actionEconomy), destination = tracked.x;
+          movementButton.click();
+          check(movementButton.disabled && bar.movementReset.disabled, '15D controls locked during validation');
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'false' && tracked.x === destination, '15D finish retains destination');
+          check(movementButton.textContent === 'Mouvement', 'Archive6 label after finish');
+          check(JSON.stringify(actor.flags.co2prism.actionEconomy) !== beforeFinish && economy.getSnapshot().movementsRemaining === 2
+            && warnings.length === notificationCount, '15D exact validation spends three M without excess warning');
+          movement('20 / 60', '10 / 30');
+          // Comparer les blocs et le portrait sur des vitesses non entières.
+          actor.system.attributes.movement = { value: 7.2, unit: 'm' };
+          settings.movementRounding = 'nearest'; await economy.reset(); bar.refreshActor();
+          movementButton.click(); trackedMove(7);
+          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '4,3', 'Archive6 variable blocks 4 plus 3');
+          check(grey() === 7 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 7, 'Archive6 seven grey cumulative cells');
+          movement('14.4 / 14.4', '7 / 7');
+          await bar.toggleMovement();
+          check(economy.getSnapshot().movementsRemaining === 0 && bar.movementResults.get(tracked).consumedCount === 2, 'Archive6 seven cells cost two M');
+          actor.system.attributes.movement = { value: 10, unit: 'm' }; movementScene.grid.distance = 3;
+          for (const mode of ['nearest', 'up', 'down']) {
+            settings.movementRounding = mode; await economy.reset(); await economy.grant('m', 3); bar.refreshActor();
+            movementButton.click();
+            const expected = (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(50 / 3);
+            const total = [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, cell) => sum + Number(cell.dataset.count), 0);
+            check(total === expected && bar.combatValues.cells.textContent === expected + ' / ' + expected, 'Archive6 cumulative portrait and blocks ' + mode);
+            trackedMove(7);
+            check(grey() === 7, 'Archive6 grey cells across variable blocks ' + mode);
+            radios[0].click(); await bar.toggleMovement();
+          }
+          actor.system.attributes.movement = { value: 0.4, unit: 'm' }; movementScene.grid.distance = 2;
+          settings.movementRounding = 'down'; await economy.reset(); bar.refreshActor(); movementButton.click(); trackedMove(1);
+          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0,0'
+            && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 0, 'Archive6 zero-sized blocks have no fake squares');
+          await economy.grant('m', 3); hooks.get('updateActor')(actor, { flags: {} });
+          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0,0,0,0,1' && grey() === 1, 'Archive6 bonus reveals first attainable cell');
+          movement('2 / 2', '1 / 1');
+          await bar.toggleMovement();
+          check(economy.getSnapshot().movementsRemaining === 0 && bar.movementResults.get(tracked).consumedCount === 5, 'Archive6 five actions for first cell');
+          tracked.canUserModify = () => false; bar.refreshActor(); check(movementButton.disabled, '15C permission disables command');
+          tracked.canUserModify = () => true;
+          hooks.get('deleteToken')(secondDocument);
+          check(!bar.movementTracker.getSnapshot(secondDocument).success, '15C deleted token cleanup');
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";

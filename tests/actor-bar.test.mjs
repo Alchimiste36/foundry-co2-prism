@@ -13,7 +13,9 @@ function setup() {
     canvas: { ready: true, tokens: { controlled: [] } }
   });
   vm.runInContext('globalThis.ActionEconomy = (() => {' + readFileSync(new URL('../module/combat/action-economy.mjs', import.meta.url), 'utf8').replace('export class ActionEconomy', 'class ActionEconomy') + '; return ActionEconomy; })()', context);
-  vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{ ActionEconomy \} from [^;]+;/, "")
+  vm.runInContext(readFileSync(new URL("../module/movement/movement-tracker.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
+  vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
+  vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
   const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
@@ -52,6 +54,238 @@ test("sélection unique, changement d'acteur et états neutres", () => {
   assert.equal(bar.portrait.src, "icons/svg/mystery-man.svg");
   context.canvas = undefined;
   assert.doesNotThrow(() => bar.refreshActor());
+});
+
+test("15B raccordement : sélection conservée, hooks natifs uniques et nettoyage ciblé", () => {
+  const { bar, context, actor, token, hooks } = setup();
+  const a = actor("movement"), t = token(a);
+  const scene = { id: "scene", tokens: new Map(), grid: { type: 1, distance: 2, units: "m" } };
+  a.system.attributes.movement = { value: 10, unit: "m" };
+  Object.assign(t.document, { id: "token", parent: scene, actor: a, x: 0, y: 0, elevation: 0,
+    testUserPermission: () => true, movementHistory: [] });
+  scene.tokens.set(t.document.id, t.document);
+  context.canvas.scene = scene; context.canvas.tokens.controlled = [t];
+  bar.refreshActor();
+  const count = hooks.size;
+  assert.equal(bar.movementTracker.start(t.document).success, true);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).state.cellsPerAction, 5);
+  context.canvas.tokens.controlled = []; hooks.get("controlToken")();
+  assert.equal(bar.movementTracker.getSnapshot(t.document).state.active, true);
+  hooks.get("recordToken")(t.document);
+  hooks.get("moveToken")(t.document, { id: "native", origin: { x: 0, y: 0 },
+    passed: { waypoints: [{ x: 100, y: 0 }], distance: 2, spaces: 1, cost: 4 } });
+  assert.equal(bar.movementTracker.getSnapshot(t.document).state.spaces, 1);
+  assert.equal(hooks.size, count);
+  hooks.get("deleteToken")(t.document);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+  bar.movementTracker.start(t.document); hooks.get("canvasTearDown")();
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+});
+
+test("15C prévisions : tranches 0/1/5/6/10/11, droits et clôture informative sans écriture", async () => {
+  const { bar, context, actor, token } = setup();
+  const a = actor("panel"), t = token(a);
+  a.system.attributes.movement = { value: 10, unit: "m" };
+  const scene = { id: "scene", tokens: new Map(), grid: { type: 1, distance: 2, units: "m" } };
+  Object.assign(t.document, { id: "token", parent: scene, actor: a, x: 0, y: 0, elevation: 0,
+    testUserPermission: () => true, canUserModify: () => true, movementHistory: [] });
+  scene.tokens.set(t.document.id, t.document);
+  context.canvas.scene = scene; context.canvas.tokens.controlled = [t];
+  let mode = "always";
+  context.game.settings = { get: (_, key) => key === "economyMode" ? mode : "nearest" };
+  a.getFlag = () => undefined; a.update = a.setFlag = () => assert.fail("Aucune écriture d'acteur");
+  for (const method of ["spend", "grant", "reset"]) {
+    context.ActionEconomy.prototype[method] = () => assert.fail(`Le panneau ne doit jamais appeler ${method}`);
+  }
+  bar.refreshActor(); bar.configuration.panels.combat = true;
+  // Le test ne persiste pas l'ouverture de Combat pour isoler les commandes du panneau.
+  const read = bar.readConfiguration.bind(bar);
+  bar.readConfiguration = actor => { const config = read(actor); config.panels.combat = true; return config; };
+  for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
+    assert.equal(bar.toggleMovement(), true);
+    assert.equal(bar.changeMovementMode("exact"), true);
+    bar.movementTracker.update(t.document, { id: String(used), origin: { x: 0, y: 0 },
+      passed: { waypoints: [{ x: 100, y: 0 }], spaces: used, distance: used * 2, cost: used } });
+    const view = bar.movementView(t.document);
+    assert.equal(view.state.theoreticalActions, required);
+    assert.equal(view.available, 2); assert.equal(view.blocks, 2);
+    assert.equal(view.excess, Math.max(0, used - 10));
+    mode = "off";
+    assert.equal(bar.movementView(t.document).blocks, 1);
+    assert.equal(bar.movementView(t.document).excess, 0);
+    mode = "always";
+    mode = "off";
+    assert.equal(await bar.toggleMovement(), true);
+    mode = "always";
+    assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+  }
+  t.document.canUserModify = () => false;
+  assert.equal(bar.toggleMovement(), false);
+});
+
+function setupMovementValidation() {
+  const env = setupConfiguration();
+  const { bar, context, configuredActor, token, hooks } = env;
+  const scene = { id: "validation-scene", tokens: new Map(), grid: { type: 1, distance: 2, units: "m" } };
+  context.canvas.scene = scene; context.game.scenes = new Map([[scene.id, scene]]);
+  let mode = "always", serial = 0;
+  context.game.settings = { get: (_, key) => key === "economyMode" ? mode : "nearest" };
+  const warnings = [];
+  bar.movementNotifications = { broadcast: (token, excess) => { warnings.push({ token, excess }); return true; } };
+  const a = configuredActor("movement-budget", { co2prism: { panels: { combat: true } } });
+  a.system.attributes.movement = { value: 10, unit: "m" };
+  const create = (actor = a) => {
+    const t = token(actor);
+    Object.assign(t.document, { id: String(++serial), parent: scene, actor, x: 0, y: 0, elevation: 0,
+      testUserPermission: () => true, canUserModify: () => true, movementHistory: [] });
+    scene.tokens.set(t.document.id, t.document); return t;
+  };
+  const t = create();
+  const select = t => { context.canvas.tokens.controlled = t ? [t] : []; hooks.get("controlToken")(); };
+  select(t);
+  const start = (used, selected = t, movementMode = "exact") => {
+    select(selected); assert.equal(bar.toggleMovement(), true); bar.changeMovementMode(movementMode);
+    hooks.get("moveToken")(selected.document, { id: "move-" + (++serial), origin: { x: 0, y: 0 },
+      passed: { waypoints: [{ x: 100, y: 0 }], distance: used * 2, spaces: used, cost: used } });
+  };
+  return { ...env, a, t, scene, create, select, start, warnings,
+    economy: new context.ActionEconomy(a), setMode: value => { mode = value; } };
+}
+
+test("15D validation : Libre/inactif gratuits, Exact 0/1/5/6/10/11 cases", async () => {
+  for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
+    const { bar, t, start, economy, warnings } = setupMovementValidation();
+    start(used);
+    assert.equal(await bar.toggleMovement(), true);
+    assert.equal(economy.getSnapshot().movementsRemaining, Math.max(0, 2 - required));
+    assert.equal(bar.movementResults.get(t.document).consumedCount, Math.min(2, required));
+    assert.equal(bar.movementResults.get(t.document).missingCount, Math.max(0, required - 2));
+    assert.equal(warnings.length, used > 10 ? 1 : 0);
+    assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+  }
+  for (const [mode, active, movementMode] of [["always", true, "free"], ["off", true, "exact"], ["combat", false, "exact"]]) {
+    const { bar, context, start, economy, warnings, setMode } = setupMovementValidation();
+    setMode(mode); context.game.combats.active.started = active; start(99, undefined, movementMode);
+    assert.equal(await bar.toggleMovement(), true);
+    assert.equal(economy.getSnapshot().movementsRemaining, 2); assert.equal(warnings.length, 0);
+  }
+});
+
+test("15D bonus et dépenses externes : réserve courante et un seul avertissement final", async () => {
+  const { bar, t, start, economy, warnings } = setupMovementValidation();
+  start(16); assert.equal(warnings.length, 0);
+  await economy.grant("m"); await economy.grant("am"); await economy.spend("a");
+  assert.equal(await bar.toggleMovement(), true);
+  const result = bar.movementResults.get(t.document);
+  assert.equal(result.availableBefore, 3); assert.equal(result.consumedCount, 3); assert.equal(result.missingCount, 1);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
+  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+});
+
+test("15D erreur atomique et mesure invalide : session ouverte, réessai sans double débit", async () => {
+  const { bar, a, t, start, economy, warnings, scene } = setupMovementValidation();
+  start(6); scene.grid.type = 0;
+  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(bar.movementErrors.get(t.document), "invalid-measurement");
+  scene.grid.type = 1;
+  const save = a.setFlag; a.setFlag = async () => { throw Error("offline"); };
+  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  assert.equal(bar.movementResults.get(t.document).consumedCount, 0);
+  a.setFlag = save;
+  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(warnings.length, 0);
+});
+
+test("15D sélection pendant sauvegarde et double clic : acteur initial uniquement", async () => {
+  const { bar, a, t, start, economy, create, select, configuredActor } = setupMovementValidation();
+  start(6);
+  const save = a.setFlag; let release;
+  a.setFlag = (...args) => new Promise(resolve => { release = async () => resolve(await save(...args)); });
+  const pending = bar.toggleMovement(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(bar.toggleMovement(), false);
+  assert.equal(await bar.resetMovement(), false);
+  const b = configuredActor("other", { co2prism: { panels: { combat: true } } });
+  select(create(b)); await release();
+  assert.equal(await pending, true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(new economy.constructor(b).getSnapshot().movementsRemaining, 2);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+});
+
+test("15D contexte invalidé dans la file : reset, suppression et arrêt de combat", async () => {
+  for (const mutation of [env => env.economy.reset(), env => env.scene.tokens.delete(env.t.document.id),
+    env => env.hooks.get("deleteCombat")({}), env => { env.t.document.canUserModify = () => false; },
+    env => { env.bar.movementTracker.cancel(env.t.document); env.bar.movementTracker.start(env.t.document); }]) {
+    const env = setupMovementValidation(); const { bar, start, economy } = env;
+    start(6); const pending = bar.toggleMovement(); mutation(env);
+    assert.equal(await pending, false); assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  }
+});
+
+test("15D clôture différée après succès : résultat conservé et aucun redébit", async () => {
+  const { bar, t, start, economy } = setupMovementValidation();
+  start(6);
+  const finish = bar.movementTracker.finish.bind(bar.movementTracker);
+  bar.movementTracker.finish = () => ({ success: false, reason: "movement-in-progress" });
+  assert.equal(await bar.toggleMovement(), false); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(bar.movementErrors.get(t.document), "closure-pending");
+  bar.movementTracker.finish = finish;
+  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+});
+
+test("15D deux tokens d'un acteur : réserve partagée à chaque validation", async () => {
+  const { bar, start, economy, create, warnings } = setupMovementValidation();
+  start(5); assert.equal(await bar.toggleMovement(), true);
+  start(6, create()); assert.equal(await bar.toggleMovement(), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
+});
+
+test("15D validations simultanées de deux tokens : file acteur, réserve actualisée", async () => {
+  const { bar, t, start, economy, create, warnings } = setupMovementValidation();
+  start(5); const first = bar.toggleMovement();
+  const secondToken = create(); start(6, secondToken); const second = bar.toggleMovement();
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
+  assert.equal(bar.movementResults.get(secondToken.document).consumedCount, 1);
+  assert.equal(economy.getSnapshot().movementsRemaining, 0); assert.equal(warnings.length, 1);
+});
+
+test("Archive6 capacité et validation cumulées : seuils 4/7, coût et notification exacts", async () => {
+  for (const [used, required, excess] of [[4, 1, 0], [5, 2, 0], [7, 2, 0], [8, 3, 1]]) {
+    const { bar, a, t, start, economy, warnings } = setupMovementValidation();
+    a.system.attributes.movement.value = 7.2;
+    start(used);
+    const view = bar.movementView(t.document);
+    assert.equal(view.capacity, 7); assert.equal(view.state.theoreticalActions, required); assert.equal(view.excess, excess);
+    assert.equal(await bar.toggleMovement(), true);
+    assert.equal(bar.movementResults.get(t.document).consumedCount, Math.min(2, required));
+    assert.equal(warnings.length, excess ? 1 : 0);
+    if (excess) assert.equal(warnings[0].excess, 1);
+    assert.equal(economy.getSnapshot().movementsRemaining, Math.max(0, 2 - required));
+  }
+});
+
+test("Archive6 garde asynchrone : vitesse brute, grille et arrondi modifiés", async () => {
+  for (const mutate of [env => { env.a.system.attributes.movement.value = 7.4; },
+    env => { env.scene.grid.size = 200; }, env => { env.context.game.settings.get = (_, key) => key === "economyMode" ? "always" : "up"; }]) {
+    const env = setupMovementValidation(); const { bar, a, start, economy } = env;
+    a.system.attributes.movement.value = 7.2; start(7);
+    const pending = bar.toggleMovement(); mutate(env);
+    assert.equal(await pending, false); assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  }
+});
+
+test("Archive6 seuil nul : budget inactif informatif et coût positif réalisable", async () => {
+  const { bar, a, t, start, economy, setMode } = setupMovementValidation();
+  a.system.attributes.movement.value = 0.2; // 0,1 case brute/M, nearest : première case à 5 M.
+  start(1);
+  assert.equal(bar.movementView(t.document).state.theoreticalActions, 5);
+  assert.equal(bar.movementView(t.document).capacity, 0);
+  setMode("off");
+  assert.equal(bar.movementView(t.document).blocks, 1); assert.equal(bar.movementView(t.document).excess, 0);
+  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 2);
 });
 
 test("bornage du remplissage et maxima non exploitables", () => {

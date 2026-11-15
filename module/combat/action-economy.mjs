@@ -2,6 +2,7 @@ const MODULE = "co2prism";
 const FLAG = "actionEconomy";
 const TYPES = ["l", "a", "am", "m"];
 const queues = new WeakMap();
+const resetVersions = new WeakMap();
 const emptyBonus = () => Object.fromEntries(TYPES.map(type => [type, 0]));
 const initialState = () => ({ version: 1, branch: "undecided", normal: { m: true, am: true },
   bonus: emptyBonus(), granted: emptyBonus() });
@@ -47,6 +48,19 @@ function snapshot(state) {
   };
 }
 
+function spendFromState(state, type) {
+  if (["f", "none"].includes(type)) return { success: true, changed: false };
+  if (!TYPES.includes(type)) return { success: false, reason: "invalid-type" };
+  const selected = candidates(state, type)[0];
+  if (!selected) return { success: false, reason: "unavailable" };
+  const [pool, slot] = selected;
+  if (pool === "bonus") state.bonus[slot]--;
+  else if (slot === "l") {
+    state.branch = "limited"; state.normal = { m: false, am: false };
+  } else { state.branch = "split"; state.normal[slot] = false; }
+  return { success: true, changed: true, consumed: { pool, slot } };
+}
+
 /** Budget de l'acteur effectif du token, indépendant des presets et du Combat. */
 export class ActionEconomy {
   constructor(actor, { getUser = () => globalThis.game?.user } = {}) {
@@ -59,20 +73,21 @@ export class ActionEconomy {
   }
 
   spend(type) {
+    return this.#mutate(state => spendFromState(state, type));
+  }
+
+  getResetVersion() { return resetVersions.get(this.actor) ?? 0; }
+
+  /** Même consommation que spend("m"), groupée dans une seule écriture pour éviter les débits partiels. */
+  spendMovements(count, { validate = () => true } = {}) {
     return this.#mutate(state => {
-      if (["f", "none"].includes(type)) return { success: true, changed: false };
-      if (!TYPES.includes(type)) return { success: false, reason: "invalid-type" };
-      const selected = candidates(state, type)[0];
-      if (!selected) return { success: false, reason: "unavailable" };
-      const [pool, slot] = selected;
-      if (pool === "bonus") state.bonus[slot]--;
-      else if (slot === "l") {
-        state.branch = "limited"; state.normal = { m: false, am: false };
-      } else {
-        state.branch = "split"; state.normal[slot] = false;
-      }
-      return { success: true, changed: true, consumed: { pool, slot } };
-    });
+      if (!Number.isSafeInteger(count) || count < 0) return { success: false, reason: "invalid-count" };
+      const available = snapshot(state).movementsRemaining;
+      const consumedSlots = [];
+      for (let index = 0; index < Math.min(count, available); index++) consumedSlots.push(spendFromState(state, "m").consumed);
+      return { success: true, changed: consumedSlots.length > 0, requiredCount: count,
+        availableBefore: available, consumedCount: consumedSlots.length, missingCount: Math.max(0, count - consumedSlots.length), consumedSlots };
+    }, validate);
   }
 
   grant(type, count = 1) {
@@ -89,6 +104,7 @@ export class ActionEconomy {
   }
 
   reset() {
+    if (this.actor && typeof this.actor === "object") resetVersions.set(this.actor, this.getResetVersion() + 1);
     return this.#mutate(state => {
       const initial = initialState();
       const changed = JSON.stringify(state) !== JSON.stringify(initial);
@@ -97,7 +113,7 @@ export class ActionEconomy {
     });
   }
 
-  #mutate(operation) {
+  #mutate(operation, validate = () => true) {
     const actor = this.actor;
     if (!actor || typeof actor !== "object") return Promise.resolve({ success: false, changed: false,
       consumed: null, reason: "invalid-actor", state: this.getSnapshot() });
@@ -109,14 +125,15 @@ export class ActionEconomy {
       const user = this.getUser();
       if (!user || typeof actor.setFlag !== "function" || typeof actor.getFlag !== "function"
         || !(user.isGM || actor.testUserPermission?.(user, "OWNER"))) return result(false, "forbidden");
+      if (!validate()) return result(false, "context-changed");
       const next = structuredClone(before);
       const outcome = operation(next);
-      if (!outcome.success || !outcome.changed) return result(outcome.success, outcome.reason ?? null);
+      if (!outcome.success || !outcome.changed) return result(outcome.success, outcome.reason ?? null, outcome);
       try {
         await actor.setFlag(MODULE, FLAG, next);
         return result(true, null, outcome, next);
       } catch {
-        return result(false, "persistence-failed");
+        return result(false, "persistence-failed", outcome.requiredCount === undefined ? {} : { consumedCount: 0, requiredCount: outcome.requiredCount });
       }
     });
     // Une erreur inattendue ne doit pas bloquer les opérations suivantes.

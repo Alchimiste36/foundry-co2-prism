@@ -3,6 +3,7 @@
   "title": "CO2 Prism",
   "description": "Module pour Chroniques Oubliées 2, initialement pour Fantasy. Socle minimal sans fonctionnalité de jeu.",
   "version": "0.1.0",
+  "socket": true,
   "compatibility": {
     "minimum": "14",
     "maximum": "14"

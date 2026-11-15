@@ -32,6 +32,45 @@ test("état initial alternatif, lectures indépendantes et aucune écriture", ()
   assert.equal(writes.length, 0);
 });
 
+test("15D règlement atomique : priorités identiques à spend(m), une seule écriture", async () => {
+  const { engine, writes } = setup();
+  await engine.grant("m"); await engine.grant("am");
+  const before = writes.length;
+  const result = await engine.spendMovements(7);
+  assert.equal(result.success, true); assert.equal(result.consumedCount, 4); assert.equal(result.missingCount, 3);
+  assert.deepEqual(result.consumedSlots, [{ pool: "bonus", slot: "m" }, { pool: "normal", slot: "m" },
+    { pool: "bonus", slot: "am" }, { pool: "normal", slot: "am" }]);
+  assert.equal(writes.length, before + 1); assert.equal(engine.getSnapshot().movementsRemaining, 0);
+  const empty = await engine.spendMovements(2);
+  assert.equal(empty.consumedCount, 0); assert.equal(empty.missingCount, 2); assert.equal(writes.length, before + 1);
+});
+
+test("15D erreur atomique : aucun débit partiel, réessai et garde dans la file", async () => {
+  const { engine, actor, writes } = setup();
+  const save = actor.setFlag;
+  actor.setFlag = async () => { throw Error("save failed"); };
+  const result = await engine.spendMovements(2);
+  assert.equal(result.reason, "persistence-failed"); assert.equal(result.consumedCount, 0);
+  assert.equal(engine.getSnapshot().movementsRemaining, 2);
+  actor.setFlag = save;
+  const version = engine.getResetVersion();
+  const queued = engine.spendMovements(2, { validate: () => engine.getResetVersion() === version });
+  const reset = engine.reset();
+  assert.equal((await queued).reason, "context-changed"); await reset;
+  assert.equal(writes.length, 0);
+  assert.equal((await engine.spendMovements(2)).consumedCount, 2);
+  assert.equal(writes.length, 1);
+});
+
+test("15D règlement sérialisé : deux tokens/instances partagent la réserve courante", async () => {
+  const { engine, actor, user } = setup();
+  const other = new ActionEconomy(actor, { getUser: () => user });
+  const results = await Promise.all([engine.spendMovements(1), other.spendMovements(2)]);
+  assert.deepEqual(results.map(result => result.consumedCount), [1, 1]);
+  assert.equal(results[1].availableBefore, 1); assert.equal(results[1].missingCount, 1);
+  assert.equal(engine.getSnapshot().movementsRemaining, 0);
+});
+
 test("A normal choisit split, consomme AM et laisse M", async () => {
   const { engine } = setup();
   const result = await engine.spend("a");
