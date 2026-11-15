@@ -35,7 +35,6 @@ function setup() {
 test("15B démarrage : token existant, permissions, modes, doublons et snapshot isolé", () => {
   const { tracker, token } = setup();
   assert.equal(tracker.start(null).reason, "invalid-token");
-  assert.equal(tracker.start(token, "shortest").reason, "invalid-mode");
   token.testUserPermission = () => false;
   assert.equal(tracker.start(token).reason, "forbidden");
   token.testUserPermission = () => true;
@@ -60,7 +59,7 @@ test("15B sessions distinctes par scène/token, même acteur et mêmes IDs sur d
 
 test("15B sections natives : clavier/drag, détours, multi-waypoints et phases sans double comptage", () => {
   const { tracker, token, move } = setup();
-  tracker.start(token, "exact");
+  tracker.start(token);
   const first = move(token, { method: "keyboard" });
   assert.equal(tracker.update(token, structuredClone(first.movement)).reason, "already-counted");
   tracker.refresh(token); tracker.refresh(token);
@@ -71,27 +70,25 @@ test("15B sections natives : clavier/drag, détours, multi-waypoints et phases s
   assert.equal(state.segmentCount, 2);
 });
 
-test("15B libre/exact réversible, mesures brutes, arrondi final et vitesse relue", () => {
+test("15B suivi exact, mesures brutes, arrondi final et vitesse relue", () => {
   const { tracker, token, actor, move, setRounding } = setup();
-  tracker.start(token, "free");
+  tracker.start(token);
   move(token, { spaces: 2.6, distance: 5.2 });
-  tracker.setMode(token, "exact"); tracker.setMode(token, "free");
   move(token, { spaces: 2.6, distance: 5.2 });
-  const state = tracker.setMode(token, "exact").state;
+  const state = tracker.getSnapshot(token).state;
   assert.equal(state.spaces, 5.2); assert.equal(state.cellsUsed, 5); assert.equal(state.theoreticalActions, 1);
   setRounding("up");
   assert.equal(tracker.getSnapshot(token).state.cellsUsed, 6);
   assert.equal(tracker.getSnapshot(token).state.theoreticalActions, 2);
   actor.speedCells = 10;
   assert.equal(tracker.getSnapshot(token).state.theoreticalActions, 1);
-  assert.equal(tracker.setMode(token, "shortest").success, false);
   assert.equal(token.x, 200);
 });
 
 test("15B historique effacé entre mouvements : trajet conservé, retour contrôlé sans clear", async () => {
   const { tracker, token, move, updates } = setup();
   token.movementHistory = [{ x: -100, y: 0, movementId: "old" }];
-  tracker.start(token, "exact"); move(token); token.movementHistory = []; move(token);
+  tracker.start(token); move(token); token.movementHistory = []; move(token);
   assert.equal(tracker.getSnapshot(token).state.spaces, 2);
   const result = await tracker.reset(token);
   assert.equal(result.success, true); assert.equal(result.state.spaces, 0);
@@ -194,15 +191,27 @@ test("15B historique vide initial : revert natif revient au premier waypoint, z�
   assert.equal(result.success, true); assert.equal(result.state.theoreticalActions, 0);
 });
 
-test("Archive6 défaut Exact, Libre explicite et mode conservé par session", () => {
+test("Session exacte unique, indépendante par token", () => {
   const { tracker, token, create } = setup();
   assert.equal(tracker.start(token).state.mode, "exact");
-  tracker.setMode(token, "free");
   const second = create("second");
   assert.equal(tracker.start(second).state.mode, "exact");
-  assert.equal(tracker.getSnapshot(token).state.mode, "free");
+  assert.equal(tracker.getSnapshot(token).state.mode, "exact");
   tracker.finish(token);
-  assert.equal(tracker.start(token, "free").state.mode, "free");
+  assert.equal(tracker.start(token).state.mode, "exact");
+});
+
+test("Sans activation : aucun suivi implicite ; démarrage exact à la position courante", () => {
+  const { tracker, token, move, updates } = setup();
+  assert.equal(move(token).result.reason, "no-session");
+  assert.equal(move(token).result.reason, "no-session");
+  assert.equal(tracker.getSnapshot(token).reason, "no-session");
+  assert.equal(tracker.sessions.size, 0); assert.deepEqual(updates, []);
+  const state = tracker.start(token).state;
+  assert.equal(state.mode, "exact"); assert.equal(state.start.x, 200); assert.equal(state.spaces, 0);
+  assert.equal(typeof tracker.setMode, "undefined");
+  move(token);
+  assert.equal(tracker.getSnapshot(token).state.spaces, 1);
 });
 
 test("Archive6 seuils 4 puis 7 : vitesse brute conservée et plus petit coût suffisant", () => {

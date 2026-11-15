@@ -1,4 +1,3 @@
-const MODES = ["free", "exact"];
 const POSITION_FIELDS = ["x", "y", "elevation", "width", "height", "depth", "shape", "level"];
 const position = token => Object.fromEntries(POSITION_FIELDS.filter(key => token[key] !== undefined).map(key => [key, token[key]]));
 const validPosition = point => [point?.x, point?.y, point?.elevation ?? 0].every(Number.isFinite);
@@ -62,14 +61,13 @@ export class MovementTracker {
     return session?.token === token ? session : null;
   }
 
-  start(token, mode = "exact") {
+  start(token) {
     if (!this.#exists(token) || !validPosition(token)) return failure("invalid-token");
     const user = this.getUser();
     if (!user || !(user.isGM || token.testUserPermission?.(user, "OBSERVER"))) return failure("forbidden");
-    if (!MODES.includes(mode)) return failure("invalid-mode");
     if (this.#session(token)) return failure("already-active");
     if (inMotion(token)) return failure("movement-in-progress");
-    this.sessions.set(keyOf(token), { id: ++this.serial, token, scene: token.parent, mode, start: position(token),
+    this.sessions.set(keyOf(token), { id: ++this.serial, token, scene: token.parent, start: position(token),
       reference: history(token), segments: [], seen: new Set(), distance: 0, spaces: 0, cost: 0,
       measureReason: null, resetting: false });
     return this.getSnapshot(token);
@@ -91,7 +89,7 @@ export class MovementTracker {
     const theoreticalActions = requiredMovementActions(cellsPerActionRaw, cellsUsed, rounding);
     const gridSignature = JSON.stringify([grid?.type, grid?.distance, grid?.units, grid?.size, grid?.diagonals, grid?.orientation]);
     return { success: true, reason: null, state: {
-      active: true, sessionId: session.id, sceneId: session.scene.id, tokenId: token.id, mode: session.mode,
+      active: true, sessionId: session.id, sceneId: session.scene.id, tokenId: token.id, mode: "exact",
       start: { ...session.start }, current: position(token), reference: structuredClone(session.reference),
       distance: session.distance, spaces: session.spaces, cost: session.cost,
       units: grid?.units ?? null, measurementValid: reason === null, measurementReason: reason,
@@ -99,14 +97,6 @@ export class MovementTracker {
       theoreticalActions, segmentCount: session.segments.length,
       resetting: session.resetting
     } };
-  }
-
-  setMode(token, mode) {
-    const session = this.#session(token);
-    if (!session) return failure("no-session");
-    if (!MODES.includes(mode)) return failure("invalid-mode");
-    session.mode = mode;
-    return this.getSnapshot(token);
   }
 
   /** moveToken(document, movement, operation, user) : uniquement les sections déjà passées. */

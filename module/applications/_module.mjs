@@ -89,7 +89,6 @@ class PrismBar {
     this.movementToggle = this.element.querySelector(".co2prism-movement-toggle");
     this.movementPanel = this.element.querySelector(".co2prism-movement-panel");
     this.movementReset = this.movementPanel.querySelector(".co2prism-movement-reset");
-    this.movementRadios = [...this.movementPanel.querySelectorAll('input[type="radio"]')];
     this.movementToggle.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation();
       if (event.detail > 1) return;
@@ -97,9 +96,6 @@ class PrismBar {
     });
     this.movementReset.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation(); void this.resetMovement();
-    });
-    for (const radio of this.movementRadios) radio.addEventListener("change", () => {
-      if (radio.checked) this.changeMovementMode(radio.value);
     });
     for (const button of this.budgetCommands) {
       for (const eventName of ["click", "contextmenu"]) button.addEventListener(eventName, event => {
@@ -308,7 +304,7 @@ class PrismBar {
     if (budgetActive && !Number.isSafeInteger(capacity)) { valid = false; capacity = null; }
     return { state, budgetActive, available, valid, capacity,
       blocks: valid ? budgetActive ? available : 1 : 0,
-      excess: valid && budgetActive && state.mode === "exact" ? Math.max(0, state.cellsUsed - capacity) : 0 };
+      excess: valid && budgetActive ? Math.max(0, state.cellsUsed - capacity) : 0 };
   }
 
   toggleMovement() {
@@ -344,10 +340,10 @@ class PrismBar {
         if (["pending", "paused", "planned"].includes(token.movement?.state)) {
           this.movementErrors.set(token, "movement-in-progress"); return false;
         }
-        if (state.mode === "exact" && view.budgetActive && !view.valid) {
+        if (view.budgetActive && !view.valid) {
           this.movementErrors.set(token, "invalid-measurement"); return false;
         }
-        const required = state.mode === "exact" && view.budgetActive ? state.theoreticalActions : 0;
+        const required = view.budgetActive ? state.theoreticalActions : 0;
         const version = this.movementContextVersion, resetVersion = engine.getResetVersion();
         const valid = () => {
           const current = this.movementTracker.getSnapshot(token).state;
@@ -391,16 +387,6 @@ class PrismBar {
     }
   }
 
-  changeMovementMode(mode) {
-    this.refreshActor();
-    const token = this.movementToken();
-    if (!token || this.movementResets.has(token) || this.movementValidations.has(token) || this.movementResults.get(token)?.success) return false;
-    const result = this.movementTracker.setMode(token, mode);
-    if (result.success) this.movementErrors.delete(token);
-    this.refreshActor();
-    return result.success;
-  }
-
   async resetMovement() {
     this.refreshActor();
     const token = this.movementToken();
@@ -439,14 +425,12 @@ class PrismBar {
     if (!open) return true;
     const { state, valid, budgetActive, available, capacity, blocks, excess } = view;
     this.movementReset.disabled = busy || settled;
-    for (const radio of this.movementRadios) { radio.checked = radio.value === state.mode; radio.disabled = busy || settled; }
     const query = selector => this.movementPanel.querySelector(`.co2prism-movement-${selector}`);
     const data = { used: state.cellsUsed, capacity, actions: state.theoreticalActions, available, cells: state.cellsPerAction, excess };
-    query("summary").textContent = !valid ? localize("Unavailable") : state.mode === "free"
-      ? format("FreeSummary", data) : format(budgetActive ? "ExactSummary" : "InformativeSummary", data);
+    query("summary").textContent = !valid ? localize("Unavailable") : format(budgetActive ? "ExactSummary" : "InformativeSummary", data);
     query("speed").textContent = Number.isFinite(state.cellsPerActionRaw) && state.cellsPerActionRaw > 0 ? format("Speed", data) : localize("SpeedUnavailable");
     const message = query("message");
-    message.textContent = state.mode === "free" ? localize("FreeNotice") : !valid ? localize("Unavailable")
+    message.textContent = !valid ? localize("Unavailable")
       : format(!budgetActive ? "InformativeNotice" : excess > 0 ? "Excess" : "WithinCapacity", data);
     message.classList.toggle("co2prism-movement-excess", excess > 0);
     query("error").hidden = !error;
@@ -465,7 +449,7 @@ class PrismBar {
       if (size === 0) block.textContent = format("ZeroBlock", { action: blockIndex + 1 });
       for (let index = 0; index < size; index += stride) {
         const count = Math.min(stride, size - index);
-        const used = state.mode === "exact" ? Math.max(0, Math.min(count, state.cellsUsed - lower - index)) : 0;
+        const used = Math.max(0, Math.min(count, state.cellsUsed - lower - index));
         const cell = document.createElement("span"); cell.className = "co2prism-movement-cell";
         cell.style.setProperty("--co2prism-used", `${100 * used / count}%`);
         cell.dataset.used = String(used); cell.dataset.count = String(count);

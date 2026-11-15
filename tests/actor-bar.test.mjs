@@ -103,7 +103,6 @@ test("15C prévisions : tranches 0/1/5/6/10/11, droits et clôture informative s
   bar.readConfiguration = actor => { const config = read(actor); config.panels.combat = true; return config; };
   for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
     assert.equal(bar.toggleMovement(), true);
-    assert.equal(bar.changeMovementMode("exact"), true);
     bar.movementTracker.update(t.document, { id: String(used), origin: { x: 0, y: 0 },
       passed: { waypoints: [{ x: 100, y: 0 }], spaces: used, distance: used * 2, cost: used } });
     const view = bar.movementView(t.document);
@@ -143,8 +142,8 @@ function setupMovementValidation() {
   const t = create();
   const select = t => { context.canvas.tokens.controlled = t ? [t] : []; hooks.get("controlToken")(); };
   select(t);
-  const start = (used, selected = t, movementMode = "exact") => {
-    select(selected); assert.equal(bar.toggleMovement(), true); bar.changeMovementMode(movementMode);
+  const start = (used, selected = t) => {
+    select(selected); assert.equal(bar.toggleMovement(), true);
     hooks.get("moveToken")(selected.document, { id: "move-" + (++serial), origin: { x: 0, y: 0 },
       passed: { waypoints: [{ x: 100, y: 0 }], distance: used * 2, spaces: used, cost: used } });
   };
@@ -152,7 +151,7 @@ function setupMovementValidation() {
     economy: new context.ActionEconomy(a), setMode: value => { mode = value; } };
 }
 
-test("15D validation : Libre/inactif gratuits, Exact 0/1/5/6/10/11 cases", async () => {
+test("Validation : budget inactif gratuit, suivi exact 0/1/5/6/10/11 cases", async () => {
   for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
     const { bar, t, start, economy, warnings } = setupMovementValidation();
     start(used);
@@ -163,9 +162,9 @@ test("15D validation : Libre/inactif gratuits, Exact 0/1/5/6/10/11 cases", async
     assert.equal(warnings.length, used > 10 ? 1 : 0);
     assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
   }
-  for (const [mode, active, movementMode] of [["always", true, "free"], ["off", true, "exact"], ["combat", false, "exact"]]) {
+  for (const [mode, active] of [["off", true], ["combat", false]]) {
     const { bar, context, start, economy, warnings, setMode } = setupMovementValidation();
-    setMode(mode); context.game.combats.active.started = active; start(99, undefined, movementMode);
+    setMode(mode); context.game.combats.active.started = active; start(99);
     assert.equal(await bar.toggleMovement(), true);
     assert.equal(economy.getSnapshot().movementsRemaining, 2); assert.equal(warnings.length, 0);
   }

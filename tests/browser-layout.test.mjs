@@ -931,16 +931,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const previewFlag = JSON.stringify(actor.flags.co2prism.actionEconomy), notificationCount = warnings.length;
           check(!movementButton.disabled, '15C eligible token');
           check(movementButton.textContent === 'Mouvement', 'Archive6 inactive movement label');
+          trackedMove(2); trackedMove(3);
+          check(movementPanel.hidden && !bar.movementTracker.getSnapshot(tracked).success
+            && JSON.stringify(actor.flags.co2prism.actionEconomy) === previewFlag, 'Untracked native moves create no session or budget write');
+          const trackedStart = tracked.x;
           movementButton.click();
           check(!movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'true', '15C session opened');
-          const radios = [...movementPanel.querySelectorAll('input[type="radio"]')];
-          check(radios.length === 2 && radios[1].checked, 'Archive6 two radios and native exact default');
+          check(movementPanel.querySelectorAll('input[type="radio"]').length === 0, 'No movement mode radios');
+          check(bar.movementTracker.getSnapshot(tracked).state.mode === 'exact'
+            && bar.movementTracker.getSnapshot(tracked).state.start.x === trackedStart, 'Exact session starts at current position');
           check(movementButton.textContent === 'Valider', 'Archive6 active validation label');
-          radios[0].click();
           trackedMove(7);
-          check(movementPanel.querySelectorAll('[data-used="1"]').length === 0, '15C free keeps blue squares');
-          radios[1].click();
-          check(radios[1].checked && !radios[0].checked, '15C radio exclusivity');
           const blocks = () => [...movementPanel.querySelectorAll('.co2prism-movement-block')];
           const grey = () => [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, node) => sum + Number(node.dataset.used), 0);
           check(blocks().length === 5 && grey() === 7 && blocks().every(block => block.children.length === 5), '15C five blocks and seven grey cells');
@@ -950,8 +951,6 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           trackedMove(22);
           check(grey() === 25 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 25, '15C excess adds no cells');
           check(movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('4 cases'), '15C immediate red excess');
-          radios[0].click(); check(!movementPanel.querySelector('.co2prism-movement-excess') && grey() === 0, '15C free removes excess');
-          radios[1].click();
           await economy.grant('am'); hooks.get('updateActor')(actor, { flags: {} });
           check(blocks().length === 6 && !movementPanel.querySelector('.co2prism-movement-excess'), '15C bonus updates capacity');
           await economy.spend('m'); hooks.get('updateActor')(actor, { flags: {} });
@@ -964,7 +963,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(!movementPanel.querySelector('.co2prism-movement-error').hidden && grey() === 25, '15C return failure preserves path');
           failReturn = false; movementPanel.querySelector('.co2prism-movement-reset').click();
           await new Promise(resolve => setTimeout(resolve, 0));
-          check(tracked.x === 0 && grey() === 0 && !movementPanel.hidden && radios[1].checked, '15C successful return keeps session and mode');
+          check(tracked.x === trackedStart && grey() === 0 && !movementPanel.hidden, 'Successful return keeps exact session');
           check(movementButton.textContent === 'Valider', 'Archive6 label after reset');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === beforeReturn, '15C return did not mutate budget');
           const secondDocument = { ...tracked, id: 'second-token', uuid: 'Scene.s.Token.second', x: 500 };
@@ -974,7 +973,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(movementButton.textContent === 'Mouvement', 'Archive6 label after selection');
           movementButton.click(); trackedMove(1, secondDocument);
           canvas.tokens.controlled = [selectedToken]; hooks.get('controlToken')();
-          check(!movementPanel.hidden && radios[1].checked && grey() === 0, '15C return selection restores own session');
+          check(!movementPanel.hidden && grey() === 0, '15C return selection restores own session');
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.position = { x: innerWidth - 1, y: 0 }; bar.layout();
             const bounds = root.getBoundingClientRect(), panel = movementPanel.getBoundingClientRect();
@@ -983,10 +982,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               && panel.top >= -0.1 && panel.bottom < base.top, size + ' 15C panel bounds');
             const blankX = bounds.left + 2, blankY = panel.top + 2;
             check(document.elementFromPoint(blankX, blankY)?.id === 'board', size + ' 15C canvas remains accessible');
-            for (const radio of radios) {
-              const rect = radio.getBoundingClientRect();
-              check(radio === document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2), size + ' 15C radios clickable');
-            }
+            const reset = movementPanel.querySelector('.co2prism-movement-reset'), rect = reset.getBoundingClientRect();
+            check(reset.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)), size + ' movement reset clickable');
           }
           movementScene.grid.type = 0; hooks.get('updateScene')(movementScene, { grid: {} });
           check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('indisponible') && blocks().length === 0, '15C gridless explicit');
@@ -995,7 +992,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           Object.defineProperty(window, 'innerHeight', { value: 500, configurable: true });
           bar.layout();
           const smallPanel = movementPanel.getBoundingClientRect(), smallBounds = root.getBoundingClientRect();
-          check(smallPanel.height >= 150 && smallPanel.top >= -0.1 && smallBounds.bottom <= 500.1, '15C small viewport keeps usable panel');
+          const smallReset = movementPanel.querySelector('.co2prism-movement-reset').getBoundingClientRect();
+          check(smallPanel.height >= 60 && smallReset.bottom <= smallPanel.bottom && smallPanel.top >= -0.1
+            && smallBounds.bottom <= 500.1, 'Small viewport keeps simplified panel and reset usable');
           Object.defineProperty(window, 'innerHeight', { value: realHeight, configurable: true }); bar.layout();
           trackedMove(11);
           const beforeFinish = JSON.stringify(actor.flags.co2prism.actionEconomy), destination = tracked.x;
@@ -1025,7 +1024,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(total === expected && bar.combatValues.cells.textContent === expected + ' / ' + expected, 'Archive6 cumulative portrait and blocks ' + mode);
             trackedMove(7);
             check(grey() === 7, 'Archive6 grey cells across variable blocks ' + mode);
-            radios[0].click(); await bar.toggleMovement();
+            settings.economyMode = 'off'; bar.refreshActor(); await bar.toggleMovement();
+            settings.economyMode = 'always'; bar.refreshActor();
           }
           actor.system.attributes.movement = { value: 0.4, unit: 'm' }; movementScene.grid.distance = 2;
           settings.movementRounding = 'down'; await economy.reset(); bar.refreshActor(); movementButton.click(); trackedMove(1);
