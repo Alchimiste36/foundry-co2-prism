@@ -99,6 +99,11 @@
       "mana": "Mana",
       "hp": "Hit points"
     },
+    "MovementRounding": "Movement cell rounding",
+    "MovementRoundingHint": "Shared table rule for rounding displayed grid cells. Distances and the action budget are unchanged.",
+    "MovementRoundingNearest": "Round to nearest",
+    "MovementRoundingUp": "Round up",
+    "MovementRoundingDown": "Round down",
     "EconomyMode": "Action budget",
     "EconomyModeHint": "Display and use of the budget; changing mode does not reset it.",
     "EconomyAlways": "Always visible and active",

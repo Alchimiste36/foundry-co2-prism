@@ -13,6 +13,12 @@ function economyEnabled() {
 
 Hooks.once("init", () => {
   if (game.system.id !== "co2") return;
+  game.settings.register(MODULE, "movementRounding", {
+    name: "CO2PRISM.MovementRounding", hint: "CO2PRISM.MovementRoundingHint", scope: "world", config: true,
+    type: String, default: "nearest", choices: {
+      nearest: "CO2PRISM.MovementRoundingNearest", up: "CO2PRISM.MovementRoundingUp", down: "CO2PRISM.MovementRoundingDown"
+    }, onChange: () => bar?.refreshActor()
+  });
   game.settings.register(MODULE, "economyMode", {
     name: "CO2PRISM.EconomyMode", hint: "CO2PRISM.EconomyModeHint", scope: "user", config: true,
     type: String, default: "combat", choices: {
@@ -318,7 +324,15 @@ class PrismBar {
     const economy = new ActionEconomy(this.actor).getSnapshot();
     for (const [key, value] of Object.entries(this.readCombatData())) {
       const node = this.combatValues[key];
-      const format = number => Number.isFinite(number) ? String(Math.round(number * 100) / 100) : unavailable;
+      const format = number => {
+        if (!Number.isFinite(number) || (key === "cells" && number < 0)) return unavailable;
+        if (key !== "cells") return String(Math.round(number * 100) / 100);
+        // Corriger seulement le bruit flottant autour d'un entier théorique.
+        const integer = Math.round(number);
+        if (Math.abs(number - integer) <= Number.EPSILON * 8 * Math.max(1, number)) number = integer;
+        const mode = game.settings?.get(MODULE, "movementRounding");
+        return String((mode === "up" ? Math.ceil : mode === "down" ? Math.floor : Math.round)(number));
+      };
       node.textContent = economyEnabled() && ["meters", "cells"].includes(key) && value !== null
         ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
       node.style.setProperty("--co2prism-combat-size", Math.min(key === "def" ? 68 : 48, 115 / (node.textContent.length * 0.58)));

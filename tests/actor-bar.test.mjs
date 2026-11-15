@@ -8,7 +8,7 @@ function setup() {
   const hooks = new Map();
   const context = vm.createContext({
     structuredClone,
-    Hooks: { once() {}, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
+    Hooks: { once(name, fn) { hooks.set(name, fn); }, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
     game: { combats: { active: { started: true } }, user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
     canvas: { ready: true, tokens: { controlled: [] } }
   });
@@ -641,6 +641,109 @@ test("Compétences : sept jets CO2, rencontres, changement d'acteur et permissio
   assert.equal(rolls.length, 9);
   hooks.get("canvasTearDown")();
   assert.equal(bar.skillsPanel.hidden, true);
+});
+
+function setupMovementDisplay() {
+  const env = setup();
+  const { bar, context, actor, hooks } = env;
+  const a = actor("rounding");
+  a.system.attributes.movement = { value: 10, unit: "m" };
+  context.canvas.scene = { grid: { type: 1, distance: 3, units: "m" } };
+  const settings = { movementRounding: "nearest", economyMode: "off" }, registrations = new Map();
+  context.game.system = { id: "co2" };
+  context.game.settings = { get: (_, key) => settings[key], register: (_, key, config) => registrations.set(key, config) };
+  hooks.get("init")();
+  bar.actor = a;
+  bar.configuration = { panels: { combat: true }, activePreset: 1 };
+  bar.combatPanel = { hidden: false, dataset: {} };
+  bar.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key => [key,
+    { textContent: "", style: { setProperty() {} } }]));
+  bar.combatEffects = { replaceChildren() {} };
+  bar.readCombatEffects = () => [];
+  bar.renderEconomy = bar.renderCombatSlots = () => false;
+  bar.refreshActor = () => bar.updateCombat();
+  vm.runInContext("bar = globalThis.movementBar", Object.assign(context, { movementBar: bar }));
+  const display = () => {
+    bar.updateCombat();
+    return [bar.combatValues.meters.textContent, bar.combatValues.cells.textContent];
+  };
+  return { ...env, a, settings, registrations, display };
+}
+
+test("14 affichage : arrondis entiers après conversion, mètres inchangés", () => {
+  const { context, settings, display, bar } = setupMovementDisplay();
+  for (const [distance, expected] of [[3, [3, 4, 3]], [2, [5, 5, 5]], [4, [3, 3, 2]]]) {
+    context.canvas.scene.grid.distance = distance;
+    for (const [index, mode] of ["nearest", "up", "down"].entries()) {
+      settings.movementRounding = mode;
+      assert.deepEqual(display(), ["10", String(expected[index])]);
+      assert.equal(bar.readCombatData().cells, 10 / distance);
+    }
+  }
+});
+
+test("14 budget : arrondir les totaux restants/maximum, bonus puis consommation", async () => {
+  const { settings, display, a, context } = setupMovementDisplay();
+  let state;
+  a.getFlag = () => state;
+  a.setFlag = async (_, key, value) => { state = structuredClone(value); };
+  const economy = new context.ActionEconomy(a);
+  settings.economyMode = "always";
+  await economy.grant("m"); await economy.spend("m");
+  for (const [mode, expected] of [["nearest", "7 / 10"], ["up", "7 / 10"], ["down", "6 / 10"]]) {
+    settings.movementRounding = mode;
+    assert.deepEqual(display(), ["20 / 30", expected]);
+  }
+  await economy.spend("m");
+  assert.deepEqual(display(), ["10 / 30", "3 / 10"]);
+  await economy.reset(); settings.movementRounding = "nearest";
+  assert.deepEqual(display(), ["20 / 20", "7 / 7"]);
+});
+
+test("14 conversions pieds, repli et précision flottante", () => {
+  const { context, a, settings, display } = setupMovementDisplay();
+  context.canvas.scene.grid = { type: 1, distance: 5, units: "ft" };
+  settings.movementRounding = "up";
+  assert.deepEqual(display(), ["10", "7"]);
+  a.system.attributes.movement = { value: 30, unit: "ft" };
+  context.canvas.scene.grid = { type: 1, distance: 2, units: "m" };
+  assert.deepEqual(display(), ["9.14", "5"]);
+  a.system.attributes.movement = { value: 10, unit: "m" };
+  for (const mode of ["up", "down"]) {
+    settings.movementRounding = mode;
+    for (const distance of [2 + Number.EPSILON * 2, 2 - Number.EPSILON]) {
+      context.canvas.scene.grid.distance = distance;
+      assert.equal(display()[1], "5");
+    }
+  }
+  for (const grid of [undefined, { type: 0, distance: 2, units: "m" }, { type: 1, distance: 0, units: "m" },
+    { type: 1, distance: 2, units: "unknown" }]) {
+    context.canvas.scene.grid = grid;
+    assert.equal(display()[1], "—");
+  }
+  context.canvas.scene = undefined;
+  assert.equal(display()[1], "—");
+});
+
+test("14 réglage monde : rafraîchissement immédiat local/distant sans écriture", () => {
+  const { settings, registrations, a, display, bar, context } = setupMovementDisplay();
+  const config = registrations.get("movementRounding");
+  assert.equal(config.scope, "world"); assert.equal(config.config, true); assert.equal(config.default, "nearest");
+  assert.deepEqual(Object.keys(config.choices), ["nearest", "up", "down"]);
+  a.setFlag = a.update = () => assert.fail("Aucune écriture attendue");
+  assert.deepEqual(display(), ["10", "3"]);
+  for (const userId of ["local-gm", "remote-gm"]) {
+    settings.movementRounding = "up";
+    config.onChange("up", {}, userId);
+    assert.equal(bar.combatValues.cells.textContent, "4");
+    settings.movementRounding = "down";
+    config.onChange("down", {}, userId);
+    assert.equal(bar.combatValues.cells.textContent, "3");
+  }
+  settings.economyMode = "combat";
+  assert.deepEqual(display(), ["20 / 20", "6 / 6"]);
+  context.game.combats.active.started = false;
+  assert.deepEqual(display(), ["10", "3"]);
 });
 
 test("Combat : mouvement réel, conversion mètres/cases et données DEF/RD préparées", () => {

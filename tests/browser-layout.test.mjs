@@ -837,6 +837,19 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             }
           }
           settings.economyMode = 'always'; bar.refreshActor();
+          canvas.scene.grid.distance = 3;
+          await resetBudget(); await command('m', true); await command('m');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size;
+            for (const mode of ['nearest', 'up', 'down']) {
+              settings.movementRounding = mode; bar.refreshActor(); bar.layout();
+              movement('20 / 30', mode === 'down' ? '6 / 10' : '7 / 10');
+              const node = bar.combatValues.cells, rect = node.getBoundingClientRect();
+              check(node.scrollWidth <= node.clientWidth + 1, size + ' rounded cells overflow');
+              const bounds = root.getBoundingClientRect();
+              check(rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1, size + ' rounded cells bounds');
+            }
+          }
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";

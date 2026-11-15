@@ -99,6 +99,11 @@
       "mana": "Mana",
       "hp": "Points de vie"
     },
+    "MovementRounding": "Arrondi des cases de déplacement",
+    "MovementRoundingHint": "Règle commune à la table pour arrondir les cases affichées. Les mètres et le budget d’actions ne sont pas modifiés.",
+    "MovementRoundingNearest": "Arrondir au plus proche",
+    "MovementRoundingUp": "Arrondir au supérieur",
+    "MovementRoundingDown": "Arrondir à l'inférieur",
     "EconomyMode": "Budget d’actions",
     "EconomyModeHint": "Affichage et utilisation du budget ; changer ce mode ne réinitialise pas le budget.",
     "EconomyAlways": "Toujours affiché et actif",
