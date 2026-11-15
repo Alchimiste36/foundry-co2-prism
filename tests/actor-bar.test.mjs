@@ -15,6 +15,7 @@ function setup() {
   vm.runInContext('globalThis.ActionEconomy = (() => {' + readFileSync(new URL('../module/combat/action-economy.mjs', import.meta.url), 'utf8').replace('export class ActionEconomy', 'class ActionEconomy') + '; return ActionEconomy; })()', context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-tracker.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
+  vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();

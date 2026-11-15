@@ -44,6 +44,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
+      ${read("../module/movement/movement-zones.mjs").replace(/export /g, "")}
       ${read("../module/applications/_module.mjs").replace(/import \{[^}]+\} from [^;]+;/g, "")}
       (async () => {
         const result = { dimensions: [], errors: [] };
@@ -941,6 +942,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(bar.movementTracker.getSnapshot(tracked).state.mode === 'exact'
             && bar.movementTracker.getSnapshot(tracked).state.start.x === trackedStart, 'Exact session starts at current position');
           check(movementButton.textContent === 'Valider', 'Archive6 active validation label');
+          check(movementPanel.querySelector('.co2prism-movement-zones-toggle').disabled
+            && movementPanel.querySelector('.co2prism-movement-zones-status').textContent.includes('indisponibles'),
+            'Zones prototype unavailable API leaves panel usable with diagnostic');
           trackedMove(7);
           const blocks = () => [...movementPanel.querySelectorAll('.co2prism-movement-block')];
           const grey = () => [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, node) => sum + Number(node.dataset.used), 0);

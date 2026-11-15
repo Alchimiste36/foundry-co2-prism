@@ -2,6 +2,7 @@
 
 import { MovementTracker, roundMovementCells, movementThreshold } from "../movement/movement-tracker.mjs";
 import { MovementNotifications } from "../movement/movement-notifications.mjs";
+import { MovementZones } from "../movement/movement-zones.mjs";
 
 const MODULE = "co2prism";
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
@@ -59,6 +60,7 @@ class PrismBar {
     this.movementResults = new WeakMap();
     this.movementNotifications = new MovementNotifications();
     this.movementContextVersion = 0;
+    this.movementZones = new MovementZones();
   }
 
   async render() {
@@ -89,6 +91,14 @@ class PrismBar {
     this.movementToggle = this.element.querySelector(".co2prism-movement-toggle");
     this.movementPanel = this.element.querySelector(".co2prism-movement-panel");
     this.movementReset = this.movementPanel.querySelector(".co2prism-movement-reset");
+    this.movementZonesButton = this.movementPanel.querySelector(".co2prism-movement-zones-toggle");
+    this.movementZonesButton.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation(); void this.toggleMovementZones();
+    });
+    this.movementZonesObserver = new MutationObserver(() => {
+      if (!this.element.isConnected) { this.movementZones.clear(); this.movementZonesObserver.disconnect(); }
+    });
+    this.movementZonesObserver.observe(document.body, { childList: true });
     this.movementToggle.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation();
       if (event.detail > 1) return;
@@ -183,6 +193,7 @@ class PrismBar {
     Hooks.on("controlToken", () => this.refreshActor());
     Hooks.on("canvasReady", () => this.refreshActor());
     Hooks.on("canvasTearDown", canvas => {
+      this.movementZones.clear();
       this.movementTracker.closeScene(canvas?.scene ?? globalThis.canvas?.scene);
       this.refreshActor(false);
     });
@@ -195,6 +206,7 @@ class PrismBar {
       if (token === this.token?.document) this.refreshActor();
     });
     Hooks.on("deleteScene", scene => {
+      if (scene === this.movementZones.token?.parent) this.movementZones.clear();
       this.movementTracker.closeScene(scene);
       if (scene === this.token?.document?.parent) this.refreshActor(false);
     });
@@ -222,6 +234,7 @@ class PrismBar {
       if (relevant && token === this.token?.document) this.refreshActor();
     });
     Hooks.on("deleteToken", token => {
+      if (token === this.movementZones.token) this.movementZones.clear();
       this.movementTracker.deleteToken(token);
       if (token === this.token?.document) this.refreshActor(false);
     });
@@ -323,6 +336,7 @@ class PrismBar {
 
   async validateMovement(token) {
     if (this.movementValidations.has(token)) return false;
+    if (token === this.movementZones.token) this.movementZones.clear();
     this.movementValidations.add(token);
     this.movementErrors.delete(token);
     this.refreshActor();
@@ -391,6 +405,7 @@ class PrismBar {
     this.refreshActor();
     const token = this.movementToken();
     if (!token || this.movementResets.has(token) || this.movementValidations.has(token) || this.movementResults.get(token)?.success || !this.movementTracker.getSnapshot(token).success) return false;
+    if (token === this.movementZones.token) this.movementZones.clear();
     this.movementResets.add(token); this.movementErrors.delete(token); this.refreshActor();
     try {
       const result = await this.movementTracker.reset(token);
@@ -407,11 +422,13 @@ class PrismBar {
     if (!this.movementPanel) return false;
     const token = this.movementToken(), view = token ? this.movementView(token) : null;
     const open = Boolean(view && this.configuration.panels.combat);
+    this.movementZones.sync(token, view?.state, open);
     const validating = Boolean(token && this.movementValidations.has(token));
     const settled = Boolean(token && this.movementResults.get(token)?.success);
     const busy = Boolean(token && (this.movementResets.has(token) || validating));
     const error = token ? this.movementErrors.get(token) : null;
-    const signature = JSON.stringify([open, token?.uuid ?? token?.id, view, busy, settled, validating, error]);
+    const signature = JSON.stringify([open, token?.uuid ?? token?.id, view, busy, settled, validating, error,
+      this.movementZones.visible, this.movementZones.busy, this.movementZones.diagnostic, this.movementZones.stats]);
     if (signature === this.movementSignature) return false;
     this.movementSignature = signature;
     const localize = key => game.i18n.localize(`CO2PRISM.Movement.${key}`);
@@ -425,6 +442,17 @@ class PrismBar {
     if (!open) return true;
     const { state, valid, budgetActive, available, capacity, blocks, excess } = view;
     this.movementReset.disabled = busy || settled;
+    if (this.movementZonesButton) {
+      this.movementZonesButton.disabled = busy || settled || (!this.movementZones.visible && Boolean(this.movementZones.supported(token, state.start)));
+      this.movementZonesButton.setAttribute("aria-pressed", String(this.movementZones.visible));
+      this.movementZonesButton.title = localize(this.movementZones.visible ? "ZonesHide" : "ZonesShow");
+      this.movementZonesButton.setAttribute("aria-label", this.movementZonesButton.title);
+      const diagnostic = this.movementPanel.querySelector(".co2prism-movement-zones-status");
+      const reason = this.movementZones.diagnostic ?? this.movementZones.supported(token, state.start);
+      diagnostic.hidden = !reason && !this.movementZones.busy;
+      diagnostic.textContent = this.movementZones.busy ? localize("ZonesBusy") : reason === "Done"
+        ? format("ZonesDone", this.movementZones.stats) : reason ? localize(`Zones${reason}`) : "";
+    }
     const query = selector => this.movementPanel.querySelector(`.co2prism-movement-${selector}`);
     const data = { used: state.cellsUsed, capacity, actions: state.theoreticalActions, available, cells: state.cellsPerAction, excess };
     query("summary").textContent = !valid ? localize("Unavailable") : format(budgetActive ? "ExactSummary" : "InformativeSummary", data);
@@ -464,6 +492,18 @@ class PrismBar {
     }
     query("blocks").replaceChildren(...nodes);
     return true;
+  }
+
+  async toggleMovementZones() {
+    this.refreshActor();
+    const token = this.movementToken(), view = token && this.movementView(token);
+    if (!view || !this.configuration.panels.combat || this.movementValidations.has(token) || this.movementResets.has(token)) return false;
+    const result = await this.movementZones.toggle(token, view.state, () => this.refreshActor());
+    return result.success;
+  }
+
+  destroy() {
+    this.movementZones.clear(); this.movementZonesObserver?.disconnect();
   }
 
   updateSkills() {

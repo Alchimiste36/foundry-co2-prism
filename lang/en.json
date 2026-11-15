@@ -102,6 +102,13 @@
       "hp": "Hit points"
     },
     "Movement": {
+      "ZonesShow": "Show movement zones (local prototype, 3/5 cells)",
+      "ZonesHide": "Hide movement zones",
+      "ZonesBusy": "Calculating local zones… Click the icon again to cancel.",
+      "ZonesDone": "Prototype: {states} states, {examined} transitions examined, {marked} cells marked, {partial} blocked/partial transitions, {elapsedMs} ms. Native exploration limited to 5 cells of cumulative cost.",
+      "ZonesUnavailable": "Zones unavailable: native pathfinding, measurement or rendering API missing/inconsistent. No approximate fallback used.",
+      "ZonesLimit": "Exploration stopped: safety limit of 4,000 states or 32,000 transitions reached. No incomplete result displayed.",
+      "ZonesUnsupported": "Prototype limited to a square grid without special regions, an aligned 1 × 1 token and a measured action restricted by walls, on the current level. Reduced/zero costs and path transformations are unsupported.",
       "Validate": "Validate",
       "ZeroBlock": "M {action}: 0 additional cells",
       "Start": "Start tracking the selected token. Actions will only be spent at validation.",

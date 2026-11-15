@@ -33,11 +33,13 @@
       <button type="button" disabled class="co2prism-piece co2prism-movement-toggle" style="--x:319;--y:0;--w:194;--h:40" aria-controls="co2prism-movement-panel" aria-expanded="false" aria-pressed="false" title="{{localize 'CO2PRISM.Movement.Start'}}">{{localize 'CO2PRISM.Combat.Movement'}}</button>
       <section id="co2prism-movement-panel" class="co2prism-movement-panel" hidden aria-label="{{localize 'CO2PRISM.Combat.Movement'}}">
         <button type="button" class="co2prism-movement-reset" title="{{localize 'CO2PRISM.Movement.Reset'}}" aria-label="{{localize 'CO2PRISM.Movement.Reset'}}"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button>
+        <button type="button" class="co2prism-movement-zones-toggle" disabled aria-pressed="false" title="{{localize 'CO2PRISM.Movement.ZonesShow'}}" aria-label="{{localize 'CO2PRISM.Movement.ZonesShow'}}"><i class="fa-solid fa-border-all" aria-hidden="true"></i></button>
         <p class="co2prism-movement-summary" aria-live="polite"></p>
         <p class="co2prism-movement-speed"></p>
         <div class="co2prism-movement-blocks" aria-hidden="true"></div>
         <p class="co2prism-movement-message" role="status"></p>
         <p class="co2prism-movement-error" role="alert" hidden></p>
+        <p class="co2prism-movement-zones-status" role="status" hidden></p>
       </section>
       <div class="co2prism-piece co2prism-combat-line" style="--x:480;--y:253;--w:1128;--h:16" aria-hidden="true"></div>
       <div class="co2prism-piece co2prism-combat-arrow" style="--x:1584;--y:232;--w:93;--h:57" aria-hidden="true"></div>

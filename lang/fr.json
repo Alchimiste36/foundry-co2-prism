@@ -102,6 +102,13 @@
       "hp": "Points de vie"
     },
     "Movement": {
+      "ZonesShow": "Afficher les zones de déplacement (prototype local, 3/5 cases)",
+      "ZonesHide": "Masquer les zones de déplacement",
+      "ZonesBusy": "Calcul local des zones en cours… Cliquez à nouveau sur l’icône pour annuler.",
+      "ZonesDone": "Prototype : {states} états, {examined} transitions examinées, {marked} cases marquées, {partial} transitions bloquées/partielles, {elapsedMs} ms. Exploration native limitée à 5 cases de coût cumulé.",
+      "ZonesUnavailable": "Zones indisponibles : API native de recherche, mesure ou rendu absente/incohérente. Aucun calcul approximatif utilisé.",
+      "ZonesLimit": "Exploration interrompue : plafond de sécurité de 4 000 états ou 32 000 transitions atteint. Aucun résultat incomplet affiché.",
+      "ZonesUnsupported": "Prototype limité à une grille carrée sans régions spéciales, un token 1 × 1 aligné et une action mesurée soumise aux murs, au niveau courant. Coûts réduits/nuls et transformations de trajet non pris en charge.",
       "Validate": "Valider",
       "ZeroBlock": "M {action} : 0 case supplémentaire",
       "Start": "Démarrer le suivi du token sélectionné. Le budget ne sera débité qu’à la validation.",
