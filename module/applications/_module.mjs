@@ -6,8 +6,19 @@ const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
 const COMBAT_ROW_ORIGINS = [522, 731];
 let bar;
 
+function economyEnabled() {
+  const mode = game.settings?.get(MODULE, "economyMode");
+  return mode === "always" || (mode !== "off" && game.combats?.active?.started === true);
+}
+
 Hooks.once("init", () => {
   if (game.system.id !== "co2") return;
+  game.settings.register(MODULE, "economyMode", {
+    name: "CO2PRISM.EconomyMode", hint: "CO2PRISM.EconomyModeHint", scope: "user", config: true,
+    type: String, default: "combat", choices: {
+      always: "CO2PRISM.EconomyAlways", combat: "CO2PRISM.EconomyCombat", off: "CO2PRISM.EconomyOff"
+    }, onChange: () => bar?.refreshActor()
+  });
   game.settings.register(MODULE, "size", {
     name: "CO2PRISM.Size", hint: "CO2PRISM.SizeHint", scope: "user", config: true,
     type: String, default: "M", choices: { S: "S", M: "M", L: "L", XL: "XL" },
@@ -129,6 +140,9 @@ class PrismBar {
   }
 
   connectActor() {
+    for (const event of ["createCombat", "updateCombat", "deleteCombat", "combatTurnChange"]) {
+      Hooks.on(event, () => this.refreshActor());
+    }
     // L'instance vit avec le monde ; ces hooks ne sont installés qu'au premier rendu.
     Hooks.on("controlToken", () => this.refreshActor());
     Hooks.on("canvasReady", () => this.refreshActor());
@@ -305,7 +319,7 @@ class PrismBar {
     for (const [key, value] of Object.entries(this.readCombatData())) {
       const node = this.combatValues[key];
       const format = number => Number.isFinite(number) ? String(Math.round(number * 100) / 100) : unavailable;
-      node.textContent = ["meters", "cells"].includes(key) && value !== null
+      node.textContent = economyEnabled() && ["meters", "cells"].includes(key) && value !== null
         ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
       node.style.setProperty("--co2prism-combat-size", Math.min(key === "def" ? 68 : 48, 115 / (node.textContent.length * 0.58)));
     }
@@ -329,7 +343,7 @@ class PrismBar {
   }
 
   async changeEconomy(operation, type) {
-    if (this.busyAction || (operation === "spend" && type === "am")) return false;
+    if (!economyEnabled() || this.busyAction || (operation === "spend" && type === "am")) return false;
     this.refreshActor();
     const actor = this.actor;
     if (!this.canConfigure(actor) || !this.configuration.panels.combat
@@ -347,7 +361,7 @@ class PrismBar {
   }
 
   updateEconomyCommands(state) {
-    const canEdit = this.canConfigure();
+    const canEdit = economyEnabled() && this.canConfigure();
     for (const button of this.budgetCommands ?? []) {
       const type = button.dataset.co2prismTime;
       button.disabled = !canEdit;
@@ -362,7 +376,12 @@ class PrismBar {
 
   renderEconomy(state) {
     if (!this.budgetBar) return false;
+    const scroll = this.budgetBar.closest?.(".co2prism-budget-scroll");
+    const hidden = !economyEnabled();
+    const visibilityChanged = scroll && scroll.hidden !== hidden;
+    if (scroll) scroll.hidden = hidden;
     this.updateEconomyCommands(state);
+    if (hidden) return Boolean(visibilityChanged);
     const labels = { l: "L", a: "A", am: "AM", m: "M" };
     const colors = { l: "limited", a: "attack", am: "mixed", m: "move" };
     const nodes = [], widths = [];
@@ -402,7 +421,7 @@ class PrismBar {
     const changed = width !== this.budgetWidth;
     this.budgetWidth = width;
     this.budgetContent.style.setProperty("--budget-width", width);
-    return changed;
+    return changed || Boolean(visibilityChanged);
   }
 
   slotRows(actor = this.actor, preset = this.configuration.activePreset) {
@@ -570,6 +589,10 @@ class PrismBar {
           }
           node.title = [read("actionName") || item?.name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
           node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ShortcutControls")}`;
+          if (economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[read("actionTypeFinal")] === false) {
+            node.classList.add("co2prism-time-insufficient");
+            node.title += `\n${game.i18n.localize("CO2PRISM.Combat.InsufficientTimeHint")}`;
+          }
           node.classList.add("co2prism-slot-executable");
           node.setAttribute("role", "button");
           if (action.properties?.activable === true) {
@@ -726,21 +749,37 @@ class PrismBar {
       const indice = action.indice;
       const deactivating = toggle && action.properties.enabled === true;
       const time = action.actionTypeFinal;
-      const charged = mode === "use" && !deactivating && ["l", "a", "m"].includes(time);
+      const activationState = [action.properties?.activable, action.properties?.temporary, action.properties?.enabled];
+      const charged = mode === "use" && !deactivating && economyEnabled() && ["l", "a", "m"].includes(time);
+      let forced = false;
       const economy = new ActionEconomy(actor);
       const ready = () => {
+        this.refreshActor();
         const config = this.readConfiguration(actor);
         return this.actor === actor && this.token === token && config.activePreset === preset && config.panels.combat
           && (game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
           && ["source", "indice", "itemId"].every(field => config.presets[preset].slots[key]?.[field] === reference?.[field])
           && this.resolveShortcut(actor, config.presets[preset].slots[key])?.action === action
+          && (!item || actor.items?.get(item.id) === item)
+          && [action.properties?.activable, action.properties?.temporary, action.properties?.enabled].every((value, index) => value === activationState[index])
           && action.actionTypeFinal === time && !(toggle && action.properties.enabled === true)
           && this.shortcutUses(action, item)?.value !== 0;
       };
       if (mode === "use" && !deactivating) {
         if (!["l", "a", "m", "f", "none"].includes(time)) return warn("CO2PRISM.Combat.UnknownActionTime");
         if (this.shortcutUses(action, item)?.value === 0) return warn("CO2PRISM.Combat.ActionExhausted");
-        if (charged && !economy.getSnapshot().canSpend[time]) return warn("CO2PRISM.Combat.NoActionTime");
+        if (charged && !economy.getSnapshot().canSpend[time]) {
+          const accepted = await foundry.applications.api.DialogV2.confirm({
+            window: { title: game.i18n.localize("CO2PRISM.Combat.InsufficientTimeTitle") },
+            content: `<p>${game.i18n.localize("CO2PRISM.Combat.InsufficientTimeConfirm")}</p>`,
+            yes: { label: game.i18n.localize("CO2PRISM.Combat.Yes") },
+            no: { label: game.i18n.localize("CO2PRISM.Combat.No"), default: true }, rejectClose: false
+          });
+          if (accepted !== true) return false;
+          if (typeof action.isVisible === "function" && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
+          if (!ready()) return warn("CO2PRISM.CommandUnavailable");
+          forced = economyEnabled() && !economy.getSnapshot().canSpend[time];
+        }
       }
       let confirmed = false, rejected = false, starts = 0, ambiguous = false, expectedType;
       if (charged) {
@@ -754,7 +793,8 @@ class PrismBar {
               rejected = "CO2PRISM.Combat.ConditionsUnavailable"; return false;
             }
             if (!ready()) { rejected = "CO2PRISM.CommandUnavailable"; return false; }
-            if (!economy.getSnapshot().canSpend[time]) { rejected = "CO2PRISM.Combat.NoActionTime"; return false; }
+            if (economyEnabled() && !forced && !economy.getSnapshot().canSpend[time]) { rejected = "CO2PRISM.Combat.NoActionTime"; return false; }
+            if (forced && economy.getSnapshot().canSpend[time]) forced = false;
             return true;
           })());
         };
@@ -794,8 +834,10 @@ class PrismBar {
           return false;
         }
         // Dépense après confirmation, toujours sur l'acteur qui a exécuté l'action.
-        const spent = await economy.spend(time);
-        if (!spent.success) return warn("CO2PRISM.Combat.ActionTimeConflict");
+        if (economyEnabled() && !forced) {
+          const spent = await economy.spend(time);
+          if (!spent.success) return warn("CO2PRISM.Combat.ActionTimeConflict");
+        }
       }
       return true;
     } catch (error) {

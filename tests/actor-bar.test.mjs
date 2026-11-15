@@ -9,7 +9,7 @@ function setup() {
   const context = vm.createContext({
     structuredClone,
     Hooks: { once() {}, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
-    game: { user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
+    game: { combats: { active: { started: true } }, user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
     canvas: { ready: true, tokens: { controlled: [] } }
   });
   vm.runInContext('globalThis.ActionEconomy = (() => {' + readFileSync(new URL('../module/combat/action-economy.mjs', import.meta.url), 'utf8').replace('export class ActionEconomy', 'class ActionEconomy') + '; return ActionEconomy; })()', context);
@@ -1320,6 +1320,9 @@ async function setupTimedExecution(time = "a") {
   const { a, item, action, context, hooks, calls, bar, click, target } = env;
   action.actionTypeFinal = time;
   const behavior = { result: "success" };
+  context.foundry.applications ??= {};
+  context.foundry.applications.api ??= {};
+  context.foundry.applications.api.DialogV2 = { confirm: async () => false };
   const economy = new context.ActionEconomy(a);
   const activate = async options => {
     if (behavior.beforeActivate) await behavior.beforeActivate();
@@ -1344,6 +1347,61 @@ async function setupTimedExecution(time = "a") {
   const run = modifiers => bar.executeShortcut(click(modifiers), target());
   return { ...env, economy, behavior, run };
 }
+
+test("13 modes : hors combat, non commencé, actif et off sans écriture cachée", async () => {
+  const { context, economy, run, calls, writes } = await setupTimedExecution();
+  let mode = "combat";
+  const get = context.game.settings.get;
+  context.game.settings.get = (module, key) => key === "economyMode" ? mode : get(module, key);
+  await economy.spend("l");
+  const count = writes.length;
+  for (const started of [false, true]) {
+    context.game.combats.active.started = started;
+    for (const selected of ["off", "combat", "always"]) {
+      mode = selected;
+      const active = selected === "always" || (selected === "combat" && started);
+      assert.equal(await run(), !active);
+      assert.equal(writes.length, count);
+    }
+  }
+  assert.equal(calls.length, 3);
+});
+
+test("13 confirmation : non/fermeture, oui sans dépense, annulation CO2", async () => {
+  const { context, economy, run, calls, writes, behavior } = await setupTimedExecution();
+  await economy.spend("l");
+  const count = writes.length;
+  for (const answer of [false, null, true]) {
+    context.foundry.applications.api.DialogV2.confirm = async () => answer;
+    assert.equal(await run(), answer === true);
+    assert.equal(writes.length, count);
+  }
+  assert.equal(calls.length, 1);
+  behavior.result = "cancel";
+  assert.equal(await run(), false);
+  assert.equal(writes.length, count);
+});
+
+test("13 attente : bonus disponible, doubles clics et contexte revérifié", async () => {
+  const { context, economy, run, bar, calls, a, writes } = await setupTimedExecution();
+  await economy.spend("l");
+  context.foundry.applications.api.DialogV2.confirm = async () => {
+    assert.equal(await run(), false);
+    await economy.grant("a"); return true;
+  };
+  assert.equal(await run(), true);
+  assert.equal(economy.getSnapshot().bonus.a, 0);
+  for (const mutate of [() => { context.canvas.tokens.controlled = []; }, () => { a.testUserPermission = () => false; },
+    () => { a.flags.co2prism.presets[1].slots['left-hand'].indice = 99; }]) {
+    const selection = context.canvas.tokens.controlled, permission = a.testUserPermission;
+    context.foundry.applications.api.DialogV2.confirm = async () => { mutate(); return true; };
+    const count = writes.length;
+    assert.equal(await run(), false);
+    assert.equal(writes.length, count);
+    context.canvas.tokens.controlled = selection; a.testUserPermission = permission; bar.refreshActor();
+  }
+  assert.equal(calls.length, 1);
+});
 
 test("12C M : bonus spécialisé, M normal, AM ; gratuit sans budget", async () => {
   const { economy, run, calls, action, writes } = await setupTimedExecution("m");

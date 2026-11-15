@@ -67,13 +67,26 @@
       "ExecutionUnconfirmed": "CO2 did not confirm this action's execution. No time was spent; check the native result.",
       "ActionTimeConflict": "Action executed, but its time could not be spent. The budget changed or could not be saved; check it manually.",
       "FutureBudget": "Action times — display only, management coming later",
-      "UnresolvedSlots": "This preset has saved shortcuts; their reference format is not supported yet."
+      "UnresolvedSlots": "This preset has saved shortcuts; their reference format is not supported yet.",
+      "InsufficientTimeHint": "No action time available: click to confirm execution without spending time.",
+      "InsufficientTimeTitle": "Insufficient action time",
+      "InsufficientTimeConfirm": "You do not have enough actions available to perform this action. Do you want to trigger it anyway?",
+      "Yes": "Yes",
+      "No": "No"
     },
     "Skills": "Skills",
     "OpenSkills": "Expand the Skills panel",
     "CloseSkills": "Collapse the Skills panel",
     "SkillBonuses": "Skill bonuses",
-    "Abilities": { "for": "STR", "agi": "AGI", "con": "CON", "cha": "CHA", "int": "INT", "vol": "WIL", "per": "PER" },
+    "Abilities": {
+      "for": "STR",
+      "agi": "AGI",
+      "con": "CON",
+      "cha": "CHA",
+      "int": "INT",
+      "vol": "WIL",
+      "per": "PER"
+    },
     "ConfigUnavailable": "Configuration requires ownership of the selected actor or GM permissions.",
     "ConfigError": "The CO2 Prism configuration could not be saved. See the console for details.",
     "CommandUnavailable": "Command unavailable for the current selection, permissions or resources, or while another action is running.",
@@ -85,6 +98,11 @@
       "fortune": "Fortune",
       "mana": "Mana",
       "hp": "Hit points"
-    }
+    },
+    "EconomyMode": "Action budget",
+    "EconomyModeHint": "Display and use of the budget; changing mode does not reset it.",
+    "EconomyAlways": "Always visible and active",
+    "EconomyCombat": "Visible and active only in combat",
+    "EconomyOff": "Hidden and inactive"
   }
 }

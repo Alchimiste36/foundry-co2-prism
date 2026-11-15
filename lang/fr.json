@@ -67,13 +67,26 @@
       "ExecutionUnconfirmed": "CO2 n’a pas confirmé l’exécution de cette action. Aucun temps débité ; vérifiez le résultat natif.",
       "ActionTimeConflict": "Action exécutée, mais son temps n’a pas pu être débité. Le budget a changé ou son enregistrement a échoué ; vérifiez-le manuellement.",
       "FutureBudget": "Temps d’action — présentation uniquement, gestion à venir",
-      "UnresolvedSlots": "Des raccourcis sont enregistrés dans ce preset ; leur format de référence n’est pas encore pris en charge."
+      "UnresolvedSlots": "Des raccourcis sont enregistrés dans ce preset ; leur format de référence n’est pas encore pris en charge.",
+      "InsufficientTimeHint": "Temps indisponible : cliquer pour confirmer une exécution sans dépense.",
+      "InsufficientTimeTitle": "Temps insuffisant",
+      "InsufficientTimeConfirm": "Vous n'avez plus assez d'actions disponibles pour réaliser cette action. Voulez-vous quand même déclencher l'action ?",
+      "Yes": "Oui",
+      "No": "Non"
     },
     "Skills": "Compétences",
     "OpenSkills": "Déployer le volet Compétences",
     "CloseSkills": "Replier le volet Compétences",
     "SkillBonuses": "Bonus de compétence",
-    "Abilities": { "for": "FOR", "agi": "AGI", "con": "CON", "cha": "CHA", "int": "INT", "vol": "VOL", "per": "PER" },
+    "Abilities": {
+      "for": "FOR",
+      "agi": "AGI",
+      "con": "CON",
+      "cha": "CHA",
+      "int": "INT",
+      "vol": "VOL",
+      "per": "PER"
+    },
     "ConfigUnavailable": "Configuration réservée au propriétaire de l’acteur sélectionné ou au MJ.",
     "ConfigError": "La configuration CO2 Prism n’a pas pu être enregistrée. Consultez la console pour les détails.",
     "CommandUnavailable": "Commande indisponible pour la sélection, les droits ou les ressources actuels, ou pendant une autre action.",
@@ -85,6 +98,11 @@
       "fortune": "Chance",
       "mana": "Mana",
       "hp": "Points de vie"
-    }
+    },
+    "EconomyMode": "Budget d’actions",
+    "EconomyModeHint": "Affichage et utilisation du budget ; changer ce mode ne réinitialise pas le budget.",
+    "EconomyAlways": "Toujours affiché et actif",
+    "EconomyCombat": "Affiché et actif uniquement en combat",
+    "EconomyOff": "Ni affiché ni actif"
   }
 }

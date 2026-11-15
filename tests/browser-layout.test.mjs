@@ -27,7 +27,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const ready = [];
       const hooks = new Map();
       const Hooks = { once(name, fn) { if (name === "ready") ready.push(fn); }, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } };
-      const settings = { size: "M", position: {}, locked: false };
+      const settings = { size: "M", position: {}, locked: false, economyMode: "always" };
       const warnings = [];
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
@@ -37,7 +37,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
         i18n: { localize: key => budgetTranslations[key] ?? key } };
       let sequence = 0;
       const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
-        applications: { handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
+        applications: { api: { DialogV2: { confirm: async () => false } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/applications/_module.mjs").replace(/import \{ ActionEconomy \} from [^;]+;/, "")}
       (async () => {
@@ -783,6 +783,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(halos() === 'a,m', size + ' automatic normal M spend halos');
             await paidClick(); movement('0 / 30', '0 / 6');
             check(halos() === '', size + ' automatic exhaustion halos');
+            const exhausted = bar.combatRows[0].querySelector('.co2prism-slot-executable');
+            check(exhausted.classList.contains('co2prism-time-insufficient') && getComputedStyle(exhausted).pointerEvents !== 'none'
+              && exhausted.getAttribute('aria-disabled') === 'false', size + ' time restriction must remain clickable');
             const executions = nativeExecutions; await paidClick();
             check(nativeExecutions === executions, size + ' exhausted budget executed');
           }
@@ -814,6 +817,26 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             }
             check(bar.budgetScroll.scrollWidth <= bar.budgetScroll.clientWidth + 1, size + ' halo artificial scroll');
           }
+          nativeAction.properties.temporary = false; nativeAction.actionTypeFinal = 'm';
+          await resetBudget(); await economy.spend('l'); bar.refreshActor();
+          const spentFlag = JSON.stringify(actor.flags.co2prism.actionEconomy);
+          for (const mode of ['off', 'combat', 'always']) {
+            settings.economyMode = mode;
+            for (const started of [false, true]) {
+              game.combats = { active: { started } }; bar.refreshActor();
+              const enabled = mode === 'always' || (mode === 'combat' && started);
+              check(bar.budgetScroll.hidden === !enabled, 'Mode budget visibility ' + mode + started);
+              movement(enabled ? '0 / 20' : '10', enabled ? '0 / 4' : '2');
+              const node = bar.combatRows[0].querySelector('.co2prism-slot-executable');
+              check(node.classList.contains('co2prism-time-insufficient') === enabled, 'Mode shortcut greying');
+              check(node.querySelector('.co2prism-slot-time')?.textContent === 'M', 'Informative time badge');
+              const executions = nativeExecutions;
+              await paidClick();
+              check(nativeExecutions === executions + Number(!enabled), 'Mode execution ' + mode + started);
+              check(JSON.stringify(actor.flags.co2prism.actionEconomy) === spentFlag, 'Mode changed hidden budget');
+            }
+          }
+          settings.economyMode = 'always'; bar.refreshActor();
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";
