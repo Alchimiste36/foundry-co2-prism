@@ -9,6 +9,7 @@ function setup() {
   const hooks = new Map();
   const context = vm.createContext({
     structuredClone,
+    foundry: { applications: { api: { DialogV2: { wait: async () => "validate" } } } },
     Hooks: { once(name, fn) { hooks.set(name, fn); }, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
     game: { combats: { active: { started: true } }, user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
     canvas: { ready: true, tokens: { controlled: [] } }
@@ -103,17 +104,17 @@ test("15C prévisions : tranches 0/1/5/6/10/11, droits et clôture informative s
   // Le test ne persiste pas l'ouverture de Combat pour isoler les commandes du panneau.
   const read = bar.readConfiguration.bind(bar);
   bar.readConfiguration = actor => { const config = read(actor); config.panels.combat = true; return config; };
-  for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
-    assert.equal(bar.toggleMovement(), true);
+  for (const used of [0, 1, 5, 6, 10, 11]) {
+    assert.equal(await bar.toggleMovement(), true);
     bar.movementTracker.update(t.document, { id: String(used), origin: { x: 0, y: 0 },
       passed: { waypoints: [{ x: 100, y: 0, terrain: { testCost: used * 2, testDistance: used * 2, testSpaces: used } }], spaces: used, distance: used * 2, cost: used * 2 } });
     const view = bar.movementView(t.document);
-    assert.equal(view.state.theoreticalActions, required);
-    assert.equal(view.available, 2); assert.equal(view.blocks, 2);
-    assert.equal(view.excess, Math.max(0, used - 10));
+    assert.equal(view.available, 2);
+    assert.equal(view.capacity, 5); assert.equal(view.remaining, Math.max(0, 5 - used));
+    assert.equal(view.excess, Math.max(0, used - 5));
     mode = "off";
-    assert.equal(bar.movementView(t.document).blocks, 1);
-    assert.equal(bar.movementView(t.document).excess, 0);
+    assert.equal(bar.movementView(t.document).capacity, view.capacity);
+    assert.equal(bar.movementView(t.document).excess, Math.max(0, used - 5));
     mode = "always";
     mode = "off";
     assert.equal(await bar.toggleMovement(), true);
@@ -121,7 +122,7 @@ test("15C prévisions : tranches 0/1/5/6/10/11, droits et clôture informative s
     assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
   }
   t.document.canUserModify = () => false;
-  assert.equal(bar.toggleMovement(), false);
+  assert.equal(await bar.toggleMovement(), false);
 });
 
 function setupMovementValidation() {
@@ -145,7 +146,7 @@ function setupMovementValidation() {
   const select = t => { context.canvas.tokens.controlled = t ? [t] : []; hooks.get("controlToken")(); };
   select(t);
   const start = (used, selected = t, costCells = used) => {
-    select(selected); assert.equal(bar.toggleMovement(), true);
+    select(selected); void bar.toggleMovement(); assert.equal(bar.movementTracker.getSnapshot(selected.document).success, true);
     hooks.get("moveToken")(selected.document, { id: "move-" + (++serial), origin: { x: 0, y: 0 },
       passed: { waypoints: [{ x: 100, y: 0, terrain: { testCost: costCells * 2, testDistance: used * 2, testSpaces: used } }], distance: used * 2, spaces: used, cost: costCells * 2 } });
   };
@@ -153,50 +154,288 @@ function setupMovementValidation() {
     economy: new context.ActionEconomy(a), setMode: value => { mode = value; } };
 }
 
-test("Validation : budget inactif gratuit, suivi exact 0/1/5/6/10/11 cases", async () => {
-  for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
+test("Validation : segment réel à coût nul inclus, budget inactif gratuit", async () => {
+  for (const used of [0, 1, 5, 6, 10, 11]) {
     const { bar, t, start, economy, warnings } = setupMovementValidation();
     start(used);
-    assert.equal(await bar.toggleMovement(), true);
-    assert.equal(economy.getSnapshot().movementsRemaining, Math.max(0, 2 - required));
-    assert.equal(bar.movementResults.get(t.document).consumedCount, Math.min(2, required));
-    assert.equal(bar.movementResults.get(t.document).missingCount, Math.max(0, required - 2));
-    assert.equal(warnings.length, used > 10 ? 1 : 0);
-    assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+    assert.equal(await bar.validateMovement(bar.movementToken()), true);
+    assert.equal(economy.getSnapshot().movementsRemaining, 1);
+    assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
+    assert.equal(bar.movementResults.get(t.document).missingCount, 0);
+    assert.equal(warnings.length, used > 5 ? 1 : 0);
+    assert.equal(bar.movementTracker.getSnapshot(t.document).success, true);
   }
   for (const [mode, active] of [["off", true], ["combat", false]]) {
     const { bar, context, start, economy, warnings, setMode } = setupMovementValidation();
     setMode(mode); context.game.combats.active.started = active; start(99);
-    assert.equal(await bar.toggleMovement(), true);
+    assert.equal(await bar.validateMovement(bar.movementToken()), true);
     assert.equal(economy.getSnapshot().movementsRemaining, 2); assert.equal(warnings.length, 0);
   }
+});
+
+test("Sessions : enchaînement, fermeture sans débit et reset", async () => {
+  const { bar, t, start, economy, hooks } = setupMovementValidation();
+  start(3); t.document.x = 100;
+  assert.equal(await bar.validateMovement(t.document), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementView(t.document).state.start.x, 100);
+  assert.equal(bar.movementView(t.document).state.segmentCount, 0);
+  assert.equal(await bar.validateMovement(t.document), false);
+  assert.equal(await bar.resetMovement(), false);
+  assert.equal(await bar.toggleMovement(), true);
+  t.document.x = 200;
+  assert.equal(await bar.toggleMovement(), true);
+  hooks.get("moveToken")(t.document, { id: "second", origin: { x: 200, y: 0 },
+    passed: { waypoints: [{ x: 300, y: 0, terrain: { testCost: 14, testDistance: 14, testSpaces: 7 } }] } });
+  t.document.x = 300;
+  t.document.update = async data => { Object.assign(t.document, data); return t.document; };
+  assert.equal(await bar.resetMovement(), true);
+  assert.equal(t.document.x, 200);
+  assert.equal(await bar.validateMovement(t.document), false);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+});
+
+test("Budget épuisé : ouverture informative et aucun débit", async () => {
+  const { bar, context, t, start, economy, warnings } = setupMovementValidation();
+  start(7);
+  await economy.spendMovements(2);
+  assert.equal(await bar.validateMovement(t.document), false);
+  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(warnings.length, 0);
+  context.foundry.applications.api.DialogV2.wait = async () => "reset";
+  t.document.update = async data => { Object.assign(t.document, data); return t.document; };
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(bar.movementView(t.document), null);
+  assert.equal(await bar.validateMovement(t.document), false);
+});
+
+test("Aucun trajet, événement immobile et aller-retour à coût arrondi nul", async () => {
+  const { bar, t, economy, hooks } = setupMovementValidation();
+  bar.toggleMovement();
+  assert.equal(await bar.validateMovement(t.document), false);
+  hooks.get("moveToken")(t.document, { id: "still", origin: { x: 0, y: 0 },
+    passed: { waypoints: [{ x: 0, y: 0 }] } });
+  assert.equal(bar.movementView(t.document).state.segmentCount, 0);
+  for (const [id, from, to] of [["out", 0, 100], ["back", 100, 0]]) {
+    hooks.get("moveToken")(t.document, { id, origin: { x: from, y: 0 },
+      passed: { waypoints: [{ x: to, y: 0, terrain: { testCost: 0, testDistance: 0, testSpaces: 0 } }] } });
+  }
+  assert.equal(bar.movementView(t.document).state.segmentCount, 2);
+  assert.equal(bar.movementView(t.document).state.cellsUsed, 0);
+  assert.equal(await bar.validateMovement(t.document), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+});
+
+test("Fermeture validée : position conservée et nouvelle origine", async () => {
+  const { bar, t, start, economy } = setupMovementValidation();
+  start(3); t.document.x = 100;
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(t.document.x, 100);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(bar.movementView(t.document).state.start.x, 100);
+  assert.equal(bar.movementView(t.document).state.segmentCount, 0);
+});
+
+test("Confirmation : textes FR exacts, validation unique et fermeture après redémarrage", async () => {
+  const { bar, context, t, start, economy } = setupMovementValidation();
+  const texts = JSON.parse(readFileSync(new URL("../lang/fr.json", import.meta.url), "utf8")).CO2PRISM.Movement;
+  context.game.i18n.localize = key => texts[key.split(".").at(-1)] ?? key;
+  let config;
+  context.foundry.applications.api.DialogV2.wait = async value => { config = value; return "validate"; };
+  start(2); t.document.x = 100;
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(config.window.title, "Déplacement en cours");
+  assert.equal(config.content, "<p>Que voulez-vous faire ?</p>");
+  assert.deepEqual(Array.from(config.buttons, button => button.label), ["Valider le mouvement", "Annuler le mouvement"]);
+  assert.equal(config.rejectClose, false);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(t.document.x, 100);
+  assert.equal(bar.movementOpenToken, null);
+  assert.equal(bar.movementOpenActor, null);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+});
+
+test("Confirmation : annulation remet le token au départ sans débit", async () => {
+  const { bar, context, t, start, economy } = setupMovementValidation();
+  context.foundry.applications.api.DialogV2.wait = async () => "reset";
+  t.document.update = async data => { Object.assign(t.document, data); return t.document; };
+  start(2); t.document.x = 100;
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(t.document.x, 0);
+  assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  assert.equal(bar.movementOpenToken, null);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+});
+
+test("Confirmation : X ou Échap conserve le trajet ; aller-retour confirmé", async () => {
+  const { bar, context, t, start, economy } = setupMovementValidation();
+  let calls = 0;
+  context.foundry.applications.api.DialogV2.wait = async () => { calls++; return null; };
+  start(0); // Segment réel, coût nul et position finale identique au départ.
+  const session = bar.movementView(t.document).state.sessionId;
+  for (let i = 0; i < 2; i++) {
+    assert.equal(await bar.toggleMovement(), false);
+    assert.equal(bar.movementView(t.document).state.sessionId, session);
+    assert.equal(bar.movementView(t.document).state.segmentCount, 1);
+    assert.equal(t.document.x, 0);
+    assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  }
+  assert.equal(calls, 2);
+});
+
+test("Confirmation : aucun dialogue sans trajet ou après reset", async () => {
+  const { bar, context, t, start, economy } = setupMovementValidation();
+  context.foundry.applications.api.DialogV2.wait = () => assert.fail("Dialogue inattendu");
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(await bar.toggleMovement(), true);
+  start(2);
+  t.document.update = async data => { Object.assign(t.document, data); return t.document; };
+  assert.equal(await bar.resetMovement(), true);
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(bar.movementOpenToken, null);
+  assert.equal(economy.getSnapshot().movementsRemaining, 2);
+});
+
+test("Confirmation : verrou pendant attente et exécution du choix", async () => {
+  const { bar, context, a, t, start, economy } = setupMovementValidation();
+  let answer, save;
+  context.foundry.applications.api.DialogV2.wait = () => new Promise(resolve => { answer = resolve; });
+  start(2);
+  const pending = bar.toggleMovement();
+  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(await bar.validateMovement(t.document), false);
+  assert.equal(await bar.resetMovement(), false);
+  assert.equal(await bar.toggleMovementZones(), false);
+  const setFlag = a.setFlag;
+  a.setFlag = (...args) => new Promise(resolve => { save = async () => resolve(await setFlag(...args)); });
+  answer("validate");
+  while (!save) await Promise.resolve();
+  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(await bar.validateMovement(t.document), false);
+  await save();
+  assert.equal(await pending, true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementClosures.has(t.document), false);
+});
+
+test("Confirmation : réponse tardive sans effet si le contexte change", async () => {
+  for (const mutate of [
+    env => env.select(env.create()),
+    env => { env.t.document.actor = env.configuredActor("replacement"); },
+    env => { env.context.canvas.scene = {}; },
+    env => { env.bar.movementTracker.cancel(env.t.document); env.bar.movementTracker.start(env.t.document); },
+    env => env.bar.destroy(),
+    env => { env.bar.element = { isConnected: false }; },
+    env => env.hooks.get("deleteCombat")({})
+  ]) {
+    const env = setupMovementValidation(), { bar, context, t, start, economy } = env;
+    let answer;
+    context.foundry.applications.api.DialogV2.wait = () => new Promise(resolve => { answer = resolve; });
+    start(2); const pending = bar.toggleMovement();
+    mutate(env); answer("reset");
+    assert.equal(await pending, false);
+    assert.equal(economy.getSnapshot().movementsRemaining, 2);
+    assert.equal(bar.movementClosures.has(t.document), false);
+  }
+});
+
+test("Confirmation : erreurs de validation et de retour conservent la session", async () => {
+  for (const choice of ["validate", "reset"]) {
+    const { bar, context, a, t, start, economy } = setupMovementValidation();
+    context.foundry.applications.api.DialogV2.wait = async () => choice;
+    a.setFlag = async () => { throw Error("offline"); };
+    t.document.update = async () => { throw Error("return failed"); };
+    start(2);
+    const session = bar.movementView(t.document).state.sessionId;
+    assert.equal(await bar.toggleMovement(), false);
+    assert.equal(bar.movementView(t.document).state.sessionId, session);
+    assert.equal(bar.movementView(t.document).state.segmentCount, 1);
+    assert.equal(bar.movementOpenToken, t.document);
+    assert.ok(bar.movementErrors.get(t.document));
+    assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  }
+});
+
+test("Confirmation : finish échoue après débit, reprise sans seconde dépense", async () => {
+  const { bar, context, t, start, economy } = setupMovementValidation();
+  context.foundry.applications.api.DialogV2.wait = async () => "validate";
+  start(2);
+  const finish = bar.movementTracker.finish.bind(bar.movementTracker);
+  bar.movementTracker.finish = () => ({ success: false });
+  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementOpenToken, t.document);
+  bar.movementTracker.finish = finish;
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementOpenToken, null);
+});
+
+test("Confirmation : ne pas fermer une session nouvelle déplacée ou remplacée", async () => {
+  for (const replace of [false, true]) {
+    const { bar, context, t, start, economy, hooks } = setupMovementValidation();
+    context.foundry.applications.api.DialogV2.wait = async () => "validate";
+    start(2); t.document.x = 100;
+    const validate = bar.validateMovement.bind(bar);
+    bar.validateMovement = async (...args) => {
+      const result = await validate(...args);
+      if (replace) { bar.movementTracker.cancel(t.document); bar.movementTracker.start(t.document); }
+      else hooks.get("moveToken")(t.document, { id: "new-path", origin: { x: 100, y: 0 },
+        passed: { waypoints: [{ x: 200, y: 0, terrain: { testCost: 2, testDistance: 2, testSpaces: 1 } }] } });
+      return result;
+    };
+    assert.equal(await bar.toggleMovement(), false);
+    assert.equal(bar.movementTracker.getSnapshot(t.document).success, true);
+    assert.equal(bar.movementOpenToken, t.document);
+    assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  }
+});
+
+test("Confirmation : changement pendant sauvegarde sans fermer une session étrangère", async () => {
+  const { bar, context, a, t, start, economy } = setupMovementValidation();
+  context.foundry.applications.api.DialogV2.wait = async () => "validate";
+  let save;
+  const setFlag = a.setFlag;
+  a.setFlag = (...args) => new Promise(resolve => { save = async () => resolve(await setFlag(...args)); });
+  start(2);
+  const pending = bar.toggleMovement();
+  while (!save) await Promise.resolve();
+  bar.movementTracker.cancel(t.document); bar.movementTracker.start(t.document);
+  const session = bar.movementView(t.document).state.sessionId;
+  await save();
+  assert.equal(await pending, false);
+  assert.equal(bar.movementView(t.document).state.sessionId, session);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
 });
 
 test("15D bonus et dépenses externes : réserve courante et un seul avertissement final", async () => {
   const { bar, t, start, economy, warnings } = setupMovementValidation();
   start(16); assert.equal(warnings.length, 0);
   await economy.grant("m"); await economy.grant("am"); await economy.spend("a");
-  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(await bar.validateMovement(bar.movementToken()), true);
   const result = bar.movementResults.get(t.document);
-  assert.equal(result.availableBefore, 3); assert.equal(result.consumedCount, 3); assert.equal(result.missingCount, 1);
-  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
-  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(result.availableBefore, 3); assert.equal(result.consumedCount, 1); assert.equal(result.missingCount, 0);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 11);
+  assert.equal(economy.getSnapshot().movementsRemaining, 2);
 });
 
 test("15D erreur atomique et mesure invalide : session ouverte, réessai sans double débit", async () => {
   const { bar, a, t, start, economy, warnings, scene } = setupMovementValidation();
   start(6); scene.grid.type = 0;
-  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(await bar.validateMovement(bar.movementToken()), false);
   assert.equal(bar.movementErrors.get(t.document), "invalid-measurement");
   scene.grid.type = 1;
   const save = a.setFlag; a.setFlag = async () => { throw Error("offline"); };
-  assert.equal(await bar.toggleMovement(), false);
+  assert.equal(await bar.validateMovement(bar.movementToken()), false);
   assert.equal(bar.movementTracker.getSnapshot(t.document).success, true);
   assert.equal(economy.getSnapshot().movementsRemaining, 2);
   assert.equal(bar.movementResults.get(t.document).consumedCount, 0);
   a.setFlag = save;
-  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
-  assert.equal(warnings.length, 0);
+  assert.equal(await bar.validateMovement(bar.movementToken()), true); assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(warnings.length, 1);
 });
 
 test("15D sélection pendant sauvegarde et double clic : acteur initial uniquement", async () => {
@@ -204,12 +443,12 @@ test("15D sélection pendant sauvegarde et double clic : acteur initial uniqueme
   start(6);
   const save = a.setFlag; let release;
   a.setFlag = (...args) => new Promise(resolve => { release = async () => resolve(await save(...args)); });
-  const pending = bar.toggleMovement(); await Promise.resolve(); await Promise.resolve();
-  assert.equal(bar.toggleMovement(), false);
+  const pending = bar.validateMovement(bar.movementToken()); await Promise.resolve(); await Promise.resolve();
+  assert.equal(await bar.validateMovement(bar.movementToken()), false);
   assert.equal(await bar.resetMovement(), false);
   const b = configuredActor("other", { co2prism: { panels: { combat: true } } });
   select(create(b)); await release();
-  assert.equal(await pending, true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(await pending, true); assert.equal(economy.getSnapshot().movementsRemaining, 1);
   assert.equal(new economy.constructor(b).getSnapshot().movementsRemaining, 2);
   assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
 });
@@ -219,7 +458,7 @@ test("15D contexte invalidé dans la file : reset, suppression et arrêt de comb
     env => env.hooks.get("deleteCombat")({}), env => { env.t.document.canUserModify = () => false; },
     env => { env.bar.movementTracker.cancel(env.t.document); env.bar.movementTracker.start(env.t.document); }]) {
     const env = setupMovementValidation(); const { bar, start, economy } = env;
-    start(6); const pending = bar.toggleMovement(); mutation(env);
+    start(6); const pending = bar.validateMovement(bar.movementToken()); mutation(env);
     assert.equal(await pending, false); assert.equal(economy.getSnapshot().movementsRemaining, 2);
   }
 });
@@ -229,42 +468,42 @@ test("15D clôture différée après succès : résultat conservé et aucun red�
   start(6);
   const finish = bar.movementTracker.finish.bind(bar.movementTracker);
   bar.movementTracker.finish = () => ({ success: false, reason: "movement-in-progress" });
-  assert.equal(await bar.toggleMovement(), false); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(await bar.validateMovement(bar.movementToken()), false); assert.equal(economy.getSnapshot().movementsRemaining, 1);
   assert.equal(bar.movementErrors.get(t.document), "closure-pending");
   bar.movementTracker.finish = finish;
-  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(await bar.validateMovement(bar.movementToken()), true); assert.equal(economy.getSnapshot().movementsRemaining, 1);
 });
 
 test("15D deux tokens d'un acteur : réserve partagée à chaque validation", async () => {
   const { bar, start, economy, create, warnings } = setupMovementValidation();
-  start(5); assert.equal(await bar.toggleMovement(), true);
-  start(6, create()); assert.equal(await bar.toggleMovement(), true);
+  start(5); assert.equal(await bar.validateMovement(bar.movementToken()), true);
+  start(6, create()); assert.equal(await bar.validateMovement(bar.movementToken()), true);
   assert.equal(economy.getSnapshot().movementsRemaining, 0);
   assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
 });
 
 test("15D validations simultanées de deux tokens : file acteur, réserve actualisée", async () => {
   const { bar, t, start, economy, create, warnings } = setupMovementValidation();
-  start(5); const first = bar.toggleMovement();
-  const secondToken = create(); start(6, secondToken); const second = bar.toggleMovement();
+  start(5); const first = bar.validateMovement(bar.movementToken());
+  const secondToken = create(); start(6, secondToken); const second = bar.validateMovement(bar.movementToken());
   assert.deepEqual(await Promise.all([first, second]), [true, true]);
   assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
   assert.equal(bar.movementResults.get(secondToken.document).consumedCount, 1);
   assert.equal(economy.getSnapshot().movementsRemaining, 0); assert.equal(warnings.length, 1);
 });
 
-test("Archive6 capacité et validation cumulées : seuils 4/7, coût et notification exacts", async () => {
-  for (const [used, required, excess] of [[4, 1, 0], [5, 2, 0], [7, 2, 0], [8, 3, 1]]) {
+test("Capacité d’une M fractionnaire : seuil 4, débit fixe et dépassement", async () => {
+  for (const [used, excess] of [[4, 0], [5, 1], [7, 3], [8, 4]]) {
     const { bar, a, t, start, economy, warnings } = setupMovementValidation();
     a.system.attributes.movement.value = 7.2;
     start(used);
     const view = bar.movementView(t.document);
-    assert.equal(view.capacity, 7); assert.equal(view.state.theoreticalActions, required); assert.equal(view.excess, excess);
-    assert.equal(await bar.toggleMovement(), true);
-    assert.equal(bar.movementResults.get(t.document).consumedCount, Math.min(2, required));
+    assert.equal(view.capacity, 4); assert.equal(view.excess, excess);
+    assert.equal(await bar.validateMovement(bar.movementToken()), true);
+    assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
     assert.equal(warnings.length, excess ? 1 : 0);
-    if (excess) assert.equal(warnings[0].excess, 1);
-    assert.equal(economy.getSnapshot().movementsRemaining, Math.max(0, 2 - required));
+    if (excess) assert.equal(warnings[0].excess, excess);
+    assert.equal(economy.getSnapshot().movementsRemaining, 1);
   }
 });
 
@@ -273,20 +512,19 @@ test("Archive6 garde asynchrone : vitesse brute, grille et arrondi modifiés", a
     env => { env.scene.grid.size = 200; }, env => { env.context.game.settings.get = (_, key) => key === "economyMode" ? "always" : "up"; }]) {
     const env = setupMovementValidation(); const { bar, a, start, economy } = env;
     a.system.attributes.movement.value = 7.2; start(7);
-    const pending = bar.toggleMovement(); mutate(env);
+    const pending = bar.validateMovement(bar.movementToken()); mutate(env);
     assert.equal(await pending, false); assert.equal(economy.getSnapshot().movementsRemaining, 2);
   }
 });
 
 test("Archive6 seuil nul : budget inactif informatif et coût positif réalisable", async () => {
   const { bar, a, t, start, economy, setMode } = setupMovementValidation();
-  a.system.attributes.movement.value = 0.2; // 0,1 case brute/M, nearest : première case à 5 M.
+  a.system.attributes.movement.value = 0.2; // Capacité arrondie à zéro.
   start(1);
-  assert.equal(bar.movementView(t.document).state.theoreticalActions, 5);
   assert.equal(bar.movementView(t.document).capacity, 0);
   setMode("off");
-  assert.equal(bar.movementView(t.document).blocks, 1); assert.equal(bar.movementView(t.document).excess, 0);
-  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 2);
+  assert.equal(bar.movementView(t.document).capacity, 0); assert.equal(bar.movementView(t.document).excess, 1);
+  assert.equal(await bar.validateMovement(bar.movementToken()), true); assert.equal(economy.getSnapshot().movementsRemaining, 2);
 });
 
 test("Zone Tactique : instantané M/AM et vitesse brute, une action hors budget sans débit", async () => {
@@ -301,17 +539,17 @@ test("Zone Tactique : instantané M/AM et vitesse brute, une action hors budget 
   assert.equal(await bar.toggleMovementZones(), true);
   assert.equal(writes.length, count);
   assert.equal(captured[0].token, t.document); assert.equal(captured[0].range.cellsPerActionRaw, 3.5);
-  assert.equal(captured[0].range.rounding, "nearest"); assert.equal(captured[0].range.actions, 2);
+  assert.equal(captured[0].range.rounding, "nearest"); assert.deepEqual(Object.keys(captured[0].range).sort(), ["cellsPerActionRaw", "rounding"]);
   assert.notEqual(captured[0].state.start, bar.movementTracker.getSnapshot(t.document).state.start);
   await economy.grant("am");
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 3);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   await economy.spend("m");
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 2);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   await economy.spendMovements(2); count = writes.length;
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 0);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   assert.equal(writes.length, count);
   setMode("off");
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 1);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   assert.equal(writes.length, count); assert.equal(economy.getSnapshot().movementsRemaining, 0);
 });
 
@@ -320,12 +558,12 @@ test("coût natif : panneau et validation débitent le coût réel, pas les espa
   start(2, t, 11);
   const view = bar.movementView(t.document);
   assert.equal(view.state.spaces, 2); assert.equal(view.state.cost, 22);
-  assert.equal(view.state.cellsUsed, 11); assert.equal(view.state.theoreticalActions, 3);
-  assert.equal(view.excess, 1);
-  assert.equal(await bar.toggleMovement(), true);
-  assert.equal(economy.getSnapshot().movementsRemaining, 0);
-  assert.equal(bar.movementResults.get(t.document).consumedCount, 2);
-  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
+  assert.equal(view.state.cellsUsed, 11);
+  assert.equal(view.excess, 6);
+  assert.equal(await bar.validateMovement(bar.movementToken()), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 6);
 });
 
 test("bornage du remplissage et maxima non exploitables", () => {
@@ -472,7 +710,7 @@ function setupActions() {
   a.update = async update => calls.push({ update });
   context.game.system = { CONST: { restActions: [] } };
   context.ui = { notifications: { warn: message => warnings.push(message), error: message => errors.push(message) } };
-  context.foundry = { utils: { escapeHTML: text => text }, applications: { api: { DialogV2: {} } } };
+  context.foundry = { utils: { escapeHTML: text => text }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
   bar.actions = ["sheet", "fortune", "hp", "mana", "fastRest", "fullRest"].map(action => ({
     dataset: { co2prismAction: action }, setAttribute(key, value) { this[key] = value; }
   }));
@@ -616,7 +854,7 @@ function setupConfiguration() {
   const env = setup();
   const { bar, context, actor, token, hooks } = env;
   const writes = [], errors = [];
-  context.foundry = { utils: { deepClone: structuredClone } };
+  context.foundry = { utils: { deepClone: structuredClone }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
   context.game.settings ??= { get: () => false };
   context.ui = { notifications: { error: message => errors.push(message) } };
   context.console = { error() {} };

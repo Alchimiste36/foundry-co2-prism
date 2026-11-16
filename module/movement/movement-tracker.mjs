@@ -25,24 +25,6 @@ export function movementThreshold(cellsPerActionRaw, count, rounding) {
   return roundMovementCells(count * cellsPerActionRaw, rounding);
 }
 
-function requiredMovementActions(cellsPerActionRaw, used, rounding) {
-  if (!Number.isFinite(cellsPerActionRaw) || cellsPerActionRaw <= 0 || !Number.isSafeInteger(used) || used < 0) return null;
-  if (used === 0) return 0;
-  const reaches = count => {
-    const product = count * cellsPerActionRaw;
-    return product === Infinity || movementThreshold(cellsPerActionRaw, count, rounding) >= used;
-  };
-  let low = 0, high = Number.MAX_SAFE_INTEGER;
-  if (!reaches(high)) return null;
-  // Au plus 53 étapes, même si plusieurs actions ont un bloc de zéro case.
-  while (low + 1 < high) {
-    const middle = low + Math.floor((high - low) / 2);
-    if (reaches(middle)) high = middle;
-    else low = middle;
-  }
-  return high;
-}
-
 /** Sessions locales par scène/token. Toutes les commandes renvoient {success, reason, state?}. */
 export class MovementTracker {
   constructor({ getUser = () => globalThis.game?.user, readMovement = () => null,
@@ -92,14 +74,13 @@ export class MovementTracker {
     const cellsUsed = costCellsRaw === null ? null : roundMovementCells(costCellsRaw, rounding);
     const cellsPerActionRaw = movement?.cells ?? null;
     const cellsPerAction = movementThreshold(cellsPerActionRaw, 1, rounding);
-    const theoreticalActions = requiredMovementActions(cellsPerActionRaw, cellsUsed, rounding);
     return { success: true, reason: null, state: {
       active: true, sessionId: session.id, sceneId: session.scene.id, tokenId: token.id, mode: "exact",
       start: { ...session.start }, current: position(token), reference: structuredClone(session.reference),
       distance: session.distance, spaces: session.spaces, cost: session.cost, costCellsRaw, reportedCost: session.reportedCost,
       units: grid?.units ?? null, measurementValid: reason === null, measurementReason: reason,
       cellsUsed, cellsPerActionRaw, cellsPerAction, rounding, gridSignature,
-      theoreticalActions, segmentCount: session.segments.length,
+      segmentCount: session.segments.length,
       resetting: session.resetting
     } };
   }
@@ -134,6 +115,7 @@ export class MovementTracker {
     if (!sameCoordinates(origin, session.path.at(-1))) {
       session.measureReason = "discontinuous-movement"; session.cost = null; return failure("discontinuous-movement");
     }
+    if (points.every(point => sameCoordinates(origin, point))) return { success: true, reason: "no-passed-section" };
     const segment = { id: movement.id, method: movement.method, origin: position(origin),
       waypoints: points.map(point => ({ ...point })), distance: passed.distance, spaces: passed.spaces, cost: passed.cost };
     session.segments.push(segment);

@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 
 /** Doubles reproductibles : ces mesures ne remplacent pas une scène Foundry réelle. */
-export function movementScenario(Engine, { kind = "open", cells = 5, actions = 2, alternating = false } = {}) {
+export function movementScenario(Engine, { kind = "open", cells = 5, alternating = false } = {}) {
   class Container {
     constructor() { this.children = []; }
     addChild(child) { child.parent = this; this.children.push(child); return child; }
@@ -13,6 +13,12 @@ export function movementScenario(Engine, { kind = "open", cells = 5, actions = 2
       super(); Object.assign(this, { text, style });
       this.anchor = { set() {} }; this.position = { set: (x, y) => Object.assign(this, { x, y }) };
     }
+  }
+  class Graphics extends Container {
+    constructor() { super(); this.position = { set: (x, y) => Object.assign(this, { x, y }) }; }
+    beginFill(fill, alpha) { this.style = { fill, alpha }; return this; }
+    drawRect() { return this; }
+    endFill() { return this; }
   }
   const profile = { constrainMs: 0, measureMs: 0, queueMs: 0, pauses: 0 };
   const scene = { id: "benchmark", grid: { type: 1 }, tokens: new Map() };
@@ -47,9 +53,9 @@ export function movementScenario(Engine, { kind = "open", cells = 5, actions = 2
     }
   } };
   scene.tokens.set(token.id, token);
-  const zones = new Engine({ getCanvas: () => canvas, getPIXI: () => ({ Container, Text }),
+  const zones = new Engine({ getCanvas: () => canvas, getPIXI: () => ({ Container, Text, Graphics }),
     getAction: () => ({ walls: "move", measure: true }), yieldFrame: async () => { profile.pauses++; } });
-  const range = { cellsPerActionRaw: cells, rounding: "nearest", actions };
+  const range = { cellsPerActionRaw: cells, rounding: "nearest" };
   const markers = () => (zones.container?.children ?? []).map(({ x, y, text, style }) => [x, y, text, style.fill])
     .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   return { zones, token, state, range, profile, markers };

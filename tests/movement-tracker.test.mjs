@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MovementTracker, movementThreshold } from "../module/movement/movement-tracker.mjs";
+import { MovementTracker } from "../module/movement/movement-tracker.mjs";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
 function setup() {
@@ -81,12 +81,12 @@ test("15B suivi exact, mesures brutes, arrondi final et vitesse relue", () => {
   move(token, { spaces: 2.6, distance: 5.2 });
   move(token, { spaces: 2.6, distance: 5.2 });
   const state = tracker.getSnapshot(token).state;
-  assert.equal(state.spaces, 5.2); assert.equal(state.cellsUsed, 5); assert.equal(state.theoreticalActions, 1);
+  assert.equal(state.spaces, 5.2); assert.equal(state.cellsUsed, 5); assert.equal(state.cellsPerAction, 5);
   setRounding("up");
   assert.equal(tracker.getSnapshot(token).state.cellsUsed, 6);
-  assert.equal(tracker.getSnapshot(token).state.theoreticalActions, 2);
+  assert.equal(tracker.getSnapshot(token).state.cellsPerAction, 5);
   actor.speedCells = 10;
-  assert.equal(tracker.getSnapshot(token).state.theoreticalActions, 1);
+  assert.equal(tracker.getSnapshot(token).state.cellsPerAction, 10);
   assert.equal(token.x, 200);
 });
 
@@ -193,7 +193,7 @@ test("15B historique vide initial : revert natif revient au premier waypoint, z�
     token.x = origin.x; token.movementHistory = []; return true;
   };
   const result = await tracker.reset(token);
-  assert.equal(result.success, true); assert.equal(result.state.theoreticalActions, 0);
+  assert.equal(result.success, true); assert.equal(result.state.cellsUsed, 0);
 });
 
 test("Session exacte unique, indépendante par token", () => {
@@ -219,49 +219,43 @@ test("Sans activation : aucun suivi implicite ; démarrage exact à la position 
   assert.equal(tracker.getSnapshot(token).state.spaces, 1);
 });
 
-test("Archive6 seuils 4 puis 7 : vitesse brute conservée et plus petit coût suffisant", () => {
+test("Capacité d’une M : vitesse brute conservée, indépendante du trajet", () => {
   const { tracker, actor, token, move } = setup();
   actor.speedCells = 3.6;
-  const thresholds = [0, 1, 2, 3, 4, 5].map(n => movementThreshold(3.6, n, "nearest"));
-  assert.deepEqual(thresholds, [0, 4, 7, 11, 14, 18]);
-  assert.deepEqual(thresholds.slice(1).map((value, index) => value - thresholds[index]), [4, 3, 4, 3, 4]);
-  for (const [used, expected] of [[0, 0], [1, 1], [4, 1], [5, 2], [6, 2], [7, 2], [8, 3], [11, 3], [12, 4]]) {
+  for (const used of [0, 1, 4, 5, 6, 7, 8, 11, 12]) {
     tracker.start(token); move(token, { spaces: used });
     const state = tracker.getSnapshot(token).state;
     assert.equal(state.cellsPerActionRaw, 3.6); assert.equal(state.cellsPerAction, 4);
-    assert.equal(state.theoreticalActions, expected);
+    assert.equal(state.cellsUsed, used);
     tracker.cancel(token);
   }
 });
 
-test("Archive6 trois arrondis : seuils cumulatifs, blocs alternés et coût minimal", () => {
+test("Capacité d’une M : trois arrondis et coût indépendant de la capacité", () => {
   const { tracker, actor, token, move, setRounding } = setup();
   actor.speedCells = 10 / 3;
-  for (const [mode, expected] of [["nearest", [0, 3, 7, 10, 13, 17]], ["up", [0, 4, 7, 10, 14, 17]],
-    ["down", [0, 3, 6, 10, 13, 16]]]) {
+  for (const [mode, expected] of [["nearest", 3], ["up", 4], ["down", 3]]) {
     setRounding(mode);
-    assert.deepEqual([0, 1, 2, 3, 4, 5].map(n => movementThreshold(actor.speedCells, n, mode)), expected);
     for (let used = 1; used <= 20; used++) {
       tracker.start(token); move(token, { spaces: used });
-      const n = tracker.getSnapshot(token).state.theoreticalActions;
-      assert.ok(movementThreshold(actor.speedCells, n, mode) >= used);
-      assert.ok(movementThreshold(actor.speedCells, n - 1, mode) < used);
+      const state = tracker.getSnapshot(token).state;
+      assert.equal(state.cellsPerAction, expected); assert.equal(state.cellsUsed, used);
       tracker.cancel(token);
     }
   }
 });
 
-test("Archive6 vitesse fractionnaire : blocs nuls, recherche bornée et invalidité", () => {
+test("Capacité fractionnaire ou invalide sans recherche du nombre d’actions", () => {
   const { tracker, actor, token, move, setRounding } = setup();
   actor.speedCells = 0.2;
-  for (const [mode, expected] of [["down", 5], ["nearest", 3], ["up", 1]]) {
+  for (const [mode, expected] of [["down", 0], ["nearest", 0], ["up", 1]]) {
     setRounding(mode); tracker.start(token); move(token, { spaces: 1 });
-    assert.equal(tracker.getSnapshot(token).state.theoreticalActions, expected);
+    assert.equal(tracker.getSnapshot(token).state.cellsPerAction, expected);
     tracker.cancel(token);
   }
-  for (const raw of [0, null, NaN, Infinity, -1, Number.MIN_VALUE]) {
+  for (const raw of [0, null, NaN, Infinity, -1]) {
     actor.speedCells = raw; tracker.start(token); move(token, { spaces: 1 });
-    assert.equal(tracker.getSnapshot(token).state.theoreticalActions, null);
+    assert.equal(tracker.getSnapshot(token).state.cellsPerAction, null);
     tracker.cancel(token);
   }
 });
