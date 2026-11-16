@@ -953,23 +953,22 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           trackedMove(7);
           const blocks = () => [...movementPanel.querySelectorAll('.co2prism-movement-block')];
           const grey = () => [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, node) => sum + Number(node.dataset.used), 0);
-          check(blocks().length === 5 && grey() === 7 && blocks().every(block => block.children.length === 5), '15C five blocks and seven grey cells');
-          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('2 / 5'), '15C theoretical actions');
-          check(blocks().slice(0, 3).every(node => Math.abs(node.getBoundingClientRect().top - blocks()[0].getBoundingClientRect().top) < 1)
-            && blocks()[3].getBoundingClientRect().top > blocks()[0].getBoundingClientRect().top, '15C maximum three blocks per row');
+          check(blocks().length === 1 && grey() === 5 && blocks()[0].children.length === 5, 'Single block with five filled cells');
+          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('1 / 5'), 'Single M session preview');
+          check(blocks()[0].getBoundingClientRect().width <= movementPanel.getBoundingClientRect().width, 'Single block fits panel');
           trackedMove(22);
-          check(grey() === 25 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 25, '15C excess adds no cells');
-          check(movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('4 cases'), '15C immediate red excess');
+          check(grey() === 5 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 5, '15C excess adds no cells');
+          check(movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('24 cases'), 'Single M immediate red excess');
           await economy.grant('am'); hooks.get('updateActor')(actor, { flags: {} });
-          check(blocks().length === 6 && !movementPanel.querySelector('.co2prism-movement-excess'), '15C bonus updates capacity');
+          check(blocks().length === 1 && movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('24 cases'), 'Bonus preserves single block and capacity');
           await economy.spend('m'); hooks.get('updateActor')(actor, { flags: {} });
-          check(blocks().length === 5 && movementPanel.querySelector('.co2prism-movement-excess'), '15C external spend updates capacity');
+          check(blocks().length === 1 && movementPanel.querySelector('.co2prism-movement-excess'), 'External spend preserves single block and capacity');
           settings.economyMode = 'off'; bar.refreshActor();
-          check(blocks().length === 1 && !movementPanel.querySelector('.co2prism-movement-excess'), '15C inactive budget single block');
+          check(blocks().length === 1 && bar.movementView(tracked).capacity === 5, 'Inactive budget single M capacity');
           settings.economyMode = 'always'; bar.refreshActor();
           const beforeReturn = JSON.stringify(actor.flags.co2prism.actionEconomy);
           failReturn = true; await bar.resetMovement();
-          check(!movementPanel.querySelector('.co2prism-movement-error').hidden && grey() === 25, '15C return failure preserves path');
+          check(!movementPanel.querySelector('.co2prism-movement-error').hidden && grey() === 5, '15C return failure preserves path');
           failReturn = false; movementPanel.querySelector('.co2prism-movement-reset').click();
           await new Promise(resolve => setTimeout(resolve, 0));
           check(tracked.x === trackedStart && grey() === 0 && !movementPanel.hidden, 'Successful return keeps exact session');
@@ -1012,39 +1011,45 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await new Promise(resolve => setTimeout(resolve, 0));
           check(movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'false' && tracked.x === destination, '15D finish retains destination');
           check(movementButton.textContent === 'Mouvement', 'Archive6 label after finish');
-          check(JSON.stringify(actor.flags.co2prism.actionEconomy) !== beforeFinish && economy.getSnapshot().movementsRemaining === 2
-            && warnings.length === notificationCount, '15D exact validation spends three M without excess warning');
-          movement('20 / 60', '10 / 30');
+          check(JSON.stringify(actor.flags.co2prism.actionEconomy) !== beforeFinish && economy.getSnapshot().movementsRemaining === 4
+            && warnings.length === notificationCount + 1, 'Single M validation warns for excess');
+          movement('40 / 60', '20 / 30');
           // Comparer les blocs et le portrait sur des vitesses non entières.
           actor.system.attributes.movement = { value: 7.2, unit: 'm' };
           settings.movementRounding = 'nearest'; await economy.reset(); bar.refreshActor();
           movementButton.click(); trackedMove(7);
-          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '4,3', 'Archive6 variable blocks 4 plus 3');
-          check(grey() === 7 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 7, 'Archive6 seven grey cumulative cells');
+          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '4', 'Fractional speed gives one block of four');
+          check(grey() === 4 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 4, 'Four filled cells capped to single M');
           movement('14.4 / 14.4', '7 / 7');
           await bar.toggleMovement();
-          check(economy.getSnapshot().movementsRemaining === 0 && bar.movementResults.get(tracked).consumedCount === 2, 'Archive6 seven cells cost two M');
+          check(economy.getSnapshot().movementsRemaining === 1 && bar.movementResults.get(tracked).consumedCount === 1, 'Seven cells cost one M');
           actor.system.attributes.movement = { value: 10, unit: 'm' }; movementScene.grid.distance = 3;
           for (const mode of ['nearest', 'up', 'down']) {
             settings.movementRounding = mode; await economy.reset(); await economy.grant('m', 3); bar.refreshActor();
             movementButton.click();
             const expected = (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(50 / 3);
             const total = [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, cell) => sum + Number(cell.dataset.count), 0);
-            check(total === expected && bar.combatValues.cells.textContent === expected + ' / ' + expected, 'Archive6 cumulative portrait and blocks ' + mode);
+            check(total === (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(10 / 3) && bar.combatValues.cells.textContent === expected + ' / ' + expected, 'Portrait budget and single M capacity ' + mode);
             trackedMove(7);
-            check(grey() === 7, 'Archive6 grey cells across variable blocks ' + mode);
+            check(grey() === total, 'Filled cells capped to single M ' + mode);
             settings.economyMode = 'off'; bar.refreshActor(); await bar.toggleMovement();
             settings.economyMode = 'always'; bar.refreshActor();
           }
           actor.system.attributes.movement = { value: 0.4, unit: 'm' }; movementScene.grid.distance = 2;
           settings.movementRounding = 'down'; await economy.reset(); bar.refreshActor(); movementButton.click(); trackedMove(1);
-          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0,0'
-            && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 0, 'Archive6 zero-sized blocks have no fake squares');
+          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0'
+            && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 0, 'Zero capacity has no fake squares');
           await economy.grant('m', 3); hooks.get('updateActor')(actor, { flags: {} });
-          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0,0,0,0,1' && grey() === 1, 'Archive6 bonus reveals first attainable cell');
+          check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0' && grey() === 0, 'Bonus does not change zero session capacity');
           movement('2 / 2', '1 / 1');
           await bar.toggleMovement();
-          check(economy.getSnapshot().movementsRemaining === 0 && bar.movementResults.get(tracked).consumedCount === 5, 'Archive6 five actions for first cell');
+          check(economy.getSnapshot().movementsRemaining === 4 && bar.movementResults.get(tracked).consumedCount === 1, 'Zero capacity spends one M');
+          actor.system.attributes.movement = { value: 2000000, unit: 'm' }; bar.refreshActor();
+          movementButton.click();
+          const aggregated = [...movementPanel.querySelectorAll('.co2prism-movement-cell')];
+          check(blocks().length === 1 && aggregated.length <= 60
+            && aggregated.reduce((sum, node) => sum + Number(node.dataset.count), 0) === 1000000, 'Huge speed DOM bounded to 60 groups');
+          settings.economyMode = 'off'; bar.refreshActor(); await bar.toggleMovement(); settings.economyMode = 'always';
           tracked.canUserModify = () => false; bar.refreshActor(); check(movementButton.disabled, '15C permission disables command');
           tracked.canUserModify = () => true;
           hooks.get('deleteToken')(secondDocument);

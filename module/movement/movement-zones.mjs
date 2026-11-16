@@ -32,7 +32,7 @@ class MovementZoneQueue {
   }
 }
 
-/** Zone locale : exploration adjacente bornée par les seuils M capturés au clic. */
+/** Zone locale : exploration adjacente bornée par une M capturée au clic. */
 export class MovementZones {
   constructor({ getCanvas = () => globalThis.canvas, getPIXI = () => globalThis.PIXI,
     getAction = action => globalThis.CONFIG?.Token?.movement?.actions?.[action],
@@ -84,20 +84,18 @@ export class MovementZones {
       this.token = token; this.sessionId = state?.sessionId;
       this.diagnostic = unsupported; onUpdate(); return { success: false, reason: unsupported };
     }
-    const { cellsPerActionRaw, rounding, actions } = range ?? {};
-    if (!Number.isFinite(cellsPerActionRaw) || cellsPerActionRaw <= 0 || !Number.isSafeInteger(actions) || actions < 0
+    const { cellsPerActionRaw, rounding } = range ?? {};
+    if (!Number.isFinite(cellsPerActionRaw) || cellsPerActionRaw <= 0
       || !["nearest", "up", "down"].includes(rounding)) {
       this.token = token; this.sessionId = state.sessionId; this.diagnostic = "InvalidRange"; onUpdate();
       return { success: false, reason: "InvalidRange" };
     }
-    const maxCost = movementThreshold(cellsPerActionRaw, actions, rounding);
+    const maxCost = movementThreshold(cellsPerActionRaw, 1, rounding);
     if (!Number.isSafeInteger(maxCost) || maxCost < 0) {
       this.token = token; this.sessionId = state.sessionId; this.diagnostic = "InvalidRange"; onUpdate();
       return { success: false, reason: "InvalidRange" };
     }
-    // Les grands nombres d'actions utilisent les mêmes seuils, évalués à la demande.
-    const thresholds = actions <= 4000 ? Array.from({ length: actions }, (_, index) => movementThreshold(cellsPerActionRaw, index + 1, rounding)) : null;
-    this.range = { cellsPerActionRaw, rounding, actions, thresholds, maxCost };
+    this.range = { cellsPerActionRaw, rounding, maxCost };
     const canvas = this.getCanvas(), grid = canvas.grid, PIXI = this.getPIXI();
     const generation = this.generation;
     const start = { ...state.start, action: token.movementAction };
@@ -108,7 +106,7 @@ export class MovementZones {
     this.container.visible = false;
     const container = this.container, scene = token.parent, sessionId = state.sessionId, began = this.now();
     const maximumStates = Math.max(4000, Math.min(50000, 18 * (2 * Math.ceil(maxCost) + 1) ** 2));
-    const stats = this.stats = { examined: 0, states: 0, marked: 0, partial: 0, elapsedMs: 0, maxCost, actions,
+    const stats = this.stats = { examined: 0, states: 0, marked: 0, partial: 0, elapsedMs: 0, maxCost,
       maximumStates, maximumTransitions: maximumStates * 8, maximumMs: 15000, yields: 0,
       popped: 0, stale: 0, peakQueue: 1, stopReason: null };
     const active = () => generation === this.generation && this.visible && this.container === container
@@ -177,19 +175,12 @@ export class MovementZones {
         }
       }
       if (!active()) return cancelled();
-      for (const { center, cost } of bestCells.values()) {
+      for (const { center } of bestCells.values()) {
         const pause = cooperate(stats.examined + stats.marked);
         if (pause) await pause;
         if (!active()) return cancelled();
-        let low = 1, high = actions;
-        while (low < high) {
-          const middle = low + Math.floor((high - low) / 2);
-          if (cost <= movementThreshold(cellsPerActionRaw, middle, rounding) + epsilon) high = middle;
-          else low = middle + 1;
-        }
-        const number = low;
-        const label = new PIXI.Text(String(number), { fontFamily: "Arial", fontSize: Math.max(14, grid.size * 0.3),
-          fontWeight: "bold", fill: number === 1 ? 0xffe100 : 0xff2438, stroke: 0x000000, strokeThickness: 3 });
+        const label = new PIXI.Text("1", { fontFamily: "Arial", fontSize: Math.max(14, grid.size * 0.3),
+          fontWeight: "bold", fill: 0xffe100, stroke: 0x000000, strokeThickness: 3 });
         label.anchor.set(0.5); label.position.set(center.x, center.y); label.eventMode = "none";
         container.addChild(label); stats.marked++;
       }

@@ -271,5 +271,6 @@
         "hash": "06a505f975ac45db24c969edf07c3e6bd6e35756125231d7afa045e2af9d773f"
       }
     }
-  ]
+  ],
+  "scope": "Historical multi-action results, before single-action sessions; not current runtime behavior"
 }

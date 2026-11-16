@@ -100,7 +100,7 @@ test("coût natif : région simulée, supplément retourné par l'oracle, unité
   const state = move(100, 100, { supplement: 5 }).state;
   assert.equal(state.cost, measure(raw).cost); assert.equal(state.cost, 15);
   assert.equal(state.costCellsRaw, 3); assert.equal(state.spaces, 1);
-  assert.equal(state.theoreticalActions, 3); assert.equal(tracker.getSnapshot(token).state.cellsUsed, 3);
+  assert.equal(state.cellsPerAction, 1); assert.equal(tracker.getSnapshot(token).state.cellsUsed, 3);
 });
 
 test("coût natif : reset local remet la continuité à zéro sans effacer l'historique partagé", { skip: !available }, async () => {

@@ -1,6 +1,6 @@
 ﻿import { ActionEconomy } from "../combat/action-economy.mjs";
 
-import { MovementTracker, roundMovementCells, movementThreshold } from "../movement/movement-tracker.mjs";
+import { MovementTracker, roundMovementCells } from "../movement/movement-tracker.mjs";
 import { MovementNotifications } from "../movement/movement-notifications.mjs";
 import { MovementZones } from "../movement/movement-zones.mjs";
 
@@ -310,14 +310,13 @@ class PrismBar {
     if (!state) return null;
     const budgetActive = economyEnabled();
     const available = budgetActive ? new ActionEconomy(token.actor).getSnapshot().movementsRemaining : null;
-    let valid = state.measurementValid && Number.isFinite(state.cellsPerActionRaw) && state.cellsPerActionRaw > 0
+    const valid = state.measurementValid && Number.isFinite(state.cellsPerActionRaw) && state.cellsPerActionRaw > 0
       && Number.isSafeInteger(state.cellsPerAction) && state.cellsPerAction >= 0
-      && Number.isSafeInteger(state.cellsUsed) && Number.isSafeInteger(state.theoreticalActions);
-    let capacity = valid && budgetActive ? movementThreshold(state.cellsPerActionRaw, available, state.rounding) : null;
-    if (budgetActive && !Number.isSafeInteger(capacity)) { valid = false; capacity = null; }
+      && Number.isSafeInteger(state.cellsUsed);
+    const capacity = valid ? state.cellsPerAction : null;
     return { state, budgetActive, available, valid, capacity,
-      blocks: valid ? budgetActive ? available : 1 : 0,
-      excess: valid && budgetActive ? Math.max(0, state.cellsUsed - capacity) : 0 };
+      remaining: valid ? Math.max(0, capacity - state.cellsUsed) : null,
+      excess: valid ? Math.max(0, state.cellsUsed - capacity) : 0 };
   }
 
   toggleMovement() {
@@ -357,7 +356,7 @@ class PrismBar {
         if (view.budgetActive && !view.valid) {
           this.movementErrors.set(token, "invalid-measurement"); return false;
         }
-        const required = view.budgetActive ? state.theoreticalActions : 0;
+        const required = view.budgetActive ? 1 : 0;
         const version = this.movementContextVersion, resetVersion = engine.getResetVersion();
         const valid = () => {
           const current = this.movementTracker.getSnapshot(token).state;
@@ -380,7 +379,7 @@ class PrismBar {
         }
         result = { ...result, requiredCount: required,
           sessionId: state.sessionId,
-          excess: required > 0 ? Math.max(0, state.cellsUsed - movementThreshold(state.cellsPerActionRaw, result.availableBefore, state.rounding)) : 0,
+          excess: required > 0 ? view.excess : 0,
           notified: false };
         // Conserver le règlement confirmé si la fermeture devient impossible après l'écriture.
         this.movementResults.set(token, result);
@@ -392,6 +391,9 @@ class PrismBar {
         if (!this.movementNotifications.broadcast(token, result.excess)) {
           ui.notifications.warn(game.i18n.localize("CO2PRISM.Movement.NotificationFailed"));
         }
+      } else if (result.missingCount > 0 && !result.notified) {
+        result.notified = true;
+        ui.notifications.warn(game.i18n.localize("CO2PRISM.Movement.NoActionAvailable"));
       }
       return true;
     } catch {
@@ -440,7 +442,7 @@ class PrismBar {
     this.movementToggle.setAttribute("aria-expanded", String(open));
     this.movementToggle.title = localize(validating ? "Validating" : !view && error ? error === "movement-in-progress" ? "Busy" : "ReturnFailed" : view ? "Finish" : "Start");
     if (!open) return true;
-    const { state, valid, budgetActive, available, capacity, blocks, excess } = view;
+    const { state, valid, budgetActive, available, capacity, excess } = view;
     this.movementReset.disabled = busy || settled;
     if (this.movementZonesButton) {
       this.movementZonesButton.disabled = busy || settled || (!this.movementZones.visible && Boolean(this.movementZones.supported(token, state.start)));
@@ -454,7 +456,7 @@ class PrismBar {
         ? format("ZonesDone", this.movementZones.stats) : reason ? localize(`Zones${reason}`) : "";
     }
     const query = selector => this.movementPanel.querySelector(`.co2prism-movement-${selector}`);
-    const data = { used: state.cellsUsed, capacity, actions: state.theoreticalActions, available, cells: state.cellsPerAction, excess };
+    const data = { used: state.cellsUsed, capacity, actions: 1, available, cells: state.cellsPerAction, excess };
     query("summary").textContent = !valid ? localize("Unavailable") : format(budgetActive ? "ExactSummary" : "InformativeSummary", data);
     query("speed").textContent = Number.isFinite(state.cellsPerActionRaw) && state.cellsPerActionRaw > 0 ? format("Speed", data) : localize("SpeedUnavailable");
     const message = query("message");
@@ -466,18 +468,15 @@ class PrismBar {
     query("error").textContent = error ? format(errorKey, { consumed: this.movementResults.get(token)?.consumedCount ?? 0 }) : "";
     const nodes = [];
     // Les valeurs extrêmes restent représentées par des groupes étiquetés, sans millions de nœuds.
-    const renderedBlocks = Math.min(blocks, 120);
-    for (let blockIndex = 0; blockIndex < renderedBlocks; blockIndex++) {
-      const lower = movementThreshold(state.cellsPerActionRaw, blockIndex, state.rounding);
-      const upper = movementThreshold(state.cellsPerActionRaw, blockIndex + 1, state.rounding);
-      const size = upper - lower;
+    if (valid) {
+      const size = state.cellsPerAction;
       const stride = Math.max(1, Math.ceil(size / 60));
       const block = document.createElement("div"); block.className = "co2prism-movement-block";
       block.dataset.cells = String(size);
-      if (size === 0) block.textContent = format("ZeroBlock", { action: blockIndex + 1 });
+      if (size === 0) block.textContent = localize("ZeroBlock");
       for (let index = 0; index < size; index += stride) {
         const count = Math.min(stride, size - index);
-        const used = Math.max(0, Math.min(count, state.cellsUsed - lower - index));
+        const used = Math.max(0, Math.min(count, state.cellsUsed - index));
         const cell = document.createElement("span"); cell.className = "co2prism-movement-cell";
         cell.style.setProperty("--co2prism-used", `${100 * used / count}%`);
         cell.dataset.used = String(used); cell.dataset.count = String(count);
@@ -485,10 +484,6 @@ class PrismBar {
         block.append(cell);
       }
       nodes.push(block);
-    }
-    if (blocks > renderedBlocks) {
-      const remainder = document.createElement("span"); remainder.className = "co2prism-movement-more";
-      remainder.textContent = format("MoreBlocks", { count: blocks - renderedBlocks }); nodes.push(remainder);
     }
     query("blocks").replaceChildren(...nodes);
     return true;
@@ -499,8 +494,7 @@ class PrismBar {
     const token = this.movementToken(), view = token && this.movementView(token);
     if (!view || !this.configuration.panels.combat || this.movementValidations.has(token) || this.movementResets.has(token)) return false;
     const state = { ...view.state, start: { ...view.state.start } };
-    const range = { cellsPerActionRaw: state.cellsPerActionRaw, rounding: state.rounding,
-      actions: view.budgetActive ? view.available : 1 };
+    const range = { cellsPerActionRaw: state.cellsPerActionRaw, rounding: state.rounding };
     const result = await this.movementZones.toggle(token, state, range, () => this.refreshActor());
     return result.success;
   }

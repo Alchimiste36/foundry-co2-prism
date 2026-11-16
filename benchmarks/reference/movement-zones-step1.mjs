@@ -1,3 +1,4 @@
+// Référence historique multi-actions, jamais chargée par le module en jeu.
 import { movementThreshold } from "../../module/movement/movement-tracker.mjs";
 
 /** Zone locale : exploration adjacente bornée par les seuils M capturés au clic. */

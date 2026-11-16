@@ -103,17 +103,17 @@ test("15C prévisions : tranches 0/1/5/6/10/11, droits et clôture informative s
   // Le test ne persiste pas l'ouverture de Combat pour isoler les commandes du panneau.
   const read = bar.readConfiguration.bind(bar);
   bar.readConfiguration = actor => { const config = read(actor); config.panels.combat = true; return config; };
-  for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
+  for (const used of [0, 1, 5, 6, 10, 11]) {
     assert.equal(bar.toggleMovement(), true);
     bar.movementTracker.update(t.document, { id: String(used), origin: { x: 0, y: 0 },
       passed: { waypoints: [{ x: 100, y: 0, terrain: { testCost: used * 2, testDistance: used * 2, testSpaces: used } }], spaces: used, distance: used * 2, cost: used * 2 } });
     const view = bar.movementView(t.document);
-    assert.equal(view.state.theoreticalActions, required);
-    assert.equal(view.available, 2); assert.equal(view.blocks, 2);
-    assert.equal(view.excess, Math.max(0, used - 10));
+    assert.equal(view.available, 2);
+    assert.equal(view.capacity, 5); assert.equal(view.remaining, Math.max(0, 5 - used));
+    assert.equal(view.excess, Math.max(0, used - 5));
     mode = "off";
-    assert.equal(bar.movementView(t.document).blocks, 1);
-    assert.equal(bar.movementView(t.document).excess, 0);
+    assert.equal(bar.movementView(t.document).capacity, view.capacity);
+    assert.equal(bar.movementView(t.document).excess, Math.max(0, used - 5));
     mode = "always";
     mode = "off";
     assert.equal(await bar.toggleMovement(), true);
@@ -153,15 +153,15 @@ function setupMovementValidation() {
     economy: new context.ActionEconomy(a), setMode: value => { mode = value; } };
 }
 
-test("Validation : budget inactif gratuit, suivi exact 0/1/5/6/10/11 cases", async () => {
-  for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
+test("Validation : une M entière même à zéro, budget inactif gratuit", async () => {
+  for (const used of [0, 1, 5, 6, 10, 11]) {
     const { bar, t, start, economy, warnings } = setupMovementValidation();
     start(used);
     assert.equal(await bar.toggleMovement(), true);
-    assert.equal(economy.getSnapshot().movementsRemaining, Math.max(0, 2 - required));
-    assert.equal(bar.movementResults.get(t.document).consumedCount, Math.min(2, required));
-    assert.equal(bar.movementResults.get(t.document).missingCount, Math.max(0, required - 2));
-    assert.equal(warnings.length, used > 10 ? 1 : 0);
+    assert.equal(economy.getSnapshot().movementsRemaining, 1);
+    assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
+    assert.equal(bar.movementResults.get(t.document).missingCount, 0);
+    assert.equal(warnings.length, used > 5 ? 1 : 0);
     assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
   }
   for (const [mode, active] of [["off", true], ["combat", false]]) {
@@ -172,15 +172,61 @@ test("Validation : budget inactif gratuit, suivi exact 0/1/5/6/10/11 cases", asy
   }
 });
 
+test("Sessions successives : cases perdues, attaque intermédiaire, origine et reset isolés", async () => {
+  const { bar, t, start, economy, hooks, warnings } = setupMovementValidation();
+  start(3); t.document.x = 100;
+  assert.equal(bar.movementView(t.document).remaining, 2);
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+  await economy.grant("a"); await economy.spend("a");
+  t.document.x = 200;
+  hooks.get("moveToken")(t.document, { id: "outside" });
+  assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
+  assert.equal(bar.toggleMovement(), true);
+  let state = bar.movementView(t.document);
+  assert.equal(state.state.start.x, 200); assert.equal(state.state.cellsUsed, 0); assert.equal(state.capacity, 5);
+  hooks.get("moveToken")(t.document, { id: "second", origin: { x: 200, y: 0 },
+    passed: { waypoints: [{ x: 300, y: 0, terrain: { testCost: 14, testDistance: 14, testSpaces: 7 } }] } });
+  t.document.x = 300;
+  t.document.update = async data => { Object.assign(t.document, data); return t.document; };
+  assert.equal(await bar.resetMovement(), true);
+  assert.equal(t.document.x, 200); assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementView(t.document).state.cellsUsed, 0);
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 0); assert.equal(warnings.length, 0);
+});
+
+test("Une M : dépassement de 2 ; budget épuisé borné, même à coût nul", async () => {
+  for (const used of [0, 3, 7]) {
+    const { bar, context, t, start, economy, warnings } = setupMovementValidation();
+    const local = []; context.ui.notifications.warn = message => local.push(message);
+    await economy.spendMovements(2);
+    start(used);
+    assert.equal(bar.movementView(t.document).capacity, 5);
+    assert.equal(await bar.toggleMovement(), true);
+    assert.equal(economy.getSnapshot().movementsRemaining, 0);
+    const result = bar.movementResults.get(t.document);
+    assert.equal(result.consumedCount, 0); assert.equal(result.missingCount, 1);
+    assert.equal(result.excess, Math.max(0, used - 5));
+    assert.equal(warnings.length, used > 5 ? 1 : 0); assert.equal(local.length, used > 5 ? 0 : 1);
+    assert.equal(await bar.validateMovement(t.document), false);
+    assert.equal(local.length + warnings.length, 1);
+  }
+  const { bar, start, economy, warnings } = setupMovementValidation();
+  start(7); assert.equal(await bar.toggleMovement(), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1); assert.equal(warnings[0].excess, 2);
+});
+
 test("15D bonus et dépenses externes : réserve courante et un seul avertissement final", async () => {
   const { bar, t, start, economy, warnings } = setupMovementValidation();
   start(16); assert.equal(warnings.length, 0);
   await economy.grant("m"); await economy.grant("am"); await economy.spend("a");
   assert.equal(await bar.toggleMovement(), true);
   const result = bar.movementResults.get(t.document);
-  assert.equal(result.availableBefore, 3); assert.equal(result.consumedCount, 3); assert.equal(result.missingCount, 1);
-  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
-  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(result.availableBefore, 3); assert.equal(result.consumedCount, 1); assert.equal(result.missingCount, 0);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 11);
+  assert.equal(economy.getSnapshot().movementsRemaining, 2);
 });
 
 test("15D erreur atomique et mesure invalide : session ouverte, réessai sans double débit", async () => {
@@ -195,8 +241,8 @@ test("15D erreur atomique et mesure invalide : session ouverte, réessai sans do
   assert.equal(economy.getSnapshot().movementsRemaining, 2);
   assert.equal(bar.movementResults.get(t.document).consumedCount, 0);
   a.setFlag = save;
-  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
-  assert.equal(warnings.length, 0);
+  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(warnings.length, 1);
 });
 
 test("15D sélection pendant sauvegarde et double clic : acteur initial uniquement", async () => {
@@ -209,7 +255,7 @@ test("15D sélection pendant sauvegarde et double clic : acteur initial uniqueme
   assert.equal(await bar.resetMovement(), false);
   const b = configuredActor("other", { co2prism: { panels: { combat: true } } });
   select(create(b)); await release();
-  assert.equal(await pending, true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(await pending, true); assert.equal(economy.getSnapshot().movementsRemaining, 1);
   assert.equal(new economy.constructor(b).getSnapshot().movementsRemaining, 2);
   assert.equal(bar.movementTracker.getSnapshot(t.document).success, false);
 });
@@ -229,10 +275,10 @@ test("15D clôture différée après succès : résultat conservé et aucun red�
   start(6);
   const finish = bar.movementTracker.finish.bind(bar.movementTracker);
   bar.movementTracker.finish = () => ({ success: false, reason: "movement-in-progress" });
-  assert.equal(await bar.toggleMovement(), false); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(await bar.toggleMovement(), false); assert.equal(economy.getSnapshot().movementsRemaining, 1);
   assert.equal(bar.movementErrors.get(t.document), "closure-pending");
   bar.movementTracker.finish = finish;
-  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 1);
 });
 
 test("15D deux tokens d'un acteur : réserve partagée à chaque validation", async () => {
@@ -253,18 +299,18 @@ test("15D validations simultanées de deux tokens : file acteur, réserve actual
   assert.equal(economy.getSnapshot().movementsRemaining, 0); assert.equal(warnings.length, 1);
 });
 
-test("Archive6 capacité et validation cumulées : seuils 4/7, coût et notification exacts", async () => {
-  for (const [used, required, excess] of [[4, 1, 0], [5, 2, 0], [7, 2, 0], [8, 3, 1]]) {
+test("Capacité d’une M fractionnaire : seuil 4, débit fixe et dépassement", async () => {
+  for (const [used, excess] of [[4, 0], [5, 1], [7, 3], [8, 4]]) {
     const { bar, a, t, start, economy, warnings } = setupMovementValidation();
     a.system.attributes.movement.value = 7.2;
     start(used);
     const view = bar.movementView(t.document);
-    assert.equal(view.capacity, 7); assert.equal(view.state.theoreticalActions, required); assert.equal(view.excess, excess);
+    assert.equal(view.capacity, 4); assert.equal(view.excess, excess);
     assert.equal(await bar.toggleMovement(), true);
-    assert.equal(bar.movementResults.get(t.document).consumedCount, Math.min(2, required));
+    assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
     assert.equal(warnings.length, excess ? 1 : 0);
-    if (excess) assert.equal(warnings[0].excess, 1);
-    assert.equal(economy.getSnapshot().movementsRemaining, Math.max(0, 2 - required));
+    if (excess) assert.equal(warnings[0].excess, excess);
+    assert.equal(economy.getSnapshot().movementsRemaining, 1);
   }
 });
 
@@ -280,12 +326,11 @@ test("Archive6 garde asynchrone : vitesse brute, grille et arrondi modifiés", a
 
 test("Archive6 seuil nul : budget inactif informatif et coût positif réalisable", async () => {
   const { bar, a, t, start, economy, setMode } = setupMovementValidation();
-  a.system.attributes.movement.value = 0.2; // 0,1 case brute/M, nearest : première case à 5 M.
+  a.system.attributes.movement.value = 0.2; // Capacité arrondie à zéro.
   start(1);
-  assert.equal(bar.movementView(t.document).state.theoreticalActions, 5);
   assert.equal(bar.movementView(t.document).capacity, 0);
   setMode("off");
-  assert.equal(bar.movementView(t.document).blocks, 1); assert.equal(bar.movementView(t.document).excess, 0);
+  assert.equal(bar.movementView(t.document).capacity, 0); assert.equal(bar.movementView(t.document).excess, 1);
   assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 2);
 });
 
@@ -301,17 +346,17 @@ test("Zone Tactique : instantané M/AM et vitesse brute, une action hors budget 
   assert.equal(await bar.toggleMovementZones(), true);
   assert.equal(writes.length, count);
   assert.equal(captured[0].token, t.document); assert.equal(captured[0].range.cellsPerActionRaw, 3.5);
-  assert.equal(captured[0].range.rounding, "nearest"); assert.equal(captured[0].range.actions, 2);
+  assert.equal(captured[0].range.rounding, "nearest"); assert.deepEqual(Object.keys(captured[0].range).sort(), ["cellsPerActionRaw", "rounding"]);
   assert.notEqual(captured[0].state.start, bar.movementTracker.getSnapshot(t.document).state.start);
   await economy.grant("am");
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 3);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   await economy.spend("m");
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 2);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   await economy.spendMovements(2); count = writes.length;
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 0);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   assert.equal(writes.length, count);
   setMode("off");
-  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 1);
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.cellsPerActionRaw, 3.5);
   assert.equal(writes.length, count); assert.equal(economy.getSnapshot().movementsRemaining, 0);
 });
 
@@ -320,12 +365,12 @@ test("coût natif : panneau et validation débitent le coût réel, pas les espa
   start(2, t, 11);
   const view = bar.movementView(t.document);
   assert.equal(view.state.spaces, 2); assert.equal(view.state.cost, 22);
-  assert.equal(view.state.cellsUsed, 11); assert.equal(view.state.theoreticalActions, 3);
-  assert.equal(view.excess, 1);
+  assert.equal(view.state.cellsUsed, 11);
+  assert.equal(view.excess, 6);
   assert.equal(await bar.toggleMovement(), true);
-  assert.equal(economy.getSnapshot().movementsRemaining, 0);
-  assert.equal(bar.movementResults.get(t.document).consumedCount, 2);
-  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
+  assert.equal(economy.getSnapshot().movementsRemaining, 1);
+  assert.equal(bar.movementResults.get(t.document).consumedCount, 1);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 6);
 });
 
 test("bornage du remplissage et maxima non exploitables", () => {

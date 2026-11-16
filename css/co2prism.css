@@ -321,10 +321,9 @@
 .co2prism-movement-zones-toggle[aria-pressed="true"] { color: #b87900; }
 .co2prism-movement-zones-toggle:disabled { opacity: 0.5; cursor: default; }
 .co2prism-movement-zones-toggle:focus-visible { outline: 2px solid #2472b6; }
-.co2prism-movement-blocks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: max(6px, calc(12 * var(--co2prism-unit))); margin-bottom: 0.5em; }
-.co2prism-movement-block { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 2px; border-left: 2px solid #172331; padding-left: 4px; }
+.co2prism-movement-blocks { margin-bottom: 0.5em; }
+.co2prism-movement-block { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 2px; }
 .co2prism-movement-cell { flex: 0 0 max(8px, calc(19 * var(--co2prism-unit))); height: max(8px, calc(19 * var(--co2prism-unit))); background: linear-gradient(to right, #777 var(--co2prism-used), #357cbb var(--co2prism-used)); font-size: 8px; line-height: 1; color: white; }
-.co2prism-movement-more { grid-column: 1 / -1; }
 .co2prism-movement-excess, .co2prism-movement-error { color: #bd1024; font-weight: bold; }
 .co2prism-movement-toggle:focus-visible, .co2prism-movement-reset:focus-visible { outline: 2px solid #2472b6; }
 .co2prism-effect { flex: 0 0 auto; display: inline-flex; align-items: center; font-size: calc(18 * 100cqw / 724); pointer-events: auto; }

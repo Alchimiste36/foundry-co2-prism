@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MovementZones } from "../module/movement/movement-zones.mjs";
 
-const DEFAULT_RANGE = Object.freeze({ cellsPerActionRaw: 2.5, rounding: "nearest", actions: 2 });
+const DEFAULT_RANGE = Object.freeze({ cellsPerActionRaw: 5, rounding: "nearest" });
 
 function setup() {
   class Container {
@@ -49,14 +49,14 @@ function setup() {
   return { zones, canvas, token, start, state: { sessionId: 1, start }, behavior, calls };
 }
 
-test("zones : origine de session, plafond 120 et classifications natives 3/5", async () => {
+test("zones : origine de session, plafond 120 et marquage jaune unique", async () => {
   const { zones, token, state, calls, canvas } = setup();
   const result = await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(result.success, true); assert.ok(calls.length > 120 && calls.length <= 32000);
   assert.ok(calls.every(call => call.path[0].x === 500 && call.path[0].y === 500 && call.options.ignoreWalls === false));
   assert.equal(zones.container.children.length, 120);
   assert.ok(zones.container.children.some(text => text.text === "1" && text.style.fill === 0xffe100));
-  assert.ok(zones.container.children.some(text => text.text === "2" && text.style.fill === 0xff2438));
+  assert.ok(zones.container.children.every(text => text.text === "1" && text.style.fill === 0xffe100));
   assert.equal(zones.container.eventMode, "none");
   assert.equal(zones.container.children.some(text => text.x === 550 && text.y === 550), false);
   token.x = 1500;
@@ -80,7 +80,7 @@ test("zones : trajet partiel ou contraint avant destination rejeté, pas de prox
 test("zones : seuils 3/4/5 et aucun marqueur au-delà", async () => {
   const { zones, token, state } = setup(); await zones.toggle(token, state, DEFAULT_RANGE);
   const at = x => zones.container.children.find(marker => marker.x === x + 50 && marker.y === 550);
-  assert.equal(at(800).text, "1"); assert.equal(at(900).text, "2"); assert.equal(at(1000).text, "2");
+  assert.equal(at(800).text, "1"); assert.equal(at(900).text, "1"); assert.equal(at(1000).text, "1");
   assert.equal(at(1100), undefined); zones.clear();
 });
 
@@ -191,7 +191,7 @@ test("zones : mesure du chemin entier, alternance diagonale et distances non uni
   };
   await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(markerAt(zones, 700, 700)?.text, "1"); // Deux diagonales : 1 + 2 = 3.
-  assert.equal(markerAt(zones, 800, 800)?.text, "2"); // Trois diagonales : 1 + 2 + 1 = 4.
+  assert.equal(markerAt(zones, 800, 800)?.text, "1"); // Trois diagonales : 1 + 2 + 1 = 4.
   assert.equal(markerAt(zones, 900, 900), undefined); // Quatre diagonales coûtent 6.
 });
 
@@ -223,68 +223,66 @@ test("zones : deux phases diagonales au même coût restent explorées", async (
   };
   await zones.toggle(token, state, DEFAULT_RANGE);
   assert.deepEqual([...phases].sort(), [0, 1]);
-  assert.equal(markerAt(zones, 900, 400)?.text, "2");
+  assert.equal(markerAt(zones, 900, 400)?.text, "1");
 });
 
 function corridor(env, length) {
   graph(env, Array.from({ length }, (_, index) => [[500 + index * 100, 500], [600 + index * 100, 500]]));
 }
 
-test("zone tactique : deux actions réelles à cinq cases, détour et seuils 5/10", async () => {
+test("zone tactique : réserve ignorée, portée de cinq cases avec détour", async () => {
   const env = setup(), { zones, token, state } = env;
   graph(env, [[[500, 500], [500, 400]], [[500, 400], [600, 400]], [[600, 400], [600, 500]],
     ...Array.from({ length: 8 }, (_, i) => [[600 + i * 100, 500], [700 + i * 100, 500]])]);
-  const result = await zones.toggle(token, state, { cellsPerActionRaw: 5, rounding: "nearest", actions: 2 });
-  assert.equal(result.success, true); assert.deepEqual(zones.range.thresholds, [5, 10]);
-  assert.equal(markerAt(zones, 600, 500)?.text, "1");
+  await zones.toggle(token, state, { cellsPerActionRaw: 5, rounding: "nearest" });
+  assert.equal(zones.range.maxCost, 5);
   assert.equal(markerAt(zones, 800, 500)?.text, "1");
-  assert.equal(markerAt(zones, 900, 500)?.text, "2");
-  assert.equal(markerAt(zones, 1300, 500)?.text, "2");
-  assert.equal(markerAt(zones, 1400, 500), undefined);
+  assert.equal(markerAt(zones, 900, 500), undefined);
+  assert.ok(zones.container.children.every(m => m.text === "1" && m.style.fill === 0xffe100));
 });
 
-test("zone tactique : 3,5 cases et trois actions donnent 4/7/11 et numéros 1/2/3", async () => {
+test("zone tactique : capacité fractionnaire, trois arrondis et seuil nul", async () => {
   const env = setup(), { zones, token, state } = env; corridor(env, 12);
-  await zones.toggle(token, state, { cellsPerActionRaw: 3.5, rounding: "nearest", actions: 3 });
-  assert.deepEqual(zones.range.thresholds, [4, 7, 11]);
-  assert.equal(markerAt(zones, 900, 500)?.text, "1");
-  assert.equal(markerAt(zones, 1000, 500)?.text, "2");
-  assert.equal(markerAt(zones, 1200, 500)?.text, "2");
-  assert.equal(markerAt(zones, 1300, 500)?.text, "3");
-  assert.equal(markerAt(zones, 1600, 500)?.text, "3");
-  assert.equal(markerAt(zones, 1700, 500), undefined);
-  assert.equal(markerAt(zones, 1300, 500)?.style.fill, 0xff2438);
+  for (const [rounding, capacity] of [["nearest", 4], ["up", 4], ["down", 3]]) {
+    await zones.toggle(token, state, { cellsPerActionRaw: 3.5, rounding });
+    assert.equal(zones.range.maxCost, capacity); assert.equal(zones.stats.marked, capacity);
+    assert.equal(markerAt(zones, 500 + capacity * 100, 500)?.text, "1");
+    assert.equal(markerAt(zones, 600 + capacity * 100, 500), undefined); zones.clear();
+  }
+  await zones.toggle(token, state, { cellsPerActionRaw: 0.1, rounding: "down" });
+  assert.equal(zones.visible, true); assert.equal(zones.stats.examined, 0); assert.equal(zones.stats.marked, 0);
 });
 
-test("zone tactique : seuils répétés, trois arrondis et zéro action sans exploration", async () => {
-  const env = setup(), { zones, token, state, calls } = env; corridor(env, 3);
-  for (const [rounding, thresholds] of [["nearest", [0, 1, 1]], ["up", [1, 1, 2]], ["down", [0, 0, 1]]]) {
-    await zones.toggle(token, state, { cellsPerActionRaw: 0.4, rounding, actions: 3 });
-    assert.deepEqual(zones.range.thresholds, thresholds);
-    assert.equal(markerAt(zones, 600, 500)?.text, String(thresholds.findIndex(value => value >= 1) + 1));
-    zones.clear();
+test("zone tactique : données invalides et absence de multiplication par la réserve", async () => {
+  const { zones, token, state, calls } = setup();
+  for (const range of [null, { cellsPerActionRaw: 0, rounding: "nearest" },
+    { cellsPerActionRaw: Infinity, rounding: "nearest" }, { cellsPerActionRaw: 5, rounding: "unknown" },
+    { cellsPerActionRaw: Number.MAX_VALUE, rounding: "nearest" }]) {
+    assert.equal((await zones.toggle(token, state, range)).reason, "InvalidRange");
+    assert.equal(zones.visible, false);
   }
-  const before = calls.length;
-  for (const range of [{ cellsPerActionRaw: 5, rounding: "nearest", actions: 0 }, { cellsPerActionRaw: 0.1, rounding: "down", actions: 3 }]) {
-    assert.equal((await zones.toggle(token, state, range)).success, true);
-    assert.equal(zones.visible, true); assert.equal(zones.diagnostic, "Done");
-    assert.equal(zones.stats.examined, 0); assert.equal(zones.container.children.length, 0);
-    await zones.toggle(token, state, range); assert.equal(zones.visible, false);
+  assert.equal(calls.length, 0);
+  for (const capacity of [1, 2, 3]) {
+    await zones.toggle(token, state, { cellsPerActionRaw: capacity, rounding: "nearest" });
+    assert.equal(zones.range.maxCost, capacity); assert.equal(zones.stats.marked, (2 * capacity + 1) ** 2 - 1);
+    assert.ok(zones.container.children.every(m => m.text === "1")); zones.clear();
   }
-  assert.equal(calls.length, before);
 });
 
 test("zone tactique : instantané figé, nouvelle activation, nouvelle session sans fuite", async () => {
   const env = setup(), { zones, token, state, canvas } = env; corridor(env, 12);
-  const range = { cellsPerActionRaw: 5, rounding: "nearest", actions: 2 };
+  const range = { cellsPerActionRaw: 5, rounding: "nearest" };
+  let ticks = 0; zones.now = () => ticks += 9;
   let resume; zones.yieldFrame = () => new Promise(resolve => { resume = resolve; });
   const pending = zones.toggle(token, state, range);
-  range.actions = 1; range.cellsPerActionRaw = 3; token.x = 800;
+  range.cellsPerActionRaw = 3; token.x = 800;
   zones.yieldFrame = async () => {}; resume(); await pending;
-  assert.deepEqual(zones.range.thresholds, [5, 10]); assert.equal(markerAt(zones, 1500, 500)?.text, "2");
-  zones.sync(token, state, true); assert.deepEqual(zones.range.thresholds, [5, 10]);
+  assert.equal(zones.range.maxCost, 5); assert.equal(markerAt(zones, 1000, 500)?.text, "1");
+  const markers = [...zones.container.children], measured = env.calls.length;
+  zones.sync(token, state, true); assert.equal(zones.range.maxCost, 5);
+  assert.deepEqual(zones.container.children, markers); assert.equal(env.calls.length, measured);
   await zones.toggle(token, state, range); await zones.toggle(token, state, range);
-  assert.deepEqual(zones.range.thresholds, [3]); assert.equal(markerAt(zones, 900, 500), undefined);
+  assert.equal(zones.range.maxCost, 3); assert.equal(markerAt(zones, 900, 500), undefined);
   zones.sync(token, { ...state, sessionId: 2 }, true); assert.equal(canvas.interface.children.length, 0);
   const next = { sessionId: 2, start: { ...state.start, x: 800 } };
   await zones.toggle(token, next, range);
@@ -292,26 +290,12 @@ test("zone tactique : instantané figé, nouvelle activation, nouvelle session s
   assert.equal(canvas.interface.children.length, 1); zones.clear(); assert.equal(canvas.interface.children.length, 0);
 });
 
-test("zone tactique : données invalides refusées et actions nombreuses évaluées sans allocation massive", async () => {
-  const { zones, token, state, calls } = setup();
-  for (const range of [null, { cellsPerActionRaw: 0, rounding: "nearest", actions: 1 },
-    { cellsPerActionRaw: Infinity, rounding: "nearest", actions: 1 }, { cellsPerActionRaw: 5, rounding: "nearest", actions: -1 },
-    { cellsPerActionRaw: 5, rounding: "nearest", actions: 1.5 }, { cellsPerActionRaw: 5, rounding: "unknown", actions: 1 },
-    { cellsPerActionRaw: Number.MAX_VALUE, rounding: "nearest", actions: 2 }]) {
-    assert.equal((await zones.toggle(token, state, range)).reason, "InvalidRange");
-    assert.equal(zones.visible, false);
+test("zone tactique : tokens non 1 × 1 refusés avant toute exploration", async () => {
+  for (const dimensions of [{ width: 2 }, { height: 2 }, { width: 0.5 }]) {
+    const { zones, token, state, calls } = setup(); Object.assign(state.start, dimensions);
+    assert.equal((await zones.toggle(token, state, DEFAULT_RANGE)).reason, "Unsupported");
+    assert.equal(calls.length, 0); assert.equal(zones.visible, false);
   }
-  assert.equal((await zones.toggle(token, state, { cellsPerActionRaw: Number.MIN_VALUE, rounding: "down", actions: Number.MAX_SAFE_INTEGER })).success, true);
-  assert.equal(zones.range.thresholds, null); assert.equal(zones.stats.marked, 0);
-  assert.equal(calls.length, 0);
-});
-
-test("zone tactique : seuils paresseux et premier indice correct pour 5 000 actions", async () => {
-  const env = setup(), { zones, token, state } = env; corridor(env, 2);
-  assert.equal((await zones.toggle(token, state, { cellsPerActionRaw: 0.0002, rounding: "down", actions: 5000 })).success, true);
-  assert.equal(zones.range.thresholds, null); assert.equal(zones.range.maxCost, 1);
-  assert.equal(markerAt(zones, 600, 500)?.text, "5000");
-  assert.equal(markerAt(zones, 700, 500), undefined);
 });
 
 test("zone tactique : limites temps/états/transitions explicites, aucun rendu partiel", async () => {
