@@ -115,6 +115,7 @@ export class MovementTracker {
     if (!sameCoordinates(origin, session.path.at(-1))) {
       session.measureReason = "discontinuous-movement"; session.cost = null; return failure("discontinuous-movement");
     }
+    if (points.every(point => sameCoordinates(origin, point))) return { success: true, reason: "no-passed-section" };
     const segment = { id: movement.id, method: movement.method, origin: position(origin),
       waypoints: points.map(point => ({ ...point })), distance: passed.distance, spaces: passed.spaces, cost: passed.cost };
     session.segments.push(segment);

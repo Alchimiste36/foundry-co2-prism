@@ -42,7 +42,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           format: (key, data) => (budgetTranslations[key] ?? key).replace(/\\{(\\w+)\\}/g, (_, name) => data[name]) } };
       let sequence = 0;
       const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
-        applications: { api: { DialogV2: { confirm: async () => false } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
+        applications: { api: { DialogV2: { confirm: async () => false, wait: async () => "validate" } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
@@ -946,15 +946,15 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(movementPanel.querySelectorAll('input[type="radio"]').length === 0, 'No movement mode radios');
           check(bar.movementTracker.getSnapshot(tracked).state.mode === 'exact'
             && bar.movementTracker.getSnapshot(tracked).state.start.x === trackedStart, 'Exact session starts at current position');
-          check(movementButton.textContent === 'Valider', 'Archive6 active validation label');
+          check(movementButton.textContent === 'Mouvement', 'Archive6 active validation label');
           check(movementPanel.querySelector('.co2prism-movement-zones-toggle').disabled
-            && movementPanel.querySelector('.co2prism-movement-zones-status').textContent.includes('indisponibles'),
+            ,
             'Zones prototype unavailable API leaves panel usable with diagnostic');
           trackedMove(7);
           const blocks = () => [...movementPanel.querySelectorAll('.co2prism-movement-block')];
           const grey = () => [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, node) => sum + Number(node.dataset.used), 0);
           check(blocks().length === 1 && grey() === 5 && blocks()[0].children.length === 5, 'Single block with five filled cells');
-          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('1 / 5'), 'Single M session preview');
+          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('actions de mouvement'), 'Single M session preview');
           check(blocks()[0].getBoundingClientRect().width <= movementPanel.getBoundingClientRect().width, 'Single block fits panel');
           trackedMove(22);
           check(grey() === 5 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 5, '15C excess adds no cells');
@@ -965,14 +965,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(blocks().length === 1 && movementPanel.querySelector('.co2prism-movement-excess'), 'External spend preserves single block and capacity');
           settings.economyMode = 'off'; bar.refreshActor();
           check(blocks().length === 1 && bar.movementView(tracked).capacity === 5, 'Inactive budget single M capacity');
+          check(movementPanel.querySelector('.co2prism-movement-summary').hidden
+            && !movementPanel.querySelector('.co2prism-movement-summary').getClientRects().length, 'Inactive budget hides summary entirely');
           settings.economyMode = 'always'; bar.refreshActor();
+          check(!movementPanel.querySelector('.co2prism-movement-summary').hidden, 'Active budget shows summary');
           const beforeReturn = JSON.stringify(actor.flags.co2prism.actionEconomy);
           failReturn = true; await bar.resetMovement();
           check(!movementPanel.querySelector('.co2prism-movement-error').hidden && grey() === 5, '15C return failure preserves path');
           failReturn = false; movementPanel.querySelector('.co2prism-movement-reset').click();
           await new Promise(resolve => setTimeout(resolve, 0));
           check(tracked.x === trackedStart && grey() === 0 && !movementPanel.hidden, 'Successful return keeps exact session');
-          check(movementButton.textContent === 'Valider', 'Archive6 label after reset');
+          check(movementButton.textContent === 'Mouvement', 'Archive6 label after reset');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === beforeReturn, '15C return did not mutate budget');
           const secondDocument = { ...tracked, id: 'second-token', uuid: 'Scene.s.Token.second', x: 500 };
           movementScene.tokens.set(secondDocument.id, secondDocument);
@@ -981,7 +984,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(movementButton.textContent === 'Mouvement', 'Archive6 label after selection');
           movementButton.click(); trackedMove(1, secondDocument);
           canvas.tokens.controlled = [selectedToken]; hooks.get('controlToken')();
-          check(!movementPanel.hidden && grey() === 0, '15C return selection restores own session');
+          check(movementPanel.hidden, 'Selection abandons previous session'); movementButton.click();
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.position = { x: innerWidth - 1, y: 0 }; bar.layout();
             const bounds = root.getBoundingClientRect(), panel = movementPanel.getBoundingClientRect();
@@ -993,8 +996,49 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const reset = movementPanel.querySelector('.co2prism-movement-reset'), rect = reset.getBoundingClientRect();
             check(reset.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)), size + ' movement reset clickable');
           }
+          const frenchMovement = { ...budgetTranslations };
+          const movementLanguages = { fr: ${JSON.stringify(translations.CO2PRISM.Movement)}, en: ${JSON.stringify(JSON.parse(read("../lang/en.json")).CO2PRISM.Movement)} };
+          for (const [language, texts] of Object.entries(movementLanguages)) {
+            for (const [key, value] of Object.entries(texts)) budgetTranslations['CO2PRISM.Movement.' + key] = value;
+            bar.movementSignature = null; bar.refreshActor();
+            for (const size of ['S', 'M', 'L', 'XL']) {
+              settings.size = size; bar.layout();
+              const panel = movementPanel.getBoundingClientRect();
+              const info = movementPanel.querySelector('.co2prism-movement-info').getBoundingClientRect();
+              const zones = bar.movementZonesButton.getBoundingClientRect();
+              const reset = bar.movementReset.getBoundingClientRect();
+              const validate = bar.movementValidate.getBoundingClientRect();
+              check(zones.right <= info.left && info.right <= reset.left, language + size + ' three horizontal zones');
+              check(Math.abs(reset.width - reset.height) < 1 && Math.abs(validate.width - validate.height) < 1
+                && reset.bottom <= validate.top && Math.abs(reset.left - validate.left) < 1, language + size + ' square stacked commands');
+              check(panel.height < 140 && movementPanel.scrollHeight <= movementPanel.clientHeight + 1
+                && movementPanel.scrollWidth <= movementPanel.clientWidth + 1, language + size + ' compact without internal scrollbars');
+              for (const selector of ['summary', 'message']) {
+                const node = movementPanel.querySelector('.co2prism-movement-' + selector);
+                const range = document.createRange(); range.selectNodeContents(node);
+                check(range.getClientRects().length === 1 && range.getBoundingClientRect().right <= info.right + 1,
+                  language + size + selector + ' readable on one line');
+              }
+              const status = movementPanel.querySelector('.co2prism-movement-message'), originalStatus = status.textContent;
+              for (const text of [texts.Normal, texts.Excess.replace('{excess}', '123')]) {
+                status.textContent = text; bar.layout();
+                const range = document.createRange(); range.selectNodeContents(status);
+                check(range.getClientRects().length === 1 && movementPanel.scrollWidth <= movementPanel.clientWidth + 1
+                  && movementPanel.getBoundingClientRect().right <= innerWidth, language + size + ' movement status fits');
+              }
+              status.textContent = originalStatus; bar.layout();
+              const cells = [...movementPanel.querySelectorAll('.co2prism-movement-cell')];
+              check(cells.every(cell => Math.abs(cell.getBoundingClientRect().top - cells[0].getBoundingClientRect().top) < 1),
+                language + size + ' one line of cells');
+              for (const button of [bar.movementZonesButton, bar.movementReset, bar.movementValidate]) {
+                check(!button.textContent.trim() && button.querySelector('i.fa-solid') && button.title && button.getAttribute('aria-label'),
+                  language + size + ' labelled icon only');
+              }
+            }
+          }
+          Object.assign(budgetTranslations, frenchMovement); bar.movementSignature = null; bar.refreshActor();
           movementScene.grid.type = 0; hooks.get('updateScene')(movementScene, { grid: {} });
-          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('indisponible') && blocks().length === 0, '15C gridless explicit');
+          check(movementPanel.querySelector('.co2prism-movement-message').textContent.includes('indisponible') && blocks().length === 0, '15C gridless explicit');
           movementScene.grid.type = 1; hooks.get('updateScene')(movementScene, { grid: {} });
           const realHeight = innerHeight;
           Object.defineProperty(window, 'innerHeight', { value: 500, configurable: true });
@@ -1006,10 +1050,10 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           Object.defineProperty(window, 'innerHeight', { value: realHeight, configurable: true }); bar.layout();
           trackedMove(11);
           const beforeFinish = JSON.stringify(actor.flags.co2prism.actionEconomy), destination = tracked.x;
-          movementButton.click();
+          bar.movementValidate.click();
           check(movementButton.disabled && bar.movementReset.disabled, '15D controls locked during validation');
           await new Promise(resolve => setTimeout(resolve, 0));
-          check(movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'false' && tracked.x === destination, '15D finish retains destination');
+          check(!movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'true' && tracked.x === destination, '15D finish retains destination');
           check(movementButton.textContent === 'Mouvement', 'Archive6 label after finish');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) !== beforeFinish && economy.getSnapshot().movementsRemaining === 4
             && warnings.length === notificationCount + 1, 'Single M validation warns for excess');
@@ -1017,39 +1061,75 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           // Comparer les blocs et le portrait sur des vitesses non entières.
           actor.system.attributes.movement = { value: 7.2, unit: 'm' };
           settings.movementRounding = 'nearest'; await economy.reset(); bar.refreshActor();
-          movementButton.click(); trackedMove(7);
+          if (movementPanel.hidden) movementButton.click(); trackedMove(7);
           check(blocks().map(block => Number(block.dataset.cells)).join(',') === '4', 'Fractional speed gives one block of four');
           check(grey() === 4 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 4, 'Four filled cells capped to single M');
           movement('14.4 / 14.4', '7 / 7');
-          await bar.toggleMovement();
+          await bar.validateMovement(tracked);
           check(economy.getSnapshot().movementsRemaining === 1 && bar.movementResults.get(tracked).consumedCount === 1, 'Seven cells cost one M');
+          await bar.toggleMovement();
           actor.system.attributes.movement = { value: 10, unit: 'm' }; movementScene.grid.distance = 3;
           for (const mode of ['nearest', 'up', 'down']) {
             settings.movementRounding = mode; await economy.reset(); await economy.grant('m', 3); bar.refreshActor();
-            movementButton.click();
+            if (movementPanel.hidden) movementButton.click();
             const expected = (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(50 / 3);
             const total = [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, cell) => sum + Number(cell.dataset.count), 0);
             check(total === (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(10 / 3) && bar.combatValues.cells.textContent === expected + ' / ' + expected, 'Portrait budget and single M capacity ' + mode);
             trackedMove(7);
             check(grey() === total, 'Filled cells capped to single M ' + mode);
-            settings.economyMode = 'off'; bar.refreshActor(); await bar.toggleMovement();
-            settings.economyMode = 'always'; bar.refreshActor();
+            settings.economyMode = 'off'; bar.refreshActor(); await bar.validateMovement(tracked);
+            settings.economyMode = 'always'; bar.refreshActor(); await bar.toggleMovement();
           }
           actor.system.attributes.movement = { value: 0.4, unit: 'm' }; movementScene.grid.distance = 2;
-          settings.movementRounding = 'down'; await economy.reset(); bar.refreshActor(); movementButton.click(); trackedMove(1);
+          settings.movementRounding = 'down'; await economy.reset(); bar.refreshActor(); if (movementPanel.hidden) movementButton.click(); trackedMove(1);
           check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0'
             && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 0, 'Zero capacity has no fake squares');
           await economy.grant('m', 3); hooks.get('updateActor')(actor, { flags: {} });
           check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0' && grey() === 0, 'Bonus does not change zero session capacity');
           movement('2 / 2', '1 / 1');
-          await bar.toggleMovement();
+          await bar.validateMovement(tracked);
           check(economy.getSnapshot().movementsRemaining === 4 && bar.movementResults.get(tracked).consumedCount === 1, 'Zero capacity spends one M');
           actor.system.attributes.movement = { value: 2000000, unit: 'm' }; bar.refreshActor();
-          movementButton.click();
+          if (movementPanel.hidden) movementButton.click();
           const aggregated = [...movementPanel.querySelectorAll('.co2prism-movement-cell')];
           check(blocks().length === 1 && aggregated.length <= 60
             && aggregated.reduce((sum, node) => sum + Number(node.dataset.count), 0) === 1000000, 'Huge speed DOM bounded to 60 groups');
-          settings.economyMode = 'off'; bar.refreshActor(); await bar.toggleMovement(); settings.economyMode = 'always';
+          check(aggregated.every(node => Math.abs(node.getBoundingClientRect().top - aggregated[0].getBoundingClientRect().top) < 1)
+            && movementPanel.scrollWidth <= movementPanel.clientWidth + 1, 'Huge speed remains a single contained row');
+          settings.economyMode = 'off'; bar.refreshActor(); await bar.validateMovement(tracked); settings.economyMode = 'always';
+          if (!movementPanel.hidden) await bar.toggleMovement();
+          await economy.reset(); bar.refreshActor();
+          movementButton.click();
+          let closeAnswer;
+          const originalWait = foundry.applications.api.DialogV2.wait;
+          foundry.applications.api.DialogV2.wait = () => new Promise(resolve => { closeAnswer = resolve; });
+          trackedMove(1);
+          const closing = bar.toggleMovement();
+          check(bar.movementToggle.disabled && bar.movementValidate.disabled && bar.movementReset.disabled
+            && bar.movementZonesButton.disabled, 'All movement controls locked during close dialogue');
+          closeAnswer(null); await closing;
+          check(!movementPanel.hidden && !bar.movementValidate.disabled, 'Dismissal keeps path and unlocks commands');
+          foundry.applications.api.DialogV2.wait = originalWait;
+          await bar.resetMovement();
+          check(bar.movementValidate.disabled && bar.movementReset.disabled, 'Empty session commands disabled');
+          trackedMove(1); await bar.validateMovement(tracked);
+          check(!movementPanel.hidden && bar.movementValidate.disabled && grey() === 0, 'Next session remains open and empty');
+          trackedMove(1); await bar.validateMovement(tracked);
+          check(!movementPanel.hidden && !movementButton.disabled && movementButton.classList.contains('co2prism-movement-unavailable'), 'Exhausted toggle remains clickable');
+          check(!movementPanel.querySelector('.co2prism-movement-empty').hidden
+            && movementPanel.querySelector('.co2prism-movement-content').hidden
+            && movementPanel.querySelector('.co2prism-movement-empty').textContent === 'Aucune action de mouvement disponible.', 'Exhausted panel only shows required message');
+          const empty = movementPanel.querySelector('.co2prism-movement-empty');
+          const emptyRange = document.createRange(); emptyRange.selectNodeContents(empty);
+          const emptyText = emptyRange.getBoundingClientRect(), emptyPanel = movementPanel.getBoundingClientRect();
+          check(emptyRange.getClientRects().length === 1 && emptyPanel.height < 80
+            && Math.abs((emptyText.left + emptyText.right - emptyPanel.left - emptyPanel.right) / 2) < 1
+            && Math.abs((emptyText.top + emptyText.bottom - emptyPanel.top - emptyPanel.bottom) / 2) < 1,
+            'Exhausted message compact and centered');
+          check([bar.movementZonesButton, bar.movementReset, bar.movementValidate].every(button => !button.getClientRects().length),
+            'All internal icons hidden at zero budget');
+          movementButton.click(); check(movementPanel.hidden, 'Exhausted panel closes');
+          movementButton.click(); check(!movementPanel.hidden, 'Exhausted panel opens');
           tracked.canUserModify = () => false; bar.refreshActor(); check(movementButton.disabled, '15C permission disables command');
           tracked.canUserModify = () => true;
           hooks.get('deleteToken')(secondDocument);
