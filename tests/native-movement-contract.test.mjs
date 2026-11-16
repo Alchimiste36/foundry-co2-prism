@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import vm from "node:vm";
+import { MovementZones } from "../module/movement/movement-zones.mjs";
+import { movementScenario } from "./helpers/movement-zones-scenarios.mjs";
 import { MovementTracker, roundMovementCells } from "../module/movement/movement-tracker.mjs";
 
 const nativePath = process.env.CO2PRISM_FOUNDRY_SCRIPT ?? "F:/FVTT_V14/public/scripts/foundry.mjs";
@@ -139,4 +141,129 @@ test("coût natif : coûts déjà appliqués figés, contexte diagonal conservé
   assert.equal(lastPath[2].cost, undefined);
   assert.equal(second.cost, token.object.measureMovementPath(lastPath).cost);
   assert.ok(second.cost > first + 5);
+});
+
+
+for (const name of ["EQUIDISTANT", "EXACT", "APPROXIMATE", "RECTILINEAR", "ALTERNATING_1", "ALTERNATING_2", "ILLEGAL"]) {
+  test("zone tactique : grille native v14, diagonales " + name, { skip: !available }, async () => {
+    const env = movementScenario(MovementZones, { cells: 3 }), grid = new native.NativeGrid(native.rules[name], 2);
+    const origin = env.state.start;
+    env.token.object.measureMovementPath = path => grid.measurePath(path);
+    const result = await env.zones.toggle(env.token, env.state, env.range);
+    assert.equal(result.success, true);
+    const expected = [];
+    for (let di = -3; di <= 3; di++) for (let dj = -3; dj <= 3; dj++) {
+      if (!di && !dj) continue;
+      const target = { ...origin, x: origin.x + dj * 100, y: origin.y + di * 100 };
+      const path = name === "ILLEGAL" ? [origin, { ...origin, x: target.x }, target] : [origin, target];
+      if (grid.measurePath(path).cost <= 6 + 1e-8) expected.push([target.x + 50, target.y + 50]);
+    }
+    expected.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    assert.deepEqual(env.markers().filter(marker => marker[3] === 0x357cbb).map(marker => marker.slice(0, 2)), expected);
+    env.zones.clear();
+  });
+}
+
+test("contrat natif v14 : préparation régionale avant contrainte et mesure", { skip: !available }, () => {
+  const context = vm.createContext({
+    canvas: { visibility: { tokenVision: false } },
+    CONFIG: { Token: { movement: { TerrainData: { resolveTerrainEffects: effects =>
+      effects.length ? { difficulty: effects[0].difficulty, equals(other) { return this.difficulty === other.difficulty; } } : null } } } },
+    REGION_MOVEMENT_SEGMENTS: { MOVE: 0 },
+    TokenDocument: { arePositionsEqual: (a, b) => a.x === b.x && a.y === b.y && a.elevation === b.elevation }
+  });
+  vm.runInContext("class NativeTerrainToken { " + method("  createTerrainMovementPath(waypoints, options={}) {") +
+    " }; globalThis.NativeTerrainToken = NativeTerrainToken;", context);
+  const token = new context.NativeTerrainToken();
+  const start = { x: 500, y: 500, elevation: 0, width: 1, height: 1, depth: 0, shape: 1, level: "l" };
+  token.document = { _source: start, movementAction: "walk",
+    getMovementOrigin: point => ({ x: point.x + 50, y: point.y + 50, elevation: point.elevation }),
+    testInsideRegion: (_region, point) => point.x >= 550,
+    segmentizeRegionMovementPath: (_region, [from, to]) =>
+      from.x < 550 && to.x >= 550 ? [{ type: 1, from: { ...from, x: 550 } }] : [] };
+  const behavior = { disabled: false, system: { _getTerrainEffects: () => [{ difficulty: 2 }] } };
+  const region = { hidden: false, includedInLevel: () => true, behaviors: [behavior] };
+  token.scene = { regions: [region], dimensions: { distancePixels: 50 } };
+  const path = token.createTerrainMovementPath([start, { ...start, x: 600 }], { preview: false });
+  assert.equal(path.length, 3);
+  assert.equal(path[1].x, 550);
+  assert.equal(path[1].intermediate, true);
+  assert.equal(path[1].terrain, null);
+  assert.equal(path[2].terrain.difficulty, 2);
+  behavior.system._getTerrainEffects = () => [];
+  const neutral = token.createTerrainMovementPath([start, { ...start, x: 600 }], { preview: false });
+  assert.equal(neutral.length, 2);
+  assert.equal(neutral[1].terrain, null);
+});
+
+
+test("contrat v14 : une case en terrain natif difficulté 2, zone et tracker concordants", { skip: !available }, async () => {
+  const context = vm.createContext({
+    canvas: { visibility: { tokenVision: false } }, NativeGrid: native.NativeGrid,
+    CONFIG: { Token: { movement: { costAggregator: results => results[0].cost,
+      actions: { walk: { walls: "move", teleport: false, measure: true, getCostFunction: () => cost => cost } } } } }
+  });
+  vm.runInContext(
+    "class TerrainData { constructor(data) { Object.assign(this, data); } clone() { return new TerrainData(this); } " +
+    method("  static resolveTerrainEffects(effects, options) {", source.indexOf("class TerrainData ")) +
+    method("  static getMovementCostFunction(token, options) {", source.indexOf("class TerrainData ")) +
+    method("  equals(other) {", source.indexOf("class TerrainData ")) + " };" +
+    "CONFIG.Token.movement.TerrainData = TerrainData;" +
+    "class TokenDocument { " +
+    method("  measureMovementPath(waypoints, {cost, aggregator}={}) {", source.indexOf("class TokenDocument ")) +
+    method("  static #removeResizeSegmentsFromMeasurementResult(path, result) {") +
+    method("  static #createMovementCostFunction(grid, cost, aggregator, width, height, depth, shape) {") +
+    method("  static #createSquareMovementCostFunction(cost, aggregator, width, height, depth) {") +
+    method("  static #createHexagonalMovementCostFunction(grid, cost, aggregator, width, height, depth, shape) {") +
+    method("  getCompleteMovementPath(waypoints) {") + " };" +
+    "class NativeObject { " +
+    method("  measureMovementPath(waypoints, options) {", source.indexOf("class Token extends ")) +
+    method("  _getMovementCostFunction(options) {", source.indexOf("class Token extends ")) +
+    method("  createTerrainMovementPath(waypoints, options={}) {") + " };" +
+    "globalThis.NativeObject = NativeObject; globalThis.NativeDocument = TokenDocument;", context);
+  const env = movementScenario(MovementZones, { cells: 1 });
+  const grid = new native.NativeGrid(native.rules.EQUIDISTANT, 1.5);
+  grid.isSquare = true; grid.type = 1;
+  const start = { x: 3100, y: 2000, elevation: 0, width: 1, height: 1, depth: 1, shape: 1, level: "l" };
+  const document = new context.NativeDocument();
+  const object = new context.NativeObject();
+  const scene = env.token.parent;
+  scene.grid = grid;
+  scene.regions = [{ hidden: false, includedInLevel: () => true,
+    behaviors: [{ disabled: false, system: { _getTerrainEffects: () => [{ name: "difficulty", difficulty: 2 }] } }] }];
+  scene.regions.size = 1;
+  scene.dimensions = { distancePixels: 100 / 1.5 };
+  Object.assign(document, { _source: start, movementAction: "walk", parent: scene });
+  Object.assign(object, { document, scene });
+  // Géométrie régionale simulée ; les fonctions de coût et de mesure sont celles du Core.
+  document.getMovementOrigin = point => ({ x: point.x + 50, y: point.y + 50, elevation: point.elevation + 0.75 });
+  document.testInsideRegion = () => true;
+  document.segmentizeRegionMovementPath = () => [];
+  document.getSnappedPosition = point => point;
+  document._positionToGridOffset = point => grid.getOffset({ ...point, x: point.x + 50, y: point.y + 50 });
+  document._gridOffsetToPosition = offset => ({ x: offset.j * 100, y: offset.i * 100, elevation: offset.k * 1.5 });
+  const input = [start, { ...start, x: 3200 }];
+  const regional = object.createTerrainMovementPath(input, { preview: false });
+  const completed = document.getCompleteMovementPath(regional);
+  const nativeMeasurement = object.measureMovementPath(completed, { preview: false });
+  assert.equal(object.measureMovementPath(regional, { preview: false }).cost, 3);
+  assert.equal(nativeMeasurement.cost, 3);
+  assert.equal(nativeMeasurement.waypoints[1].backward.cost, 3);
+  const originalConstraint = env.token.object.constrainMovementPath;
+  Object.assign(env.token, start, { getCompleteMovementPath: path => document.getCompleteMovementPath(path) });
+  Object.assign(env.token.object, { createTerrainMovementPath: path => object.createTerrainMovementPath(path, { preview: false }),
+    measureMovementPath: path => object.measureMovementPath(path, { preview: false }),
+    constrainMovementPath: path => originalConstraint(path) });
+  env.state.start = start;
+  // Le canvas du scénario utilise aussi 1,5 unité par case.
+  const localCanvas = env.zones.getCanvas(); localCanvas.grid.distance = 1.5;
+  const zone = await env.zones.toggle(env.token, env.state, env.range);
+  assert.equal(zone.success, true);
+  assert.equal(zone.stats.marked, 0);
+  const tracker = new MovementTracker({ getUser: () => ({ isGM: true }), readMovement: () => ({ cells: 1 }) });
+  assert.equal(tracker.start(env.token).success, true);
+  const actual = tracker.update(env.token, { id: "native", origin: start,
+    passed: { waypoints: completed.slice(1), cost: nativeMeasurement.cost } });
+  assert.equal(actual.state.cost, nativeMeasurement.cost);
+  assert.equal(actual.state.costCellsRaw, 2);
 });

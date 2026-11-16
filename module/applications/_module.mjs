@@ -535,9 +535,11 @@ class PrismBar {
     if (available <= 0 || !view) return true;
     const { state, valid, capacity, excess } = view;
     if (this.movementZonesButton) {
-      this.movementZonesButton.disabled = busy || settled || (!this.movementZones.visible && Boolean(this.movementZones.supported(token, state.start)));
+      const unsupported = this.movementZones.supported(token, state.start);
+      this.movementZonesButton.disabled = busy || settled || (!this.movementZones.visible && Boolean(unsupported));
       this.movementZonesButton.setAttribute("aria-pressed", String(this.movementZones.visible));
-      this.movementZonesButton.title = localize(this.movementZones.visible ? "ZonesHide" : "ZonesShow");
+      const diagnostic = this.movementZones.diagnostic === "Done" ? null : this.movementZones.diagnostic;
+      this.movementZonesButton.title = localize(diagnostic || unsupported ? `Zones${diagnostic ?? unsupported}` : this.movementZones.visible ? "ZonesHide" : "ZonesShow");
       this.movementZonesButton.setAttribute("aria-label", this.movementZonesButton.title);
     }
     const data = { used: state.cellsUsed, capacity, actions: 1, available, cells: state.cellsPerAction, excess };

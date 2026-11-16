@@ -110,7 +110,7 @@
       "ZonesLimit": "Tactical Zone stopped: range-adjusted safety limit reached (at most 50,000 states and 400,000 transitions). No incomplete result displayed.",
       "ZonesTimeLimit": "Tactical Zone stopped after 15 seconds. No incomplete result displayed; toggle it off/on to retry.",
       "ZonesInvalidRange": "Tactical Zone unavailable: invalid speed or rounding, or single-action capacity outside numeric limits.",
-      "ZonesUnsupported": "Prototype limited to a square grid without special regions, an aligned 1 × 1 token and a measured action restricted by walls, on the current level. Reduced/zero costs and path transformations are unsupported.",
+      "ZonesUnsupported": "Tactical Zone requires a square grid, positive token dimensions ≤ 1 × 1 and a measured action constrained by walls on the current level. Path transformations are unsupported.",
       "Validate": "Validate",
       "ZeroBlock": "Capacity for this M action: 0 cells",
       "Start": "Open the Movement panel.",
@@ -143,7 +143,9 @@
       "CloseTitle": "Movement in progress",
       "CloseQuestion": "What would you like to do?",
       "CloseValidate": "Validate movement",
-      "CloseReset": "Cancel movement"
+      "CloseReset": "Cancel movement",
+      "ZonesTerrainUnavailable": "Tactical Zone unavailable: native regional terrain preparation is missing or inconsistent. No approximate result displayed.",
+      "ZonesNonpositiveCost": "Tactical Zone unavailable: a native transition has zero, negative or near-zero cost. No incomplete result displayed."
     },
     "MovementRounding": "Movement cell rounding",
     "MovementRoundingHint": "Shared table rule for rounding displayed grid cells. Distances and the action budget are unchanged.",

@@ -46,19 +46,23 @@ export class MovementZones {
     const canvas = this.getCanvas(), object = token?.object, grid = canvas?.grid;
     if (!canvas?.ready || token?.parent !== canvas.scene || canvas.scene?.tokens?.get(token.id) !== token
       || !start || ![start.x, start.y, start.elevation].every(Number.isFinite)) return "Unavailable";
-    if (canvas.scene.grid?.type !== 1 || start.width !== 1 || start.height !== 1 || canvas.scene.regions?.size > 0
+    if (canvas.scene.grid?.type !== 1 || ![start.width, start.height].every(size => Number.isFinite(size) && size > 0 && size <= 1)
       || (canvas.level?.id && start.level !== canvas.level.id)) return "Unsupported";
     if (!["constrainMovementPath", "measureMovementPath"].every(key => typeof object?.[key] === "function")
       || !["getOffset", "getTopLeftPoint", "getCenterPoint", "getAdjacentOffsets"].every(key => typeof grid?.[key] === "function")
       || !canvas.interface?.addChild || typeof canvas.dimensions?.rect?.contains !== "function"
       || !(Number.isFinite(grid.size) && grid.size > 0 && Number.isFinite(grid.distance) && grid.distance > 0)
-      || !this.getPIXI()?.Container || !this.getPIXI()?.Text) return "Unavailable";
+      || !this.getPIXI()?.Container || !this.getPIXI()?.Graphics) return "Unavailable";
     const action = this.getAction(token.movementAction);
     if (!action?.walls || action.teleport || action.measure === false) return "Unsupported";
-    const offset = grid.getOffset(start);
+    if (canvas.scene.regions?.size > 0 && (typeof object.createTerrainMovementPath !== "function"
+      || typeof token.getCompleteMovementPath !== "function")) return "TerrainUnavailable";
+    if ((start.width < 1 || start.height < 1) && typeof token.getMovementOrigin !== "function") return "Unavailable";
+    const offset = grid.getOffset(token.getMovementOrigin?.(start) ?? start);
     if (![offset.i, offset.j].every(Number.isSafeInteger)) return "Unavailable";
     const corner = grid.getTopLeftPoint(offset);
-    if (corner.x !== start.x || corner.y !== start.y) return "Unsupported";
+    if (![corner.x, corner.y].every(Number.isFinite)) return "Unavailable";
+    if (start.width === 1 && start.height === 1 && (corner.x !== start.x || corner.y !== start.y)) return "Unsupported";
     return null;
     } catch { return "Unavailable"; }
   }
@@ -82,7 +86,9 @@ export class MovementZones {
     const unsupported = this.supported(token, state?.start);
     if (unsupported) {
       this.token = token; this.sessionId = state?.sessionId;
-      this.diagnostic = unsupported; onUpdate(); return { success: false, reason: unsupported };
+      this.diagnostic = unsupported; onUpdate();
+      if (globalThis.game?.i18n) globalThis.ui?.notifications?.warn(game.i18n.localize(`CO2PRISM.Movement.Zones${unsupported}`));
+      return { success: false, reason: unsupported };
     }
     const { cellsPerActionRaw, rounding } = range ?? {};
     if (!Number.isFinite(cellsPerActionRaw) || cellsPerActionRaw <= 0
@@ -129,7 +135,8 @@ export class MovementZones {
           return Promise.resolve(this.yieldFrame()).then(() => { lastYield = count; sliceStarted = this.now(); });
         }
       };
-      const origin = grid.getOffset(start), epsilon = 1e-8;
+      const origin = grid.getOffset(token.getMovementOrigin?.(start) ?? start), epsilon = 1e-8;
+      const originCorner = grid.getTopLeftPoint(origin);
       const stateKey = node => `${node.i},${node.j},${node.parity},${node.offsetX},${node.offsetY}`;
       const first = { ...origin, cost: 0, path: [start], parity: 0, offsetX: 0, offsetY: 0 };
       const queue = new MovementZoneQueue(first), bestStates = new Map([[stateKey(first), 0]]), bestCells = new Map();
@@ -145,26 +152,48 @@ export class MovementZones {
           if (![i, j].every(Number.isSafeInteger) || Math.max(Math.abs(di), Math.abs(dj)) !== 1) throw Error("Invalid adjacency");
           const corner = grid.getTopLeftPoint(offset), center = grid.getCenterPoint(offset);
           if (!canvas.dimensions?.rect?.contains(center.x, center.y)) continue;
-          const destination = { ...start, x: corner.x, y: corner.y };
+          const destination = { ...start, x: start.x + corner.x - originCorner.x, y: start.y + corner.y - originCorner.y };
           if (++stats.examined > stats.maximumTransitions) throw Error("Exploration limit");
           const pause = cooperate(stats.examined);
           if (pause) await pause;
           if (!active()) return cancelled();
           // Le chemin entier conserve l'approche des angles et l'alternance native des diagonales.
           const path = [...current.path, destination];
-          const constrained = token.object.constrainMovementPath(path, options);
+          // Foundry prépare les terrains et leurs points intermédiaires avant les murs et la mesure.
+          const regional = typeof token.object.createTerrainMovementPath === "function"
+            ? token.object.createTerrainMovementPath(path, { preview: false }) : path;
+          const vertices = regional?.filter?.(point => !point.intermediate);
+          if (!Array.isArray(regional) || vertices?.length !== path.length
+            || vertices.some((point, index) => !matches(point, path[index]))
+            || (scene.regions?.size > 0 && regional.some(point => !("terrain" in point)))) throw Error("Terrain unavailable");
+          const constrained = token.object.constrainMovementPath(regional, options);
           if (!Array.isArray(constrained) || !Array.isArray(constrained[0])) throw Error("Invalid constrained path");
           const checked = constrained[0];
           if (checked.length < 2 || !matches(checked[0], start) || !matches(checked.at(-1), destination)) { stats.partial++; continue; }
-          if (checked.length !== path.length || checked.some((point, index) => !matches(point, path[index]))) throw Error("Unsupported transition");
-          const measurement = token.object.measureMovementPath(checked, { preview: false });
+          if (checked.length !== regional.length || checked.some((point, index) => !matches(point, regional[index]))) throw Error("Unsupported transition");
+          if (checked.some((point, index) => point.action !== regional[index].action
+            || (regional[index].terrain && (!point.terrain
+              || (typeof regional[index].terrain.equals === "function" && !regional[index].terrain.equals(point.terrain)))))) throw Error("Terrain unavailable");
+          // Comme le déplacement réel, compléter le chemin sans réutiliser de coûts historiques.
+          const completed = typeof token.getCompleteMovementPath === "function" ? token.getCompleteMovementPath(checked) : checked;
+          if (!Array.isArray(completed) || completed.length < 2 || !matches(completed[0], start)
+            || !matches(completed.at(-1), destination)
+            || (scene.regions?.size > 0 && completed.some(point => !("terrain" in point)))) throw Error("Terrain unavailable");
+          const nativePath = completed.map(point => { const { cost, ...native } = point; return native; });
+          const measurement = token.object.measureMovementPath(nativePath, { preview: false });
           if (measurement?.cost === Infinity) { stats.partial++; continue; }
           if (!Number.isFinite(measurement?.cost) || !Number.isSafeInteger(measurement.diagonals) || measurement.diagonals < 0) throw Error("Invalid path measurement");
+          if (measurement.waypoints !== undefined) {
+            if (measurement.waypoints.length !== nativePath.length || measurement.waypoints.slice(1)
+              .some(point => !Number.isFinite(point.backward?.cost) || point.backward.cost < 0)) throw Error("Invalid path measurement");
+            const sectionTotal = measurement.waypoints.slice(1).reduce((sum, point) => sum + point.backward.cost, 0);
+            if (Math.abs(sectionTotal - measurement.cost) > epsilon * Math.max(1, measurement.cost)) throw Error("Invalid path measurement");
+          }
           const cost = measurement.cost / grid.distance;
-          // Les terrains à coût nul/réduit restent hors du prototype ; aucune exploration non bornée.
-          if (cost - current.cost < 1 - epsilon) throw Error("Unsupported movement cost");
+          // Un coût strictement positif permet les réductions ; les plafonds restent actifs.
+          if (cost - current.cost <= epsilon) throw Error("Nonpositive movement cost");
           if (cost > maxCost + epsilon) continue;
-          const next = { i, j, cost, path: checked, parity: measurement.diagonals % 2,
+          const next = { i, j, cost, path, parity: measurement.diagonals % 2,
             offsetX: dj ? Math.sign(dj) : current.offsetX, offsetY: di ? Math.sign(di) : current.offsetY };
           const key = stateKey(next);
           if (cost + epsilon < (bestStates.get(key) ?? Infinity)) {
@@ -175,23 +204,26 @@ export class MovementZones {
         }
       }
       if (!active()) return cancelled();
-      for (const { center } of bestCells.values()) {
+      for (const { center, color } of [{ center: grid.getCenterPoint(origin), color: 0xd84b4b },
+        ...Array.from(bestCells.values(), cell => ({ ...cell, color: 0x357cbb }))]) {
         const pause = cooperate(stats.examined + stats.marked);
         if (pause) await pause;
         if (!active()) return cancelled();
-        const label = new PIXI.Text("1", { fontFamily: "Arial", fontSize: Math.max(14, grid.size * 0.3),
-          fontWeight: "bold", fill: 0xffe100, stroke: 0x000000, strokeThickness: 3 });
-        label.anchor.set(0.5); label.position.set(center.x, center.y); label.eventMode = "none";
-        container.addChild(label); stats.marked++;
+        const size = grid.size * 0.35;
+        const marker = new PIXI.Graphics();
+        marker.beginFill(color, 0.4).drawRect(-size / 2, -size / 2, size, size).endFill();
+        marker.position.set(center.x, center.y); marker.eventMode = "none";
+        container.addChild(marker); if (color === 0x357cbb) stats.marked++;
       }
       this.busy = false; container.visible = true; stats.elapsedMs = Math.round(this.now() - began); stats.stopReason = "Done"; this.diagnostic = "Done"; onUpdate();
       return { success: true, visible: true, stats: { ...stats } };
     } catch (error) {
       if (generation !== this.generation) return cancelled();
       const message = String(error?.message ?? error);
-      const diagnostic = message === "Exploration time limit" ? "TimeLimit" : message === "Exploration limit" ? "Limit" : message.startsWith("Unsupported") ? "Unsupported" : "Unavailable";
+      const diagnostic = message === "Terrain unavailable" ? "TerrainUnavailable" : message === "Nonpositive movement cost" ? "NonpositiveCost" : message === "Exploration time limit" ? "TimeLimit" : message === "Exploration limit" ? "Limit" : message.startsWith("Unsupported") ? "Unsupported" : "Unavailable";
       const finalStats = { ...stats, elapsedMs: Math.round(this.now() - began), stopReason: diagnostic };
       this.clear(); this.token = token; this.sessionId = state.sessionId; this.diagnostic = diagnostic; this.stats = finalStats; onUpdate();
+      if (globalThis.game?.i18n) globalThis.ui?.notifications?.warn(game.i18n.localize(`CO2PRISM.Movement.Zones${diagnostic}`));
       return { success: false, reason: diagnostic, stats: finalStats };
     }
   }

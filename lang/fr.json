@@ -110,7 +110,7 @@
       "ZonesLimit": "Zone Tactique interrompue : plafond de sécurité adapté à la portée atteint (au plus 50 000 états et 400 000 transitions). Aucun résultat incomplet affiché.",
       "ZonesTimeLimit": "Zone Tactique interrompue après 15 secondes. Aucun résultat incomplet affiché ; désactivez/réactivez pour réessayer.",
       "ZonesInvalidRange": "Zone Tactique indisponible : vitesse ou arrondi invalide, ou capacité d’une action hors limites numériques.",
-      "ZonesUnsupported": "Prototype limité à une grille carrée sans régions spéciales, un token 1 × 1 aligné et une action mesurée soumise aux murs, au niveau courant. Coûts réduits/nuls et transformations de trajet non pris en charge.",
+      "ZonesUnsupported": "Zone Tactique limitée à une grille carrée, un token de dimensions positives ≤ 1 × 1 et une action mesurée soumise aux murs, au niveau courant. Transformations de trajet non prises en charge.",
       "Validate": "Valider",
       "ZeroBlock": "Capacité de cette action M : 0 case",
       "Start": "Ouvrir le panneau Mouvement.",
@@ -143,7 +143,9 @@
       "CloseTitle": "Déplacement en cours",
       "CloseQuestion": "Que voulez-vous faire ?",
       "CloseValidate": "Valider le mouvement",
-      "CloseReset": "Annuler le mouvement"
+      "CloseReset": "Annuler le mouvement",
+      "ZonesTerrainUnavailable": "Zone Tactique indisponible : préparation native des terrains régionaux absente ou incohérente. Aucun résultat approximatif affiché.",
+      "ZonesNonpositiveCost": "Zone Tactique indisponible : une transition native a un coût nul, négatif ou trop proche de zéro. Aucun résultat incomplet affiché."
     },
     "MovementRounding": "Arrondi des cases de déplacement",
     "MovementRoundingHint": "Règle commune à la table pour arrondir les cases affichées. Les mètres et le budget d’actions ne sont pas modifiés.",
