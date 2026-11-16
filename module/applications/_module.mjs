@@ -652,21 +652,57 @@ class PrismBar {
     if (!actor) return [];
     const entries = [], statuses = new Set();
     for (const effect of actor.appliedEffects ?? []) {
-      entries.push({ name: effect.name, img: effect.img });
-      for (const id of effect.statuses ?? []) statuses.add(id);
+      const effectStatuses = Array.from(effect.statuses ?? []);
+      let description, duration, durationTitle;
+      try { description = effect.description; } catch { /* Description indisponible. */ }
+      try {
+        const nativeDuration = effect.duration;
+        duration = nativeDuration?.label;
+        if (effectStatuses.length) {
+          // Un statut permanent reçoit aussi le libellé natif « Aucun ».
+          if ((nativeDuration?.value !== undefined && (!Number.isFinite(nativeDuration.value) || nativeDuration.value <= 0))
+            || (nativeDuration?.remaining !== undefined && !Number.isFinite(nativeDuration.remaining))
+            || duration === game.i18n.localize("COMMON.None")) duration = undefined;
+          durationTitle = game.i18n.localize("EFFECT.DURATION.Label");
+          if (durationTitle === "EFFECT.DURATION.Label") durationTitle = game.i18n.localize("CO.ui.duration");
+          if (durationTitle === "CO.ui.duration") durationTitle = "";
+        }
+      } catch { /* Durée native indisponible. */ }
+      entries.push({ name: effect.name, img: effect.img, description, duration, durationTitle });
+      for (const id of effectStatuses) statuses.add(id);
     }
     for (const effect of actor.system?.currentEffects ?? []) {
       // Le modèle CO2 expose l'Item source des effets personnalisés.
-      let img;
+      let img, description;
       try { img = effect.sourceParts?.item?.img; } catch { /* Source supprimée ou inaccessible. */ }
-      entries.push({ name: effect.name, img });
+      try { description = effect.tooltip; } catch { /* Conserver le nom si CO2 ne résout plus la source. */ }
+      entries.push({ name: effect.name, img, description, html: true });
     }
     for (const id of actor.statuses ?? []) {
       if (statuses.has(id)) continue;
       const status = globalThis.CONFIG?.statusEffects?.find(entry => entry.id === id);
-      entries.push({ name: status ? game.i18n.localize(status.name) : id, img: status?.img });
+      let description;
+      try { description = status?.description; } catch { /* Configuration tierce inaccessible. */ }
+      entries.push({ name: status ? game.i18n.localize(status.name) : id, img: status?.img, description });
     }
-    return entries;
+    return entries.map(effect => {
+      const name = typeof effect.name === "string" ? effect.name : game.i18n.localize("CO2PRISM.Unavailable");
+      const escaped = foundry.utils.escapeHTML(name);
+      let description = typeof effect.description === "string" ? effect.description.trim() : "";
+      if (description && game.i18n.has?.(description)) description = game.i18n.localize(description);
+      const html = effect.html || /<\/?[a-z][^>]*>/i.test(description);
+      let details = html ? description : foundry.utils.escapeHTML(description).replace(/\r?\n/g, "<br>");
+      try { details = foundry.utils.cleanHTML(details); } catch { details = ""; }
+      const firstLine = details.replace(/<br\s*\/?>|<\/(?:p|div|h[1-6])>/gi, "\n")
+        .replace(/<[^>]*>/g, "").trim().split("\n")[0].trim();
+      const includesName = details && [name, escaped].includes(firstLine);
+      let tooltip = includesName ? details : `<strong>${escaped}</strong>${details ? `<br>${details}` : ""}`;
+      if (typeof effect.duration === "string" && effect.duration.trim()) {
+        const title = effect.durationTitle ?? game.i18n.localize("DURATION.Label");
+        tooltip += `<br>${title ? `${foundry.utils.escapeHTML(title)} : ` : ""}${foundry.utils.escapeHTML(effect.duration)}`;
+      }
+      return { name, img: effect.img, tooltip };
+    });
   }
 
   updateCombat() {
@@ -692,12 +728,15 @@ class PrismBar {
     const elements = effects.map(effect => {
       const element = document.createElement("span");
       element.className = "co2prism-effect";
-      element.title = typeof effect.name === "string" ? effect.name : unavailable;
+      const name = typeof effect.name === "string" ? effect.name : unavailable;
+      // Le gestionnaire natif nettoie ce HTML avant de l'afficher.
+      element.dataset.tooltipHtml = effect.tooltip;
+      element.setAttribute("aria-label", name);
       if (typeof effect.img === "string" && effect.img) {
         const img = document.createElement("img");
-        img.src = effect.img; img.alt = element.title; img.draggable = false;
+        img.src = effect.img; img.alt = name; img.draggable = false;
         element.append(img);
-      } else element.textContent = element.title;
+      } else element.textContent = name;
       return element;
     });
     this.combatEffects.replaceChildren(...elements);

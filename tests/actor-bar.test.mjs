@@ -4,12 +4,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
+const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]);
+
 // Simuler les documents préparés, sans dépendre d'un monde Foundry lancé.
 function setup() {
   const hooks = new Map();
   const context = vm.createContext({
     structuredClone,
-    foundry: { applications: { api: { DialogV2: { wait: async () => "validate" } } } },
+    foundry: { utils: { escapeHTML, cleanHTML: value => value }, applications: { api: { DialogV2: { wait: async () => "validate" } } } },
     Hooks: { once(name, fn) { hooks.set(name, fn); }, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
     game: { combats: { active: { started: true } }, user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
     canvas: { ready: true, tokens: { controlled: [] } }
@@ -710,7 +712,7 @@ function setupActions() {
   a.update = async update => calls.push({ update });
   context.game.system = { CONST: { restActions: [] } };
   context.ui = { notifications: { warn: message => warnings.push(message), error: message => errors.push(message) } };
-  context.foundry = { utils: { escapeHTML: text => text }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
+  context.foundry = { utils: { escapeHTML }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
   bar.actions = ["sheet", "fortune", "hp", "mana", "fastRest", "fullRest"].map(action => ({
     dataset: { co2prismAction: action }, setAttribute(key, value) { this[key] = value; }
   }));
@@ -854,7 +856,7 @@ function setupConfiguration() {
   const env = setup();
   const { bar, context, actor, token, hooks } = env;
   const writes = [], errors = [];
-  context.foundry = { utils: { deepClone: structuredClone }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
+  context.foundry = { utils: { deepClone: structuredClone, escapeHTML, cleanHTML: value => value }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
   context.game.settings ??= { get: () => false };
   context.ui = { notifications: { error: message => errors.push(message) } };
   context.console = { error() {} };
@@ -1346,6 +1348,113 @@ test("Combat : effets natifs, effets CO2 et statuts sans doublons ni effet ficti
   assert.equal(result[3].img, "dead.svg");
   assert.equal(bar.readCombatEffects(actor("empty")).length, 0);
   assert.equal(bar.readCombatEffects(null).length, 0);
+});
+
+test("Infobulles : getter CO2 complet lu une fois, source et tooltip défectueux isolés", () => {
+  const { bar, actor } = setup(), a = actor("co2-tooltip");
+  const html = "Durée : 3 rounds<br />Restant : 2<br />Dégâts : 1d6 feu<br />Statuts : Étourdi<br />Défense : -2<br />par Bâton de Mage";
+  let calls = 0;
+  a.system.currentEffects = [
+    { name: "Flamme", sourceParts: { item: { img: "flame.svg" } }, get tooltip() { calls++; return html; } },
+    { name: "Source perdue", get sourceParts() { throw Error("deleted"); }, get tooltip() { throw Error("deleted"); } },
+    { name: "Soin", tooltip: "Soins : 1d4<br />", sourceParts: {} }
+  ];
+  const effects = bar.readCombatEffects(a);
+  assert.equal(calls, 1);
+  assert.equal(effects[0].tooltip, "<strong>Flamme</strong><br>" + html);
+  assert.equal(effects[0].img, "flame.svg");
+  assert.equal(effects[1].tooltip, "<strong>Source perdue</strong>");
+  assert.equal(effects[1].img, undefined);
+  assert.equal(effects[2].tooltip, "<strong>Soin</strong><br>Soins : 1d4<br />");
+});
+
+test("Infobulles : statuts configurés, traductions FR/EN et statut inconnu", () => {
+  for (const language of ["fr", "en"]) {
+    const { bar, context, actor } = setup(), a = actor("status-tooltips");
+    const dictionary = language === "fr"
+      ? { "status.stunned": "Étourdi", "status.stunned.description": "Ne peut pas agir." }
+      : { "status.stunned": "Stunned", "status.stunned.description": "Cannot act." };
+    context.game.i18n = { has: key => key in dictionary, localize: key => dictionary[key] ?? key };
+    context.CONFIG = { statusEffects: [
+      { id: "stunned", name: "status.stunned", description: "status.stunned.description", img: "stun.svg" },
+      { id: "paralyzed", name: "Paralysé", description: "<p>Immobile.</p>" },
+      { id: "unconscious", name: "Inconscient", description: "Sans réaction." },
+      { id: "module-status", name: "Module", description: "Bonus < 3 & repos" },
+      { id: "broken", name: "Cassé", get description() { throw Error("module"); } }
+    ] };
+    a.statuses = new Set(["stunned", "paralyzed", "unconscious", "module-status", "broken", "unknown"]);
+    const effects = bar.readCombatEffects(a);
+    assert.equal(effects[0].tooltip, "<strong>" + dictionary["status.stunned"] + "</strong><br>" + dictionary["status.stunned.description"]);
+    assert.ok(effects[1].tooltip.includes("<p>Immobile.</p>"));
+    assert.ok(effects[2].tooltip.includes("Sans réaction."));
+    assert.ok(effects[3].tooltip.includes("Bonus &lt; 3 &amp; repos"));
+    assert.equal(effects[4].tooltip, "<strong>Cassé</strong>");
+    assert.equal(effects[5].tooltip, "<strong>unknown</strong>");
+  }
+});
+
+test("Infobulles : ActiveEffect natif, durée préparée et repli sans durée inventée", () => {
+  const { bar, context, actor } = setup(), a = actor("active-tooltips");
+  context.game.i18n.localize = key => key === "DURATION.Label" ? "Durée" : key;
+  a.appliedEffects = [
+    { name: "Protection", description: "<p>Protection</p><p>+2 DEF</p>", duration: { label: "2 rounds", remaining: 2 } },
+    { name: "Protection", description: "Autre effet distinct.", duration: { seconds: 42 } },
+    { name: "<Mage & Ami>", get description() { throw Error("missing"); }, get duration() { throw Error("missing"); } }
+  ];
+  const effects = bar.readCombatEffects(a);
+  assert.equal(effects.length, 3);
+  assert.equal(effects[0].tooltip, "<p>Protection</p><p>+2 DEF</p><br>Durée : 2 rounds");
+  assert.equal(effects[1].tooltip, "<strong>Protection</strong><br>Autre effet distinct.");
+  assert.equal(effects[2].tooltip, "<strong>&lt;Mage &amp; Ami&gt;</strong>");
+});
+
+test("Statuts : durée absente ou indéfinie omise, durée réelle traduite en FR/EN", () => {
+  for (const language of ["fr", "en"]) {
+    const { bar, context, actor } = setup(), a = actor("status-duration");
+    const none = language === "fr" ? "Aucun" : "None", title = language === "fr" ? "Durée" : "Duration";
+    context.game.i18n.localize = key => ({ "COMMON.None": none, "EFFECT.DURATION.Label": title })[key] ?? key;
+    context.CONFIG = { statusEffects: [{ id: "stunned", name: "Stunned", description: "Description native." }] };
+    a.statuses = new Set(["stunned"]);
+    for (const duration of [undefined, {}, { label: none }, { label: none, value: Infinity, remaining: Infinity },
+      { label: "placeholder", value: null }, { label: "placeholder", remaining: Infinity }]) {
+      a.appliedEffects = [{ name: "Stunned", description: "Description native.", statuses: new Set(["stunned"]), duration }];
+      const effects = bar.readCombatEffects(a);
+      assert.equal(effects.length, 1);
+      assert.equal(effects[0].tooltip, "<strong>Stunned</strong><br>Description native.");
+    }
+    a.appliedEffects[0].duration = { label: "2 rounds", value: 3, remaining: 2 };
+    assert.equal(bar.readCombatEffects(a)[0].tooltip,
+      "<strong>Stunned</strong><br>Description native.<br>" + title + " : 2 rounds");
+    context.game.i18n.localize = key => key === "COMMON.None" ? none : key;
+    assert.ok(!bar.readCombatEffects(a)[0].tooltip.includes("DURATION.Label"));
+  }
+});
+
+test("Statuts : correction isolée, effets natifs ordinaires et HTML CO2 inchangés", () => {
+  const { bar, context, actor } = setup(), a = actor("mixed-duration");
+  context.game.i18n.localize = key => key === "COMMON.None" ? "Aucun" : key;
+  const co2 = "Durée : 3 rounds<br />Restant : 2<br />Soins : 1d6<br />";
+  a.system.currentEffects = [{ name: "Soin CO2", tooltip: co2 }];
+  a.appliedEffects = [
+    { name: "Effet natif", description: "Distinct.", duration: { label: "Aucun", value: Infinity } },
+    { name: "Paralysé", description: "Immobile.", statuses: new Set(["paralyzed"]), duration: { label: "Aucun", value: Infinity } }
+  ];
+  a.statuses = new Set(["paralyzed", "unconscious"]);
+  context.CONFIG = { statusEffects: [{ id: "unconscious", name: "Inconscient", description: "Sans réaction." }] };
+  const effects = bar.readCombatEffects(a);
+  assert.equal(effects.length, 4);
+  assert.equal(effects[0].tooltip, "<strong>Effet natif</strong><br>Distinct.<br>DURATION.Label : Aucun");
+  assert.equal(effects[1].tooltip, "<strong>Paralysé</strong><br>Immobile.");
+  assert.equal(effects[2].tooltip, "<strong>Soin CO2</strong><br>" + co2);
+  assert.equal(effects[3].tooltip, "<strong>Inconscient</strong><br>Sans réaction.");
+});
+
+test("Infobulles : échec du nettoyage conserve le nom et les autres effets", () => {
+  const { bar, context, actor } = setup(), a = actor("sanitize-failure");
+  context.foundry.utils.cleanHTML = () => { throw Error("unavailable"); };
+  a.appliedEffects = [{ name: "Effet sûr", description: "<p>Texte</p>" }, { name: "Autre" }];
+  assert.deepEqual(Array.from(bar.readCombatEffects(a), effect => effect.tooltip),
+    ["<strong>Effet sûr</strong>", "<strong>Autre</strong>"]);
 });
 
 function setupShortcuts() {

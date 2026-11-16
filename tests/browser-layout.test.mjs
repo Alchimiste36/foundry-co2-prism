@@ -17,6 +17,14 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
   const directory = mkdtempSync(join(tmpdir(), "co2prism-browser-"));
   try {
     const translations = JSON.parse(read("../lang/fr.json"));
+    const nativePath = process.env.CO2PRISM_FOUNDRY_SCRIPT ?? "F:/FVTT_V14/public/scripts/foundry.mjs";
+    const native = existsSync(nativePath) ? readFileSync(nativePath, "utf8") : "";
+    const nativePart = (start, end) => native.slice(native.indexOf(start), native.indexOf(end));
+    const nativeTooltips = native ? "const deepFreeze = Object.freeze;\n"
+      + nativePart("const ALLOWED_HTML_TAGS", "const WORLD_JOIN_THEMES")
+      + nativePart("function cleanHTML(raw,", "function saveDataToFile(")
+      + nativePart("class TooltipManager {", "var _module$H")
+      + "foundry.utils.cleanHTML = cleanHTML;\n" : "";
     const markup = read("../templates/bar.hbs").replace(/\{\{localize '([^']+)'\}\}/g,
       (_match, key) => key.split(".").reduce((value, part) => value?.[part], translations) ?? key);
     // Un board natif reste derrière Prism ; aucune instance de monde n'est modifiée.
@@ -41,8 +49,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
         i18n: { localize: key => budgetTranslations[key] ?? key,
           format: (key, data) => (budgetTranslations[key] ?? key).replace(/\\{(\\w+)\\}/g, (_, name) => data[name]) } };
       let sequence = 0;
-      const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
+      const foundry = { utils: { cleanHTML: value => value, escapeHTML: value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]), deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
         applications: { api: { DialogV2: { confirm: async () => false, wait: async () => "validate" } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
+      ${nativeTooltips}
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
@@ -210,7 +219,51 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const firstY = slots[0].getBoundingClientRect().y, secondY = slots[3].getBoundingClientRect().y;
             check(slots.slice(0, 3).every(slot => slot.getBoundingClientRect().y === firstY)
               && slots.slice(3).every(slot => slot.getBoundingClientRect().y === secondY) && secondY > firstY, "Disposition 5/3");
-            check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.title === "Native effect", "Effets réels");
+            check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.dataset.tooltipHtml === "<strong>Native effect</strong>", "Effets réels");
+            if (typeof TooltipManager !== "undefined" && !game.tooltip) {
+              const saved = { applied: actor.appliedEffects, custom: actor.system.currentEffects, position: bar.position };
+              actor.appliedEffects = [{ name: 'Protection <Mage>', img: "file:///F:/FVTT_V14/public/icons/svg/shield.svg",
+                description: '<p><em>Défense +2</em></p><img src="data:," onerror="window.tooltipUnsafe = true">',
+                duration: { label: '2 rounds', remaining: 2 }, statuses: new Set() }];
+              actor.system.currentEffects = [{ name: 'Flamme', sourceParts: {},
+                tooltip: 'Durée : 3 rounds<br />Restant : 2<br />Dégâts : 1d6 feu<br />Statuts : Étourdi<br />Défense : -2<br />par Bâton de Mage'
+                  + '<scr' + 'ipt>window.tooltipUnsafe = true</scr' + 'ipt>' }];
+              bar.refreshActor();
+              const icon = bar.combatEffects.firstElementChild, custom = bar.combatEffects.children[1];
+              const iconBefore = icon.getBoundingClientRect();
+              const tooltipElement = document.createElement("aside"); tooltipElement.id = "tooltip";
+              tooltipElement.setAttribute("popover", "manual"); document.body.append(tooltipElement);
+              Math.clamp = (number, min, max) => Math.min(max, Math.max(min, number));
+              const Tour = globalThis.Tour = { tourInProgress: false };
+              foundry.applications.detached = { adoptNodes: (parent, ...nodes) => parent.append(...nodes) };
+              foundry.utils.getDefiningClass = () => TooltipManager;
+              const manager = game.tooltip = new TooltipManager();
+              manager.activateListeners(document);
+              icon.dispatchEvent(new PointerEvent("pointerenter"));
+              await new Promise(resolve => setTimeout(resolve, 550));
+              check(manager.element === icon && tooltipElement.querySelector('em')?.textContent === 'Défense +2',
+                'Native tooltip hover renders rich HTML');
+              check(tooltipElement.textContent.includes('Protection <Mage>') && tooltipElement.textContent.includes('2 rounds'),
+                'Native effect name and prepared duration');
+              check(!tooltipElement.querySelector('[onerror], script') && !window.tooltipUnsafe, 'Native HTML sanitization');
+              check(!icon.hasAttribute('title') && icon.getAttribute('aria-label') === 'Protection <Mage>'
+                && icon.querySelector('img').alt === 'Protection <Mage>', 'No literal HTML title and accessible effect name');
+              manager.activate(custom);
+              check(tooltipElement.querySelectorAll('br').length >= 5 && tooltipElement.textContent.includes('par Bâton de Mage')
+                && !tooltipElement.textContent.includes('<br'), 'CO2 tooltip HTML retained');
+              for (const position of [{ x: 0, y: 0 }, { x: innerWidth, y: innerHeight }]) {
+                bar.position = position; bar.layout(); manager.activate(icon);
+                const bounds = tooltipElement.getBoundingClientRect();
+                check(bounds.left >= -1 && bounds.top >= -1 && bounds.right <= innerWidth + 1
+                  && bounds.bottom <= innerHeight + 1, 'Native effect tooltip stays inside screen');
+              }
+              bar.position = saved.position; bar.layout();
+              const iconAfter = icon.getBoundingClientRect();
+              check(Math.abs(iconBefore.width - iconAfter.width) < 1 && Math.abs(iconBefore.height - iconAfter.height) < 1,
+                'Tooltips preserve icon dimensions');
+              manager.deactivate(); tooltipElement.hidePopover();
+              actor.appliedEffects = saved.applied; actor.system.currentEffects = saved.custom; bar.refreshActor();
+            }
             const count = calls.length, original = JSON.stringify(actor.system);
             for (const node of [...slots, ...root.querySelectorAll(".co2prism-defense-control")]) {
               node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
