@@ -498,7 +498,10 @@ class PrismBar {
     this.refreshActor();
     const token = this.movementToken(), view = token && this.movementView(token);
     if (!view || !this.configuration.panels.combat || this.movementValidations.has(token) || this.movementResets.has(token)) return false;
-    const result = await this.movementZones.toggle(token, view.state, () => this.refreshActor());
+    const state = { ...view.state, start: { ...view.state.start } };
+    const range = { cellsPerActionRaw: state.cellsPerActionRaw, rounding: state.rounding,
+      actions: view.budgetActive ? view.available : 1 };
+    const result = await this.movementZones.toggle(token, state, range, () => this.refreshActor());
     return result.success;
   }
 

@@ -1,6 +1,8 @@
 const POSITION_FIELDS = ["x", "y", "elevation", "width", "height", "depth", "shape", "level"];
 const position = token => Object.fromEntries(POSITION_FIELDS.filter(key => token[key] !== undefined).map(key => [key, token[key]]));
 const validPosition = point => [point?.x, point?.y, point?.elevation ?? 0].every(Number.isFinite);
+const sameCoordinates = (a, b) => ["x", "y", "elevation"].every(key => (a[key] ?? 0) === (b[key] ?? 0));
+const gridIdentity = grid => JSON.stringify([grid?.type, grid?.distance, grid?.units, grid?.size, grid?.diagonals, grid?.orientation]);
 const samePosition = (a, b) => POSITION_FIELDS.every(key => a[key] === b[key]);
 const history = token => Array.from(token.movementHistory ?? [], point => ({ ...position(point),
   movementId: point.movementId, subpathId: point.subpathId, action: point.action, cost: point.cost }));
@@ -69,6 +71,8 @@ export class MovementTracker {
     if (inMotion(token)) return failure("movement-in-progress");
     this.sessions.set(keyOf(token), { id: ++this.serial, token, scene: token.parent, start: position(token),
       reference: history(token), segments: [], seen: new Set(), distance: 0, spaces: 0, cost: 0,
+      reportedCost: 0, path: [{ ...position(token), action: token.movementAction, terrain: null, cost: 0 }],
+      gridSignature: gridIdentity(token.parent.grid),
       measureReason: null, resetting: false });
     return this.getSnapshot(token);
   }
@@ -77,21 +81,22 @@ export class MovementTracker {
     const session = this.#session(token);
     if (!session) return failure("no-session");
     const grid = session.scene.grid;
+    const gridSignature = gridIdentity(grid);
     const reason = !this.#exists(token) ? "invalid-token" : session.measureReason
       ?? (!(Number.isInteger(grid?.type) && grid.type > 0 && Number.isFinite(grid.distance) && grid.distance > 0)
-        ? "grid-unavailable" : null);
+        ? "grid-unavailable" : session.segments.length && gridSignature !== session.gridSignature ? "grid-changed" : null);
     let movement = null;
     try { movement = this.readMovement(token); } catch { /* Donnée native indisponible. */ }
     const rounding = this.getRounding();
-    const cellsUsed = reason ? null : roundMovementCells(session.spaces, rounding);
+    const costCellsRaw = reason || !Number.isFinite(session.cost) ? null : session.cost / grid.distance;
+    const cellsUsed = costCellsRaw === null ? null : roundMovementCells(costCellsRaw, rounding);
     const cellsPerActionRaw = movement?.cells ?? null;
     const cellsPerAction = movementThreshold(cellsPerActionRaw, 1, rounding);
     const theoreticalActions = requiredMovementActions(cellsPerActionRaw, cellsUsed, rounding);
-    const gridSignature = JSON.stringify([grid?.type, grid?.distance, grid?.units, grid?.size, grid?.diagonals, grid?.orientation]);
     return { success: true, reason: null, state: {
       active: true, sessionId: session.id, sceneId: session.scene.id, tokenId: token.id, mode: "exact",
       start: { ...session.start }, current: position(token), reference: structuredClone(session.reference),
-      distance: session.distance, spaces: session.spaces, cost: session.cost,
+      distance: session.distance, spaces: session.spaces, cost: session.cost, costCellsRaw, reportedCost: session.reportedCost,
       units: grid?.units ?? null, measurementValid: reason === null, measurementReason: reason,
       cellsUsed, cellsPerActionRaw, cellsPerAction, rounding, gridSignature,
       theoreticalActions, segmentCount: session.segments.length,
@@ -115,17 +120,47 @@ export class MovementTracker {
       movement.history?.distance, movement.history?.spaces, movement.pending?.waypoints?.map(position)]);
     if (session.seen.has(signature)) return { success: true, reason: "already-counted" };
     session.seen.add(signature);
-    // Distance et espaces natifs tiennent compte des diagonales, tailles et actions de téléportation.
-    const valid = [passed.distance, passed.spaces].every(value => Number.isFinite(value) && value >= 0);
-    if (!valid) session.measureReason = "measurement-unavailable";
-    else {
-      session.distance += passed.distance;
-      session.spaces += passed.spaces;
-      session.cost = Number.isFinite(passed.cost) && passed.cost >= 0 && session.cost !== null ? session.cost + passed.cost : null;
-      if (![session.distance, session.spaces].every(Number.isFinite)) session.measureReason = "measurement-unavailable";
+    let origin = movement.origin, points = passed.waypoints;
+    // Certains relais peuvent répéter un préfixe déjà enregistré pour le même mouvement.
+    if (!sameCoordinates(origin, session.path.at(-1))) {
+      for (const segment of session.segments) {
+        if (segment.id !== movement.id || !sameCoordinates(origin, segment.origin) || points.length < segment.waypoints.length
+          || !segment.waypoints.every((point, index) => sameCoordinates(point, points[index]))) continue;
+        points = points.slice(segment.waypoints.length); origin = segment.waypoints.at(-1);
+        if (!points.length) return { success: true, reason: "already-counted" };
+        if (sameCoordinates(origin, session.path.at(-1))) break;
+      }
     }
-    session.segments.push({ id: movement.id, method: movement.method, origin: position(movement.origin),
-      waypoints: passed.waypoints.map(position), distance: passed.distance, spaces: passed.spaces, cost: passed.cost });
+    if (!sameCoordinates(origin, session.path.at(-1))) {
+      session.measureReason = "discontinuous-movement"; session.cost = null; return failure("discontinuous-movement");
+    }
+    const segment = { id: movement.id, method: movement.method, origin: position(origin),
+      waypoints: points.map(point => ({ ...point })), distance: passed.distance, spaces: passed.spaces, cost: passed.cost };
+    session.segments.push(segment);
+    session.reportedCost = points === passed.waypoints && Number.isFinite(passed.cost) && passed.cost >= 0 && session.reportedCost !== null
+      ? session.reportedCost + passed.cost : null;
+    try {
+      if (session.measureReason || gridIdentity(session.scene.grid) !== session.gridSignature
+        || typeof token.object?.measureMovementPath !== "function") throw Error("Native measurement unavailable");
+      if (session.scene.regions?.size > 0 && points.some(point => !("terrain" in point))) throw Error("Terrain data unavailable");
+      const path = [...session.path];
+      for (const point of points) {
+        const { cost, ...native } = point;
+        // Retirer le coût dépendant de l'historique global, conserver les terrains natifs.
+        path.push({ ...position(path.at(-1)), action: path.at(-1).action, terrain: null, ...native });
+      }
+      const measured = token.object.measureMovementPath(path, { preview: false });
+      if (![measured?.cost, measured?.distance, measured?.spaces].every(value => Number.isFinite(value) && value >= 0)
+        || measured.waypoints?.length !== path.length
+        || measured.waypoints.slice(1).some(point => !Number.isFinite(point.backward?.cost) || point.backward.cost < 0)) throw Error("Invalid native cost");
+      const sectionTotal = measured.waypoints.slice(1).reduce((sum, point) => sum + point.backward.cost, 0);
+      if (Math.abs(sectionTotal - measured.cost) > 1e-8 * Math.max(1, measured.cost)) throw Error("Inconsistent native cost");
+      // Épingler les coûts déjà appliqués sans perdre les positions qui portent la continuité diagonale.
+      session.path = path.map((point, index) => ({ ...point, cost: index ? measured.waypoints[index].backward.cost : 0 }));
+      session.distance = measured.distance; session.spaces = measured.spaces; session.cost = measured.cost;
+    } catch {
+      session.measureReason = "native-cost-unavailable"; session.cost = null;
+    }
     return this.getSnapshot(token);
   }
 
@@ -155,6 +190,9 @@ export class MovementTracker {
       session.reference = history(token);
       session.segments = []; session.seen.clear();
       session.distance = session.spaces = session.cost = 0; session.measureReason = null;
+      session.reportedCost = 0;
+      session.path = [{ ...session.start, action: token.movementAction, terrain: null, cost: 0 }];
+      session.gridSignature = gridIdentity(token.parent.grid);
       session.resetting = false;
       return this.getSnapshot(token);
     } catch { return failure("return-failed"); }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
 // Simuler les documents préparés, sans dépendre d'un monde Foundry lancé.
 function setup() {
@@ -15,7 +16,7 @@ function setup() {
   vm.runInContext('globalThis.ActionEconomy = (() => {' + readFileSync(new URL('../module/combat/action-economy.mjs', import.meta.url), 'utf8').replace('export class ActionEconomy', 'class ActionEconomy') + '; return ActionEconomy; })()', context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-tracker.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
-  vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
+  vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/import[^;]+;/g, "").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
@@ -31,7 +32,7 @@ function setup() {
     uuid: `Actor.${id}`, type: "character", name: id, img: `${id}.webp`, testUserPermission: () => true,
     system: { attributes: { hp: { value: 12, max: 30 } }, resources }
   });
-  const token = actor => ({ actor, document: { baseActor: actor } });
+  const token = actor => ({ actor, document: { baseActor: actor, object: { measureMovementPath: measureRecordedPath } } });
   return { bar, context, hooks, actor, token };
 }
 
@@ -74,7 +75,7 @@ test("15B raccordement : sélection conservée, hooks natifs uniques et nettoyag
   assert.equal(bar.movementTracker.getSnapshot(t.document).state.active, true);
   hooks.get("recordToken")(t.document);
   hooks.get("moveToken")(t.document, { id: "native", origin: { x: 0, y: 0 },
-    passed: { waypoints: [{ x: 100, y: 0 }], distance: 2, spaces: 1, cost: 4 } });
+    passed: { waypoints: [{ x: 100, y: 0, terrain: { testCost: 4, testDistance: 2, testSpaces: 1 } }], distance: 2, spaces: 1, cost: 4 } });
   assert.equal(bar.movementTracker.getSnapshot(t.document).state.spaces, 1);
   assert.equal(hooks.size, count);
   hooks.get("deleteToken")(t.document);
@@ -105,7 +106,7 @@ test("15C prévisions : tranches 0/1/5/6/10/11, droits et clôture informative s
   for (const [used, required] of [[0, 0], [1, 1], [5, 1], [6, 2], [10, 2], [11, 3]]) {
     assert.equal(bar.toggleMovement(), true);
     bar.movementTracker.update(t.document, { id: String(used), origin: { x: 0, y: 0 },
-      passed: { waypoints: [{ x: 100, y: 0 }], spaces: used, distance: used * 2, cost: used } });
+      passed: { waypoints: [{ x: 100, y: 0, terrain: { testCost: used * 2, testDistance: used * 2, testSpaces: used } }], spaces: used, distance: used * 2, cost: used * 2 } });
     const view = bar.movementView(t.document);
     assert.equal(view.state.theoreticalActions, required);
     assert.equal(view.available, 2); assert.equal(view.blocks, 2);
@@ -143,10 +144,10 @@ function setupMovementValidation() {
   const t = create();
   const select = t => { context.canvas.tokens.controlled = t ? [t] : []; hooks.get("controlToken")(); };
   select(t);
-  const start = (used, selected = t) => {
+  const start = (used, selected = t, costCells = used) => {
     select(selected); assert.equal(bar.toggleMovement(), true);
     hooks.get("moveToken")(selected.document, { id: "move-" + (++serial), origin: { x: 0, y: 0 },
-      passed: { waypoints: [{ x: 100, y: 0 }], distance: used * 2, spaces: used, cost: used } });
+      passed: { waypoints: [{ x: 100, y: 0, terrain: { testCost: costCells * 2, testDistance: used * 2, testSpaces: used } }], distance: used * 2, spaces: used, cost: costCells * 2 } });
   };
   return { ...env, a, t, scene, create, select, start, warnings,
     economy: new context.ActionEconomy(a), setMode: value => { mode = value; } };
@@ -286,6 +287,45 @@ test("Archive6 seuil nul : budget inactif informatif et coût positif réalisabl
   setMode("off");
   assert.equal(bar.movementView(t.document).blocks, 1); assert.equal(bar.movementView(t.document).excess, 0);
   assert.equal(await bar.toggleMovement(), true); assert.equal(economy.getSnapshot().movementsRemaining, 2);
+});
+
+test("Zone Tactique : instantané M/AM et vitesse brute, une action hors budget sans débit", async () => {
+  const { bar, a, t, start, economy, setMode, writes } = setupMovementValidation();
+  a.system.attributes.movement.value = 7;
+  start(0);
+  const captured = [];
+  bar.movementZones.toggle = async (token, state, range) => {
+    captured.push({ token, state, range }); return { success: true };
+  };
+  let count = writes.length;
+  assert.equal(await bar.toggleMovementZones(), true);
+  assert.equal(writes.length, count);
+  assert.equal(captured[0].token, t.document); assert.equal(captured[0].range.cellsPerActionRaw, 3.5);
+  assert.equal(captured[0].range.rounding, "nearest"); assert.equal(captured[0].range.actions, 2);
+  assert.notEqual(captured[0].state.start, bar.movementTracker.getSnapshot(t.document).state.start);
+  await economy.grant("am");
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 3);
+  await economy.spend("m");
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 2);
+  await economy.spendMovements(2); count = writes.length;
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 0);
+  assert.equal(writes.length, count);
+  setMode("off");
+  await bar.toggleMovementZones(); assert.equal(captured.at(-1).range.actions, 1);
+  assert.equal(writes.length, count); assert.equal(economy.getSnapshot().movementsRemaining, 0);
+});
+
+test("coût natif : panneau et validation débitent le coût réel, pas les espaces traversés", async () => {
+  const { bar, t, start, economy, warnings } = setupMovementValidation();
+  start(2, t, 11);
+  const view = bar.movementView(t.document);
+  assert.equal(view.state.spaces, 2); assert.equal(view.state.cost, 22);
+  assert.equal(view.state.cellsUsed, 11); assert.equal(view.state.theoreticalActions, 3);
+  assert.equal(view.excess, 1);
+  assert.equal(await bar.toggleMovement(), true);
+  assert.equal(economy.getSnapshot().movementsRemaining, 0);
+  assert.equal(bar.movementResults.get(t.document).consumedCount, 2);
+  assert.equal(warnings.length, 1); assert.equal(warnings[0].excess, 1);
 });
 
 test("bornage du remplissage et maxima non exploitables", () => {

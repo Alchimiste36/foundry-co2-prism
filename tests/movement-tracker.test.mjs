@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MovementTracker, movementThreshold } from "../module/movement/movement-tracker.mjs";
+import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
 function setup() {
   const user = { isGM: false }, updates = [];
@@ -12,6 +13,7 @@ function setup() {
   const create = (id, parent = scene) => {
     const token = { id, parent, actor, x: 0, y: 0, elevation: 3, width: 2, height: 2, depth: 1, shape: 1, level: "level",
       movementHistory: [], testUserPermission: () => true, canUserModify: () => true,
+      object: { measureMovementPath: measureRecordedPath },
       async update(data) {
         updates.push(data); Object.assign(this, Object.fromEntries(Object.entries(data).filter(([key]) => key !== "action")));
         tracker.update(this, { id: "return", origin: { x: 100, y: 0 }, passed: { waypoints: [{ x: 0, y: 0 }], distance: 100, spaces: 50 } });
@@ -20,11 +22,14 @@ function setup() {
     parent.tokens.set(id, token); return token;
   };
   let serial = 0;
-  const move = (token, { x = token.x + 100, y = token.y, distance = 2, spaces = 1, cost = 9,
+  const move = (token, { x = token.x + 100, y = token.y, distance = 2, spaces = 1, cost = spaces * token.parent.grid.distance,
     method = "dragging", id = String(++serial), waypoints } = {}) => {
     const origin = { x: token.x, y: token.y, elevation: token.elevation };
     token.x = x; token.y = y;
-    const movement = { id, origin, method, passed: { waypoints: waypoints ?? [{ x, y, elevation: token.elevation }], distance, spaces, cost },
+    const points = waypoints ?? [{ x, y, elevation: token.elevation }];
+    const native = points.map(point => ({ elevation: token.elevation, ...point,
+      terrain: { testCost: cost / points.length, testDistance: distance / points.length, testSpaces: spaces / points.length } }));
+    const movement = { id, origin, method, passed: { waypoints: native, distance, spaces, cost },
       history: { distance: serial * 2, spaces: serial } };
     return { result: tracker.update(token, movement), movement };
   };
@@ -66,7 +71,7 @@ test("15B sections natives : clavier/drag, détours, multi-waypoints et phases s
   move(token, { x: 0, waypoints: [{ x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 }], distance: 6, spaces: 3 });
   const state = tracker.getSnapshot(token).state;
   assert.equal(state.current.x, state.start.x);
-  assert.equal(state.distance, 8); assert.equal(state.spaces, 4); assert.equal(state.cost, 18);
+  assert.equal(state.distance, 8); assert.equal(state.spaces, 4); assert.equal(state.cost, 8);
   assert.equal(state.segmentCount, 2);
 });
 
@@ -258,5 +263,42 @@ test("Archive6 vitesse fractionnaire : blocs nuls, recherche bornée et invalidi
     actor.speedCells = raw; tracker.start(token); move(token, { spaces: 1 });
     assert.equal(tracker.getSnapshot(token).state.theoreticalActions, null);
     tracker.cancel(token);
+  }
+});
+
+test("coût natif : conversion en cases après cumul, distinct des espaces géométriques", () => {
+  const { tracker, token, move, setRounding } = setup();
+  tracker.start(token);
+  move(token, { spaces: 1, cost: 2.8 }); move(token, { spaces: 1, cost: 2.8 });
+  const state = tracker.getSnapshot(token).state;
+  assert.equal(state.spaces, 2); assert.equal(state.cost, 5.6); assert.equal(state.costCellsRaw, 2.8);
+  assert.equal(state.cellsUsed, 3);
+  setRounding("down"); assert.equal(tracker.getSnapshot(token).state.cellsUsed, 2);
+});
+
+test("coût natif : préfixes chevauchants du même mouvement comptés une seule fois", () => {
+  const { tracker, token, move } = setup();
+  tracker.start(token);
+  const first = move(token, { id: "checkpoints" });
+  const second = { ...first.movement, passed: { ...first.movement.passed,
+    waypoints: [...first.movement.passed.waypoints, { x: 200, y: 0, elevation: 3,
+      terrain: { testCost: 4, testDistance: 2, testSpaces: 1 } }], cost: 6 }, history: { spaces: 99 } };
+  token.x = 200;
+  tracker.update(token, second);
+  assert.equal(tracker.getSnapshot(token).state.cost, 6);
+  tracker.update(token, { ...second, history: { spaces: 100 } });
+  assert.equal(tracker.getSnapshot(token).state.cost, 6);
+  assert.equal(tracker.getSnapshot(token).state.segmentCount, 2);
+});
+
+test("coût natif : API/cout/terrain manquant, jamais de repli sur spaces", () => {
+  for (const invalidate of [token => { token.object = null; },
+    token => { token.object.measureMovementPath = () => ({ spaces: 10, distance: 20, cost: NaN, waypoints: [] }); },
+    token => { token.parent.regions = new Map([["r", {}]]); }]) {
+    const { tracker, token } = setup(); tracker.start(token); invalidate(token);
+    tracker.update(token, { id: "invalid", origin: { x: 0, y: 0, elevation: 3 },
+      passed: { waypoints: [{ x: 100, y: 0, elevation: 3 }], spaces: 10, distance: 20, cost: 20 } });
+    const state = tracker.getSnapshot(token).state;
+    assert.equal(state.cellsUsed, null); assert.equal(state.measurementValid, false);
   }
 });

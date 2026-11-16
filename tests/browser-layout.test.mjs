@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
 const edge = process.env.CO2PRISM_EDGE ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const foundryCSS = process.env.CO2PRISM_FOUNDRY_CSS ?? "F:/FVTT_V14/public/css/foundry2.css";
@@ -31,6 +32,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const warnings = [];
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
+      const measureRecordedPath = ${measureRecordedPath.toString()};
       const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Movement).map(([key, value]) => [`CO2PRISM.Movement.${key}`, value])))});
       budgetTranslations['CO2PRISM.Combat.Movement'] = ${JSON.stringify(translations.CO2PRISM.Combat.Movement)};
@@ -44,7 +46,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
-      ${read("../module/movement/movement-zones.mjs").replace(/export /g, "")}
+      ${read("../module/movement/movement-zones.mjs").replace(/import[^;]+;/g, "").replace(/export /g, "")}
       ${read("../module/applications/_module.mjs").replace(/import \{[^}]+\} from [^;]+;/g, "")}
       (async () => {
         const result = { dimensions: [], errors: [] };
@@ -911,7 +913,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           movementScene.id = 'movement-scene'; movementScene.tokens = new Map();
           Object.assign(tracked, { id: 'movement-token', uuid: 'Scene.s.Token.t', parent: movementScene,
             actor, x: 0, y: 0, elevation: 0, width: 1, height: 1, depth: 0, shape: 1, level: 'level', movementHistory: [],
-            testUserPermission: () => true, canUserModify: () => true });
+            testUserPermission: () => true, canUserModify: () => true,
+            object: { measureMovementPath: measureRecordedPath } });
           movementScene.tokens.set(tracked.id, tracked);
           movementScene.grid = { type: 1, distance: 2, units: 'm' };
           await economy.reset(); await economy.grant('m', 3); hooks.get('updateActor')(actor, { flags: {} });
@@ -919,8 +922,10 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const trackedMove = (spaces, target = tracked) => {
             const origin = { x: target.x, y: target.y, elevation: target.elevation };
             target.x += spaces * 100;
+            const nativeDistance = spaces * target.parent.grid.distance;
             hooks.get('moveToken')(target, { id: 'tracked-' + (++moveSerial), origin, method: 'keyboard',
-              passed: { waypoints: [{ x: target.x, y: target.y, elevation: target.elevation }], spaces, distance: spaces * 2, cost: spaces } });
+              passed: { waypoints: [{ x: target.x, y: target.y, elevation: target.elevation,
+                terrain: { testCost: nativeDistance, testDistance: nativeDistance, testSpaces: spaces } }], spaces, distance: nativeDistance, cost: nativeDistance } });
           };
           let failReturn = false;
           tracked.update = async data => {

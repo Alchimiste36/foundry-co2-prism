@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MovementZones } from "../module/movement/movement-zones.mjs";
 
+const DEFAULT_RANGE = Object.freeze({ cellsPerActionRaw: 2.5, rounding: "nearest", actions: 2 });
+
 function setup() {
   class Container {
     constructor() { this.children = []; }
@@ -49,7 +51,7 @@ function setup() {
 
 test("zones : origine de session, plafond 120 et classifications natives 3/5", async () => {
   const { zones, token, state, calls, canvas } = setup();
-  const result = await zones.toggle(token, state);
+  const result = await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(result.success, true); assert.ok(calls.length > 120 && calls.length <= 32000);
   assert.ok(calls.every(call => call.path[0].x === 500 && call.path[0].y === 500 && call.options.ignoreWalls === false));
   assert.equal(zones.container.children.length, 120);
@@ -61,22 +63,22 @@ test("zones : origine de session, plafond 120 et classifications natives 3/5", a
   zones.sync(token, state, true);
   assert.equal(calls.length, zones.stats.examined); assert.equal(zones.container.children.length, 120);
   const container = zones.container;
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(zones.visible, false); assert.equal(container.destroyed, true); assert.equal(canvas.interface.children.length, 0);
 });
 
 test("zones : trajet partiel ou contraint avant destination rejeté, pas de proximité approximative", async () => {
   const { zones, token, state, behavior } = setup();
   behavior.constrain = path => [[path[0]], true];
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(zones.stats.partial, 8); assert.equal(zones.stats.marked, 0);
   zones.clear();
   behavior.constrain = path => [[path[0]], true];
-  await zones.toggle(token, state); assert.equal(zones.stats.marked, 0);
+  await zones.toggle(token, state, DEFAULT_RANGE); assert.equal(zones.stats.marked, 0);
 });
 
 test("zones : seuils 3/4/5 et aucun marqueur au-delà", async () => {
-  const { zones, token, state } = setup(); await zones.toggle(token, state);
+  const { zones, token, state } = setup(); await zones.toggle(token, state, DEFAULT_RANGE);
   const at = x => zones.container.children.find(marker => marker.x === x + 50 && marker.y === 550);
   assert.equal(at(800).text, "1"); assert.equal(at(900).text, "2"); assert.equal(at(1000).text, "2");
   assert.equal(at(1100), undefined); zones.clear();
@@ -86,28 +88,30 @@ test("zones : extinction pendant une pause ignore les résultats tardifs", async
   const { zones, token, state, canvas } = setup();
   let resume;
   zones.yieldFrame = () => new Promise(resolve => { resume = resolve; });
-  const pending = zones.toggle(token, state);
+  const pending = zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(zones.busy, true); assert.equal(typeof resume, "function");
-  await zones.toggle(token, state); resume();
+  await zones.toggle(token, state, DEFAULT_RANGE); resume();
   assert.equal((await pending).reason, "cancelled");
   assert.equal(canvas.interface.children.length, 0); assert.equal(zones.visible, false);
-  zones.yieldFrame = async () => {}; await zones.toggle(token, state);
+  zones.yieldFrame = async () => {}; await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(zones.visible, true); zones.clear();
 });
 
 test("zones : nettoyage token/session/panneau/scène et API indisponible sans repli", async () => {
   for (const changed of ["token", "session", "panel", "scene"]) {
-    const { zones, token, state, canvas } = setup(); await zones.toggle(token, state);
+    const { zones, token, state, canvas } = setup(); await zones.toggle(token, state, DEFAULT_RANGE);
     if (changed === "scene") canvas.scene = {};
     zones.sync(changed === "token" ? {} : token, changed === "session" ? { ...state, sessionId: 2 } : state, changed !== "panel");
     assert.equal(zones.visible, false); assert.equal(canvas.interface.children.length, 0);
   }
   const { zones, token, state, behavior } = setup();
   behavior.measure = () => ({ cost: NaN, diagonals: 0 });
-  assert.equal((await zones.toggle(token, state)).success, false);
+  assert.equal((await zones.toggle(token, state, DEFAULT_RANGE)).success, false);
   assert.equal(zones.diagnostic, "Unavailable"); assert.equal(zones.visible, false);
   token.object.constrainMovementPath = undefined;
-  assert.equal((await zones.toggle(token, state)).reason, "Unavailable");
+  assert.equal((await zones.toggle(token, state, DEFAULT_RANGE)).reason, "Unavailable");
+  token.object.constrainMovementPath = () => { throw "native-error"; };
+  assert.equal((await zones.toggle(token, state, DEFAULT_RANGE)).reason, "Unavailable");
 });
 
 // Graphe de réponses natives simulées, sans prétendre reproduire les murs Foundry.
@@ -135,7 +139,7 @@ const markerAt = (zones, x, y) => zones.container.children.find(marker => marker
 test("zones : angle contourné par transitions intermédiaires, diagonale bloquée rejetée", async () => {
   const env = setup(), { zones, token, state, calls } = env;
   graph(env, [[[500, 500], [500, 400]], [[500, 400], [600, 400]], [[600, 400], [600, 500]]]);
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(markerAt(zones, 600, 500)?.text, "1");
   assert.equal(markerAt(zones, 700, 500), undefined);
   assert.ok(calls.some(({ path }) => path.at(-2).x === 600 && path.at(-2).y === 400 && path.at(-1).y === 500));
@@ -150,13 +154,13 @@ test("zones : mur infranchissable, porte ouverte/fermée et nouveau calcul expli
     }
     return [path, false];
   };
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.ok(zones.container.children.every(marker => marker.x <= 550));
   zones.clear();
-  graph(env, []); await zones.toggle(token, state);
+  graph(env, []); await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(markerAt(zones, 600, 500), undefined);
   zones.clear();
-  graph(env, [[[500, 500], [600, 500]]]); await zones.toggle(token, state);
+  graph(env, [[[500, 500], [600, 500]]]); await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(markerAt(zones, 600, 500)?.text, "1");
 });
 
@@ -170,7 +174,7 @@ test("zones : plusieurs chemins, un coût inférieur remplace une découverte pl
     if (path.at(-1).x === 700 && path.at(-1).y === 500) seen.push(result.cost / env.canvas.grid.distance);
     return result;
   };
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.ok(seen.includes(5) && seen.includes(3));
   assert.equal(markerAt(zones, 700, 500)?.text, "1");
 });
@@ -185,7 +189,7 @@ test("zones : mesure du chemin entier, alternance diagonale et distances non uni
     }
     return { cost: (steps + Math.floor(diagonals / 2)) * canvas.grid.distance, diagonals };
   };
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(markerAt(zones, 700, 700)?.text, "1"); // Deux diagonales : 1 + 2 = 3.
   assert.equal(markerAt(zones, 800, 800)?.text, "2"); // Trois diagonales : 1 + 2 + 1 = 4.
   assert.equal(markerAt(zones, 900, 900), undefined); // Quatre diagonales coûtent 6.
@@ -195,10 +199,10 @@ test("zones : adjacence native sans diagonales, coût nul et régions refusés e
   const { zones, token, state, behavior, canvas } = setup();
   const adjacent = canvas.grid.getAdjacentOffsets;
   canvas.grid.getAdjacentOffsets = offset => adjacent(offset).filter(p => p.i === offset.i || p.j === offset.j);
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.equal(markerAt(zones, 800, 800), undefined);
   zones.clear(); behavior.measure = () => ({ cost: 0, diagonals: 0 });
-  assert.equal((await zones.toggle(token, state)).success, false);
+  assert.equal((await zones.toggle(token, state, DEFAULT_RANGE)).success, false);
   assert.equal(zones.visible, false);
   canvas.scene.regions = new Map([["region", {}]]);
   assert.equal(zones.supported(token, state.start), "Unsupported");
@@ -217,7 +221,126 @@ test("zones : deux phases diagonales au même coût restent explorées", async (
     }
     return { spaces: path.length - 1, cost: (path.length - 1 + Math.floor(diagonals / 2)) * canvas.grid.distance, diagonals };
   };
-  await zones.toggle(token, state);
+  await zones.toggle(token, state, DEFAULT_RANGE);
   assert.deepEqual([...phases].sort(), [0, 1]);
   assert.equal(markerAt(zones, 900, 400)?.text, "2");
+});
+
+function corridor(env, length) {
+  graph(env, Array.from({ length }, (_, index) => [[500 + index * 100, 500], [600 + index * 100, 500]]));
+}
+
+test("zone tactique : deux actions réelles à cinq cases, détour et seuils 5/10", async () => {
+  const env = setup(), { zones, token, state } = env;
+  graph(env, [[[500, 500], [500, 400]], [[500, 400], [600, 400]], [[600, 400], [600, 500]],
+    ...Array.from({ length: 8 }, (_, i) => [[600 + i * 100, 500], [700 + i * 100, 500]])]);
+  const result = await zones.toggle(token, state, { cellsPerActionRaw: 5, rounding: "nearest", actions: 2 });
+  assert.equal(result.success, true); assert.deepEqual(zones.range.thresholds, [5, 10]);
+  assert.equal(markerAt(zones, 600, 500)?.text, "1");
+  assert.equal(markerAt(zones, 800, 500)?.text, "1");
+  assert.equal(markerAt(zones, 900, 500)?.text, "2");
+  assert.equal(markerAt(zones, 1300, 500)?.text, "2");
+  assert.equal(markerAt(zones, 1400, 500), undefined);
+});
+
+test("zone tactique : 3,5 cases et trois actions donnent 4/7/11 et numéros 1/2/3", async () => {
+  const env = setup(), { zones, token, state } = env; corridor(env, 12);
+  await zones.toggle(token, state, { cellsPerActionRaw: 3.5, rounding: "nearest", actions: 3 });
+  assert.deepEqual(zones.range.thresholds, [4, 7, 11]);
+  assert.equal(markerAt(zones, 900, 500)?.text, "1");
+  assert.equal(markerAt(zones, 1000, 500)?.text, "2");
+  assert.equal(markerAt(zones, 1200, 500)?.text, "2");
+  assert.equal(markerAt(zones, 1300, 500)?.text, "3");
+  assert.equal(markerAt(zones, 1600, 500)?.text, "3");
+  assert.equal(markerAt(zones, 1700, 500), undefined);
+  assert.equal(markerAt(zones, 1300, 500)?.style.fill, 0xff2438);
+});
+
+test("zone tactique : seuils répétés, trois arrondis et zéro action sans exploration", async () => {
+  const env = setup(), { zones, token, state, calls } = env; corridor(env, 3);
+  for (const [rounding, thresholds] of [["nearest", [0, 1, 1]], ["up", [1, 1, 2]], ["down", [0, 0, 1]]]) {
+    await zones.toggle(token, state, { cellsPerActionRaw: 0.4, rounding, actions: 3 });
+    assert.deepEqual(zones.range.thresholds, thresholds);
+    assert.equal(markerAt(zones, 600, 500)?.text, String(thresholds.findIndex(value => value >= 1) + 1));
+    zones.clear();
+  }
+  const before = calls.length;
+  for (const range of [{ cellsPerActionRaw: 5, rounding: "nearest", actions: 0 }, { cellsPerActionRaw: 0.1, rounding: "down", actions: 3 }]) {
+    assert.equal((await zones.toggle(token, state, range)).success, true);
+    assert.equal(zones.visible, true); assert.equal(zones.diagnostic, "Done");
+    assert.equal(zones.stats.examined, 0); assert.equal(zones.container.children.length, 0);
+    await zones.toggle(token, state, range); assert.equal(zones.visible, false);
+  }
+  assert.equal(calls.length, before);
+});
+
+test("zone tactique : instantané figé, nouvelle activation, nouvelle session sans fuite", async () => {
+  const env = setup(), { zones, token, state, canvas } = env; corridor(env, 12);
+  const range = { cellsPerActionRaw: 5, rounding: "nearest", actions: 2 };
+  let resume; zones.yieldFrame = () => new Promise(resolve => { resume = resolve; });
+  const pending = zones.toggle(token, state, range);
+  range.actions = 1; range.cellsPerActionRaw = 3; token.x = 800;
+  zones.yieldFrame = async () => {}; resume(); await pending;
+  assert.deepEqual(zones.range.thresholds, [5, 10]); assert.equal(markerAt(zones, 1500, 500)?.text, "2");
+  zones.sync(token, state, true); assert.deepEqual(zones.range.thresholds, [5, 10]);
+  await zones.toggle(token, state, range); await zones.toggle(token, state, range);
+  assert.deepEqual(zones.range.thresholds, [3]); assert.equal(markerAt(zones, 900, 500), undefined);
+  zones.sync(token, { ...state, sessionId: 2 }, true); assert.equal(canvas.interface.children.length, 0);
+  const next = { sessionId: 2, start: { ...state.start, x: 800 } };
+  await zones.toggle(token, next, range);
+  assert.ok(zones.container.children.every(marker => marker.x !== 850 || marker.y !== 550));
+  assert.equal(canvas.interface.children.length, 1); zones.clear(); assert.equal(canvas.interface.children.length, 0);
+});
+
+test("zone tactique : données invalides refusées et actions nombreuses évaluées sans allocation massive", async () => {
+  const { zones, token, state, calls } = setup();
+  for (const range of [null, { cellsPerActionRaw: 0, rounding: "nearest", actions: 1 },
+    { cellsPerActionRaw: Infinity, rounding: "nearest", actions: 1 }, { cellsPerActionRaw: 5, rounding: "nearest", actions: -1 },
+    { cellsPerActionRaw: 5, rounding: "nearest", actions: 1.5 }, { cellsPerActionRaw: 5, rounding: "unknown", actions: 1 },
+    { cellsPerActionRaw: Number.MAX_VALUE, rounding: "nearest", actions: 2 }]) {
+    assert.equal((await zones.toggle(token, state, range)).reason, "InvalidRange");
+    assert.equal(zones.visible, false);
+  }
+  assert.equal((await zones.toggle(token, state, { cellsPerActionRaw: Number.MIN_VALUE, rounding: "down", actions: Number.MAX_SAFE_INTEGER })).success, true);
+  assert.equal(zones.range.thresholds, null); assert.equal(zones.stats.marked, 0);
+  assert.equal(calls.length, 0);
+});
+
+test("zone tactique : seuils paresseux et premier indice correct pour 5 000 actions", async () => {
+  const env = setup(), { zones, token, state } = env; corridor(env, 2);
+  assert.equal((await zones.toggle(token, state, { cellsPerActionRaw: 0.0002, rounding: "down", actions: 5000 })).success, true);
+  assert.equal(zones.range.thresholds, null); assert.equal(zones.range.maxCost, 1);
+  assert.equal(markerAt(zones, 600, 500)?.text, "5000");
+  assert.equal(markerAt(zones, 700, 500), undefined);
+});
+
+test("zone tactique : limites temps/états/transitions explicites, aucun rendu partiel", async () => {
+  for (const kind of ["time", "states", "transitions"]) {
+    const { zones, token, state, canvas } = setup();
+    zones.now = () => kind === "time" && zones.stats?.examined > 100 ? 16000 : 0;
+    zones.yieldFrame = async () => {
+      assert.equal(zones.container.visible, false);
+      if (kind === "states") zones.stats.maximumStates = zones.stats.states;
+      if (kind === "transitions") zones.stats.maximumTransitions = zones.stats.examined;
+    };
+    const result = await zones.toggle(token, state, DEFAULT_RANGE);
+    assert.equal(result.reason, kind === "time" ? "TimeLimit" : "Limit");
+    assert.equal(result.stats.stopReason, result.reason);
+    assert.equal(zones.visible, false); assert.equal(canvas.interface.children.length, 0);
+  }
+});
+
+test("zone tactique : annulation pendant le rendu et invalidation directe du contexte", async () => {
+  for (const kind of ["render", "session", "scene", "token"]) {
+    const { zones, token, state, canvas } = setup();
+    zones.yieldFrame = async () => {
+      if (kind === "render") { if (zones.stats.marked > 0) zones.clear(); }
+      else if (kind === "session") zones.sessionId++;
+      else if (kind === "scene") canvas.scene = {};
+      else canvas.scene.tokens.delete(token.id);
+    };
+    const result = await zones.toggle(token, state, DEFAULT_RANGE);
+    assert.equal(result.reason, "cancelled");
+    assert.equal(zones.visible, false); assert.equal(canvas.interface.children.length, 0);
+  }
 });
