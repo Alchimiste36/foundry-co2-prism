@@ -1594,6 +1594,62 @@ async function setupExecution() {
   return { ...env, action, calls, click, target };
 }
 
+test("attaques de rencontre : source commune, persistance et exécution par Item propriétaire", async () => {
+  const { bar, a, item, action, calls, click, target, writes } = await setupExecution();
+  a.type = "encounter"; item.type = "attack";
+  action.source = "Item.sourceCommune";
+  action.resolvers = [{ attack: "+14", damage: "1d6+6" }];
+  const secondAction = { ...action, resolvers: [{ attack: "+14", damage: "1d4 + 3" }] };
+  const second = { ...item, id: "serpent", uuid: `${a.uuid}.Item.serpent`, actions: [secondAction] };
+  a.items.set(second.id, second);
+  assert.equal(bar.shortcutFromDrop(a, { type: "co.action", source: action.source, indice: 0 }), null);
+  for (const [owned, key] of [[item, "left-hand"], [second, "right-hand"]]) {
+    const ref = bar.shortcutFromDrop(a, { type: "co.attack", uuid: owned.uuid });
+    assert.equal(ref.itemId, owned.id);
+    assert.equal(ref.source, owned.uuid);
+    await bar.saveShortcut(a, 1, bar.slotRows()[0].find(slot => slot.key === key), ref);
+    const restored = JSON.parse(JSON.stringify(bar.readConfiguration(a).presets[1].slots[key]));
+    assert.equal(bar.resolveShortcut(a, restored).action, owned.actions[0]);
+    const count = writes.length;
+    for (const modifiers of [{}, { altKey: true }, { shiftKey: true }]) {
+      assert.equal(await bar.executeShortcut(click(modifiers), target(key)), true);
+    }
+    assert.deepEqual(calls.splice(0), [["useAction", owned.uuid, 0, "attack"],
+      ["useAction", owned.uuid, 0, "damage"], ["openSheet", owned.uuid]]);
+    assert.equal(writes.length, count);
+    assert.equal(owned.actions[0].actionTypeFinal, "none");
+    assert.equal(owned.actions[0].source, "Item.sourceCommune");
+  }
+  secondAction.autoAttack = true;
+  await bar.executeShortcut(click(), target("right-hand"));
+  assert.deepEqual(calls.pop(), ["useAction", second.uuid, 0, "auto"]);
+  const stale = target("right-hand");
+  a.items.delete(second.id);
+  assert.equal(bar.resolveShortcut(a, stale.reference), null);
+  assert.equal(await bar.executeShortcut(click(), stale), false);
+  assert.equal(calls.length, 0);
+});
+
+test("attaques de rencontre : UUID synthétique, droits et dépôts étrangers refusés", () => {
+  const { bar, a, item, create } = setupShortcuts();
+  item.type = "attack";
+  const oldUuid = item.uuid;
+  a.uuid = "Scene.scene.Token.token.Actor.synthetic";
+  item.uuid = `${a.uuid}.Item.${item.id}`;
+  const drop = () => bar.shortcutFromDrop(a, { type: "co.attack", uuid: item.uuid });
+  assert.equal(drop().source, item.uuid);
+  assert.equal(bar.shortcutFromDrop(a, { type: "co.attack", uuid: oldUuid }), null);
+  assert.equal(bar.shortcutFromDrop(create("other").actor, { type: "co.attack", uuid: item.uuid }), null);
+  item.testUserPermission = () => false;
+  assert.equal(drop(), null);
+  item.testUserPermission = () => true;
+  a.testUserPermission = () => false;
+  assert.equal(drop(), null);
+  a.testUserPermission = () => true;
+  item.parent = create("foreign").actor;
+  assert.equal(drop(), null);
+});
+
 test("exécution CO2 : attaque/dommages/chat/feuille et priorité Shift > Ctrl > Alt", async () => {
   const { bar, item, calls, click, target, writes, a } = await setupExecution();
   const count = writes.length, flags = JSON.stringify(a.flags);

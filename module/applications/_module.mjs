@@ -867,8 +867,11 @@ class PrismBar {
       if (data?.type === "co.attack") {
         const item = [...(actor.items?.values() ?? [])].find(entry => entry.uuid === data.uuid && entry.type === "attack");
         const action = item?.actions?.[0];
-        if (!action) return null;
-        data = { type: "co.action", source: action.source, indice: action.indice };
+        if (!action || item.parent !== actor
+          || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))) return null;
+        // La source exportée peut être commune à plusieurs attaques : garder le support réel.
+        const reference = { source: item.uuid, indice: action.indice, itemId: item.id };
+        return this.resolveShortcut(actor, reference) ? reference : null;
       }
       if (data?.type !== "co.action" || typeof data.source !== "string" || !Number.isSafeInteger(data.indice)) return null;
       // La collection native de l'acteur agrège aussi les actions de ses Items.
