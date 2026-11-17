@@ -1200,7 +1200,7 @@ test("14 affichage : arrondis entiers après conversion, mètres inchangés", ()
   }
 });
 
-test("14 budget : arrondir les totaux restants/maximum, bonus puis consommation", async () => {
+test("14 budget : arrondir les totaux disponibles en metres et cases, bonus puis consommation", async () => {
   const { settings, display, a, context } = setupMovementDisplay();
   let state;
   a.getFlag = () => state;
@@ -1208,14 +1208,14 @@ test("14 budget : arrondir les totaux restants/maximum, bonus puis consommation"
   const economy = new context.ActionEconomy(a);
   settings.economyMode = "always";
   await economy.grant("m"); await economy.spend("m");
-  for (const [mode, expected] of [["nearest", "7 / 10"], ["up", "7 / 10"], ["down", "6 / 10"]]) {
+  for (const [mode, expected] of [["nearest", "7"], ["up", "7"], ["down", "6"]]) {
     settings.movementRounding = mode;
-    assert.deepEqual(display(), ["20 / 30", expected]);
+    assert.deepEqual(display(), ["20", expected]);
   }
   await economy.spend("m");
-  assert.deepEqual(display(), ["10 / 30", "3 / 10"]);
+  assert.deepEqual(display(), ["10", "3"]);
   await economy.reset(); settings.movementRounding = "nearest";
-  assert.deepEqual(display(), ["20 / 20", "7 / 7"]);
+  assert.deepEqual(display(), ["20", "7"]);
 });
 
 test("14 conversions pieds, repli et précision flottante", () => {
@@ -1259,7 +1259,7 @@ test("14 réglage monde : rafraîchissement immédiat local/distant sans écritu
     assert.equal(bar.combatValues.cells.textContent, "3");
   }
   settings.economyMode = "combat";
-  assert.deepEqual(display(), ["20 / 20", "6 / 6"]);
+  assert.deepEqual(display(), ["20", "6"]);
   context.game.combats.active.started = false;
   assert.deepEqual(display(), ["10", "3"]);
 });

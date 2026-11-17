@@ -10,7 +10,7 @@ const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
 const COMBAT_ROW_ORIGIN = 948;
 const COMBAT_SLOT_SIZE = 172;
 const COMBAT_SLOT_GAP = 8;
-const BUDGET_ORIGIN = 326;
+const BUDGET_ORIGIN = 308 + 43 + 20;
 const MOVEMENT_ORIGIN = 246;
 const MOVEMENT_BOTTOM = 28;
 const BASE_BOTTOM = 569;
@@ -544,7 +544,7 @@ class PrismBar {
     this.movementReset.disabled = busy || settled || !view?.state.segmentCount || available <= 0;
     if (this.movementValidate) this.movementValidate.disabled = busy || !view?.state.segmentCount || (available <= 0 && !settled);
     if (available <= 0 || !view) return true;
-    const { state, valid, capacity, excess } = view;
+    const { state, valid, remaining, excess } = view;
     if (this.movementZonesButton) {
       const unsupported = this.movementZones.supported(token, state.start);
       this.movementZonesButton.disabled = busy || settled || (!this.movementZones.visible && Boolean(unsupported));
@@ -553,12 +553,13 @@ class PrismBar {
       this.movementZonesButton.title = localize(diagnostic || unsupported ? `Zones${diagnostic ?? unsupported}` : this.movementZones.visible ? "ZonesHide" : "ZonesShow");
       this.movementZonesButton.setAttribute("aria-label", this.movementZonesButton.title);
     }
-    const data = { used: state.cellsUsed, capacity, actions: 1, available, cells: state.cellsPerAction, excess };
     query("summary").hidden = !view.budgetActive;
-    query("summary").textContent = format(available === 1 ? "ActionsOne" : "Actions", data);
+    query("summary").textContent = valid
+      ? format(remaining <= 1 ? "CellsAvailableOne" : "CellsAvailable", { cells: remaining })
+      : localize("SpeedUnavailable");
     const message = query("message");
     message.textContent = !valid ? localize("Unavailable") : !state.segmentCount ? localize("NoMovement")
-      : excess > 0 ? format(excess === 1 ? "ExcessOne" : "Excess", data) : localize("Normal");
+      : excess > 0 ? format(excess === 1 ? "ExcessOne" : "Excess", { excess }) : localize("Normal");
     message.classList.toggle("co2prism-movement-excess", excess > 0);
     query("error").hidden = !error;
     const errorKey = { "movement-in-progress": "Busy", "invalid-measurement": "InvalidValidation", "context-changed": "ContextChanged", "validation-failed": "ValidationFailed", "closure-pending": "ClosurePending" }[error] ?? "ReturnFailed";
@@ -729,16 +730,18 @@ class PrismBar {
     if (!open) return changed;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const economy = new ActionEconomy(this.actor).getSnapshot();
+    const movements = economyEnabled() ? economy.movementsRemaining : 1;
     for (const [key, value] of Object.entries(this.readCombatData())) {
       const node = this.combatValues[key];
+      const isMovement = key === "meters" || key === "cells";
       const format = number => {
         if (!Number.isFinite(number) || (key === "cells" && number < 0)) return unavailable;
         if (key !== "cells") return String(Math.round(number * 100) / 100);
         return String(roundMovementCells(number, game.settings?.get(MODULE, "movementRounding")));
       };
-      node.textContent = economyEnabled() && ["meters", "cells"].includes(key) && value !== null
-        ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
-      node.style.setProperty("--co2prism-combat-size", Math.min(key === "def" ? 68 : 48, 115 / (node.textContent.length * 0.58)));
+      node.textContent = format(isMovement && value !== null ? value * movements : value);
+      node.style.setProperty("--co2prism-combat-size", Math.min(isMovement ? 42 : key === "def" ? 72 : 48,
+        (isMovement ? 62 : 115) / (node.textContent.length * 0.58)));
     }
     this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
     const budgetChanged = this.renderEconomy(economy);
