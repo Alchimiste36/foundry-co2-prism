@@ -7,8 +7,12 @@ import { MovementZones } from "../movement/movement-zones.mjs";
 const MODULE = "co2prism";
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
-const COMBAT_ROW_ORIGINS = [522, 731];
-const BUDGET_ORIGIN = 522;
+const COMBAT_ROW_ORIGIN = 948;
+const COMBAT_SLOT_SIZE = 172;
+const COMBAT_SLOT_GAP = 8;
+const BUDGET_ORIGIN = 326;
+const MOVEMENT_ORIGIN = 246;
+const MOVEMENT_BOTTOM = 28;
 const BASE_BOTTOM = 569;
 let bar;
 
@@ -77,14 +81,21 @@ class PrismBar {
     this.portrait = this.element.querySelector(".co2prism-portrait");
     this.name = this.element.querySelector(".co2prism-name");
     this.combatPanel = this.element.querySelector(".co2prism-combat");
+    this.combatToggle = this.element.querySelector(".co2prism-combat-toggle");
+    this.combatToggle.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.writeConfiguration("panels.combat", value => !value);
+    });
     this.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key =>
       [key, this.element.querySelector(`[data-co2prism-combat-value="${key}"]`)]));
     this.combatEffects = this.element.querySelector(".co2prism-effects");
     this.combatSlots = this.element.querySelector(".co2prism-combat-slots");
     this.combatRows = [...this.combatSlots.querySelectorAll(".co2prism-combat-row")];
-    this.combatLine = this.element.querySelector(".co2prism-combat-line");
-    this.combatArrow = this.element.querySelector(".co2prism-combat-arrow");
+    this.combatHands = Object.fromEntries([...this.combatSlots.querySelectorAll("[data-co2prism-hand-container]")]
+      .map(node => [node.dataset.co2prismHandContainer, node]));
     this.budgetScroll = this.element.querySelector(".co2prism-budget-scroll");
+    this.timeCommands = this.element.querySelector(".co2prism-time-commands");
     this.budgetContent = this.element.querySelector(".co2prism-budget-content");
     this.budgetBar = this.element.querySelector(".co2prism-time-bar");
     this.budgetCommands = [...this.element.querySelectorAll("[data-co2prism-time]")];
@@ -284,7 +295,7 @@ class PrismBar {
       if (nodes.text.textContent !== text) nodes.text.textContent = text;
       nodes.fill.style.setProperty("--fill", `${fill}%`);
       // Réduire seulement les longues valeurs pour les garder dans leur zone.
-      const width = 110;
+      const width = 92;
       nodes.text.style.setProperty("--text-size", Math.min(36, width / (text.length * 0.58)));
       const label = `${game.i18n.localize(`CO2PRISM.Gauges.${key}`)} : ${text}`;
       nodes.fill.title = label;
@@ -512,15 +523,15 @@ class PrismBar {
     const settled = Boolean(token && this.movementResults.get(token)?.success && this.movementResults.get(token).sessionId === view?.state.sessionId);
     const busy = Boolean(token && (this.movementResets.has(token) || validating || this.movementClosures.has(token)));
     const error = token ? this.movementErrors.get(token) : null;
-    const signature = JSON.stringify([open, available, token?.uuid ?? token?.id, view, busy, settled, validating, error,
+    const combatOpen = this.configuration.panels.combat;
+    const signature = JSON.stringify([open, combatOpen, available, token?.uuid ?? token?.id, view, busy, settled, validating, error,
       this.movementZones.visible, this.movementZones.busy, this.movementZones.diagnostic, this.movementZones.stats]);
     if (signature === this.movementSignature) return false;
     this.movementSignature = signature;
     const localize = key => game.i18n.localize(`CO2PRISM.Movement.${key}`);
     const format = (key, data) => game.i18n.format(`CO2PRISM.Movement.${key}`, data);
     this.movementPanel.hidden = !open;
-    this.movementToggle.disabled = !token || busy;
-    this.movementToggle.textContent = game.i18n.localize("CO2PRISM.Combat.Movement");
+    this.movementToggle.disabled = !token || !combatOpen || busy;
     this.movementToggle.classList.toggle("co2prism-movement-unavailable", available <= 0);
     this.movementToggle.setAttribute("aria-pressed", String(open));
     this.movementToggle.setAttribute("aria-expanded", String(open));
@@ -605,7 +616,7 @@ class PrismBar {
     for (const { key, button, value, count } of this.skillNodes) {
       const modifier = this.actor.system?.abilities?.[key]?.value;
       value.textContent = Number.isFinite(modifier) ? `${modifier >= 0 ? "+" : ""}${modifier}` : unavailable;
-      value.style.setProperty("--co2prism-skill-size", Math.min(52, 90 / (value.textContent.length * 0.55)));
+      value.style.setProperty("--co2prism-skill-size", Math.min(40, 82 / (value.textContent.length * 0.55)));
       // Le système inclut déjà les bonus généraux et conditionnels.
       let bonuses = null;
       try {
@@ -710,6 +721,11 @@ class PrismBar {
     const open = Boolean(this.actor && this.configuration.panels.combat);
     const changed = this.combatPanel.hidden === open;
     this.combatPanel.hidden = !open;
+    if (this.combatToggle) {
+      this.combatToggle.disabled = !this.canConfigure();
+      this.combatToggle.setAttribute("aria-expanded", String(open));
+    }
+    this.updateEffects();
     if (!open) return changed;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const economy = new ActionEconomy(this.actor).getSnapshot();
@@ -724,6 +740,14 @@ class PrismBar {
         ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
       node.style.setProperty("--co2prism-combat-size", Math.min(key === "def" ? 68 : 48, 115 / (node.textContent.length * 0.58)));
     }
+    this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
+    const budgetChanged = this.renderEconomy(economy);
+    const resized = this.renderCombatSlots();
+    return changed || resized || budgetChanged;
+  }
+
+  updateEffects() {
+    const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const effects = this.readCombatEffects();
     const elements = effects.map(effect => {
       const element = document.createElement("span");
@@ -740,10 +764,6 @@ class PrismBar {
       return element;
     });
     this.combatEffects.replaceChildren(...elements);
-    this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
-    const budgetChanged = this.renderEconomy(economy);
-    const resized = this.renderCombatSlots();
-    return changed || resized || budgetChanged;
   }
 
   async changeEconomy(operation, type) {
@@ -784,6 +804,7 @@ class PrismBar {
     const hidden = !economyEnabled();
     const visibilityChanged = scroll && scroll.hidden !== hidden;
     if (scroll) scroll.hidden = hidden;
+    if (this.timeCommands) this.timeCommands.hidden = hidden;
     this.updateEconomyCommands(state);
     if (hidden) return Boolean(visibilityChanged);
     const labels = { l: "L", a: "A", am: "AM", m: "M" };
@@ -820,8 +841,8 @@ class PrismBar {
     const barWidth = widths.reduce((sum, width) => sum + width, 16) + (nodes.length - 1) * 8;
     this.budgetBar.replaceChildren(...nodes);
     this.budgetBar.style.setProperty("--w", barWidth);
-    this.budgetReset.style.setProperty("--x", 235 + barWidth + 6);
-    const width = Math.max(492, 235 + barWidth + 48);
+    this.budgetReset.style.setProperty("--x", barWidth + 4);
+    const width = barWidth + 44;
     const changed = width !== this.budgetWidth;
     this.budgetWidth = width;
     this.budgetContent.style.setProperty("--budget-width", width);
@@ -942,7 +963,7 @@ class PrismBar {
       || slot.hand || (slot.reference !== undefined && this.resolveShortcut(this.actor, slot.reference))));
     for (const [index, row] of rows.entries()) {
       const scroll = this.combatRows[index].scrollLeft;
-      const nodes = row.map(slot => {
+      const nodes = row.flatMap(slot => {
         const node = document.createElement("div");
         node.className = "co2prism-combat-slot";
         node.dataset.co2prismRow = String(slot.row);
@@ -963,7 +984,8 @@ class PrismBar {
           node.setAttribute("aria-label", label);
           const icon = add("i", "fa-solid fa-hand");
           icon.setAttribute("aria-hidden", "true");
-          return node;
+          this.combatHands[slot.hand].replaceChildren(node);
+          return [];
         }
         if (slot.reference !== undefined && !resolved) {
           node.classList.add("co2prism-slot-unavailable");
@@ -1069,14 +1091,19 @@ class PrismBar {
         node.addEventListener("dragover", event => this.hoverSlot(event, slot, node));
         node.addEventListener("dragleave", () => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
         node.addEventListener("drop", event => { void this.dropSlot(event, slot, node); });
-        return node;
+        if (!slot.hand) return [node];
+        this.combatHands[slot.hand].replaceChildren(node);
+        return [];
       });
       this.combatRows[index].replaceChildren(...nodes);
       this.combatRows[index].scrollLeft = scroll;
     }
-    const widths = rows.map(row => Math.max(0, row.length * 209 - 11));
-    const extent = Math.max(economyEnabled() ? BUDGET_ORIGIN + (this.budgetWidth ?? 492) : 0,
-      ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
+    const widths = rows.map(row => {
+      const count = row.filter(slot => !slot.hand).length;
+      return count * COMBAT_SLOT_SIZE + Math.max(0, count - 1) * COMBAT_SLOT_GAP;
+    });
+    const extent = Math.max(COMBAT_ROW_ORIGIN + Math.max(0, ...widths),
+      economyEnabled() ? BUDGET_ORIGIN + (this.budgetWidth ?? 228) : 0);
     // Une ligne peut grandir sans changer l'extrémité globale du volet.
     const resized = extent !== this.combatExtent || widths.some((width, index) => width !== this.combatRowWidths?.[index]);
     this.combatExtent = extent;
@@ -1417,7 +1444,7 @@ class PrismBar {
   }
 
   writeConfiguration(path, value, { combat = false } = {}) {
-    const toggle = path === "panels.competences" && typeof value === "function";
+    const toggle = ["panels.competences", "panels.combat"].includes(path) && typeof value === "function";
     // Seuls ces champs sont modifiables à cette étape.
     if (!(path === "activePreset" && [1, 2, 3].includes(value))
       && !(["panels.combat", "panels.competences", "panels.equipements"].includes(path) && typeof value === "boolean") && !toggle) {
@@ -1598,43 +1625,42 @@ class PrismBar {
     // Le même dessin conserve ses proportions, même dans une petite fenêtre.
     const open = Boolean(this.actor && this.configuration?.panels.competences);
     const combat = Boolean(this.actor && this.configuration?.panels.combat);
-    let top = open ? 237 : combat && economyEnabled() ? 32 : 0;
-    const left = open ? 168 : combat ? 122 : 0;
+    let top = 0;
+    const left = open ? 198 : 0;
+    const bottom = open ? 603 : BASE_BOTTOM;
+    const minimumRight = COMBAT_ROW_ORIGIN + COMBAT_SLOT_SIZE;
     const movementOpen = this.movementPanel?.hidden === false;
     const reserve = movementOpen ? Math.min(180, (window.innerHeight - 8) * 0.4) : 0;
     const width = Math.max(1, Math.min(WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M,
-      (window.innerWidth - 8) * 724 / ((combat ? 732 : 724) + left),
-      (window.innerHeight - 8 - reserve) * 724 / (BASE_BOTTOM + Math.max(top, movementOpen ? 44 : 0))));
+      (window.innerWidth - 8) * 724 / ((combat ? minimumRight : 724) + left),
+      (window.innerHeight - 8 - reserve) * 724 / bottom));
     // Les réserves haute et basse suivent l'ancrage du dessin d'origine.
     const scale = width / 724;
-    let right = combat ? Math.min(this.combatExtent ?? 1344,
-      Math.max(732, (window.innerWidth - width * left / 724 - 8) / scale)) : 724;
+    let right = combat ? Math.min(this.combatExtent ?? minimumRight, (window.innerWidth - 8) / scale - left) : 724;
     this.element.style.setProperty("--co2prism-unit", `${scale}px`);
     if (movementOpen) {
       this.movementPanel.style.removeProperty("width");
       this.movementPanel.style.removeProperty("max-height");
-      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (319 + left) * scale)}px`;
-      right = Math.max(right, 319 + this.movementPanel.getBoundingClientRect().width / scale);
-      top = Math.max(top, this.movementPanel.getBoundingClientRect().height / scale + 44);
+      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (MOVEMENT_ORIGIN + left) * scale)}px`;
+      const panel = this.movementPanel.getBoundingClientRect();
+      right = Math.max(right, MOVEMENT_ORIGIN + panel.width / scale);
+      top = Math.max(top, panel.height / scale - MOVEMENT_BOTTOM);
     }
     this.panelOffset = { x: width * left / 724, y: width * top / 724 };
     for (const [index, row] of (this.combatRows ?? []).entries()) {
-      row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? 198, Math.max(1, right - COMBAT_ROW_ORIGINS[index])));
+      row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? COMBAT_SLOT_SIZE, Math.max(0, right - COMBAT_ROW_ORIGIN)));
     }
-    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 492, Math.max(1, right - BUDGET_ORIGIN - 8)));
-    this.combatEffects?.style.setProperty("--w", Math.min(824, Math.max(1, right - 731)));
-    this.combatLine?.style.setProperty("--w", Math.max(0, right - 480 - 60));
-    this.combatArrow?.style.setProperty("--x", right - 93);
+    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 228, Math.max(1, right - BUDGET_ORIGIN)));
     this.element.style.setProperty("--co2prism-base-width", `${width}px`);
     this.element.style.setProperty("--co2prism-base-height", `${width * 515 / 724}px`);
     this.element.style.setProperty("--co2prism-offset-x", `${this.panelOffset.x}px`);
     this.element.style.setProperty("--co2prism-offset-y", `${this.panelOffset.y}px`);
     this.element.style.width = `${width * right / 724 + this.panelOffset.x}px`;
-    this.element.style.height = `${width * BASE_BOTTOM / 724 + this.panelOffset.y}px`;
+    this.element.style.height = `${width * bottom / 724 + this.panelOffset.y}px`;
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
     const x = preserveAnchor ? anchor.x : valid ? saved.x : 40;
-    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * BASE_BOTTOM / 724 - 40;
+    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * bottom / 724 - 40;
     // Le maintien du portrait ne peut pas laisser le volet déplié hors écran.
     this.place(x - this.panelOffset.x, y - this.panelOffset.y);
     for (const row of this.combatRows ?? []) {

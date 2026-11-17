@@ -1088,7 +1088,11 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(a.flags.co2prism.panels.equipements, true);
   assert.deepEqual(base(), before);
   assert.ok(reads.length >= 7);
-  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1512 / 724) < 0.01);
+  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1318 / 724) < 0.01);
+  await bar.setPanelState("equipements", false);
+  assert.equal(bar.skillsPanel.hidden, false);
+  await bar.setPanelState("equipements", true);
+  assert.equal(bar.skillsPanel.hidden, false);
   await bar.setPanelState("competences", false);
   assert.deepEqual(base(), before);
   const count = reads.length;
