@@ -1,5 +1,29 @@
 {
   "CO2PRISM": {
+    "Equipment": {
+      "ToggleAllHint": "Clic droit pour replier ou déplier toutes les catégories",
+      "Operations": {
+        "Title": "Opérations de l’objet",
+        "Decrease": "Quantité −1",
+        "Increase": "Quantité +1",
+        "Action": "Exécuter {action}",
+        "Equip": "Équiper",
+        "Unequip": "Déséquiper"
+      },
+      "HiddenItem": "{item} (masqué dans Prism)",
+      "Title": "Équipements",
+      "Open": "Ouvrir le volet Équipements",
+      "Close": "Fermer le volet Équipements",
+      "Expand": "Déplier {category}",
+      "Collapse": "Replier {category}",
+      "Groups": {
+        "misc": "Divers",
+        "containers": "Contenants",
+        "consumable": "Consommables",
+        "protection": "Protection",
+        "weapon": "Armes"
+      }
+    },
     "Title": "CO2 Prism",
     "Size": "Taille de la barre",
     "SizeHint": "Choisir S, M, L ou XL. La modification est appliquée immédiatement.",

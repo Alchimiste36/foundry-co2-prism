@@ -216,17 +216,115 @@
   outline: calc(2 * 100cqw / 724) solid #ffcf60;
 }
 
-.co2prism-bar .co2prism-skills-toggle {
+.co2prism-bar :is(.co2prism-skills-toggle, .co2prism-equipment-toggle) {
   padding: 0; margin: 0; border: 0; border-radius: 0; min-height: 0;
   background: transparent; box-shadow: none; opacity: 1;
   pointer-events: auto; cursor: pointer;
 }
-.co2prism-bar .co2prism-skills-toggle:disabled { cursor: default; }
-.co2prism-skills-toggle[aria-expanded="true"] {
+.co2prism-bar :is(.co2prism-skills-toggle, .co2prism-equipment-toggle):disabled { cursor: default; }
+:is(.co2prism-skills-toggle, .co2prism-equipment-toggle)[aria-expanded="true"] {
   color: #114f71;
   -webkit-text-stroke: calc(2 * var(--co2prism-unit)) white;
 }
-.co2prism-skills-toggle:focus-visible { outline: calc(2 * 100cqw / 724) solid #ffcf60; }
+:is(.co2prism-skills-toggle, .co2prism-equipment-toggle):focus-visible { outline: calc(2 * 100cqw / 724) solid #ffcf60; }
+.co2prism-equipment {
+  --pitch: calc(40 * var(--co2prism-unit));
+  --square: calc(52 * var(--co2prism-unit));
+  --tile: calc(var(--square) * sqrt(2));
+  position: absolute;
+  display: flex;
+  flex-flow: row wrap-reverse;
+  align-items: flex-start;
+  row-gap: calc(20 * var(--co2prism-unit));
+  /* Centres sur la diagonale supérieure gauche, à quelques unités du bord. */
+  left: calc(-96 * var(--co2prism-unit));
+  bottom: calc(100% - 269 * var(--co2prism-unit) - var(--tile) / 2);
+  width: calc(6 * var(--pitch) + var(--tile));
+  padding: 0;
+  margin: 0;
+  border: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.co2prism-equipment[hidden], .co2prism-equipment-items[hidden] { display: none; }
+.co2prism-equipment-group {
+  position: relative;
+  flex: 0 0 100%;
+  height: calc(var(--tile) + (var(--rows, 1) - 1) * 2 * var(--pitch));
+}
+/* Les pictogrammes repliés successifs partagent une rangée. */
+.co2prism-equipment-group:has(> [aria-expanded="false"]) {
+  flex-basis: var(--pitch);
+  height: calc(56 * var(--co2prism-unit));
+}
+.co2prism-bar .co2prism-equipment-category {
+  position: absolute;
+  display: grid; place-items: center;
+  left: calc(var(--tile) / 2);
+  bottom: calc(var(--tile) / 2 + var(--compact-column, 0) * var(--pitch));
+  translate: -50% 50%;
+  width: calc(38 * var(--co2prism-unit));
+  height: calc(38 * var(--co2prism-unit));
+  min-width: 0; min-height: 0; padding: 0; margin: 0;
+  border: 0; border-radius: 0; box-shadow: none;
+  background: transparent;
+  pointer-events: auto;
+  transition: none;
+  color: #c2c4c7;
+  font-size: calc(30 * var(--co2prism-unit));
+  line-height: 1;
+}
+.co2prism-bar .co2prism-equipment-category[aria-expanded="true"] { color: #83d4f3; }
+.co2prism-bar .co2prism-equipment-category:focus-visible { color: #ffcf60; }
+.co2prism-bar .co2prism-equipment-tile {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  left: calc(var(--tile) / 2 + var(--column) * var(--pitch));
+  bottom: calc(var(--tile) / 2 + (2 * var(--row) + var(--column)) * var(--pitch));
+  width: var(--square);
+  height: var(--square);
+  translate: -50% 50%;
+  transform: rotate(-45deg);
+  border: max(1px, calc(1.2 * var(--co2prism-unit))) solid #000;
+  min-width: 0; min-height: 0; margin: 0; padding: 0;
+  border-radius: 0; background: transparent; box-shadow: none;
+  pointer-events: auto;
+  transition: none;
+}
+.co2prism-equipment-tile:focus-visible { outline: 2px solid #ffcf60; }
+.co2prism-equipment-tile img {
+  display: block; width: 100%; height: 100%;
+  border: 0; border-radius: 0;
+  object-fit: cover;
+}
+.co2prism-equipment-masked img { filter: grayscale(1); opacity: 0.5; }
+.co2prism-equipment-menu {
+  position: fixed;
+  inset: 0 auto auto 0;
+  margin: 0;
+  padding: 4px;
+  max-width: calc(100vw - 8px);
+  max-height: calc(100vh - 8px);
+  overflow: auto;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #23252a;
+  color: #fff;
+  pointer-events: auto;
+}
+.co2prism-equipment-menu button {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.co2prism-equipment-menu button:is(:hover, :focus-visible) { background: #414957; }
 .co2prism-skills {
   margin: 0; padding: 0; border: 0;
 }

@@ -43,6 +43,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const measureRecordedPath = ${measureRecordedPath.toString()};
       const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Movement).map(([key, value]) => [`CO2PRISM.Movement.${key}`, value])))});
+      Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Equipment.Operations).map(([key, value]) => [`CO2PRISM.Equipment.Operations.${key}`, value])))});
       budgetTranslations['CO2PRISM.Combat.Movement'] = ${JSON.stringify(translations.CO2PRISM.Combat.Movement)};
       const game = globalThis.game = { system: { id: "co2" }, user: {},
         settings: { get: (_, key) => settings[key], set: (_, key, value) => settings[key] = value },
@@ -51,6 +52,10 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       let sequence = 0;
       const foundry = { utils: { cleanHTML: value => value, escapeHTML: value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]), deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
         applications: { api: { DialogV2: { confirm: async () => false, wait: async () => "validate" } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
+      foundry.applications.ux = { TextEditor: { implementation: { async enrichHTML(description, options) {
+        if (!options.relativeTo.id) throw new Error('Missing native Item context');
+        return description;
+      } } } };
       ${nativeTooltips}
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
@@ -1334,6 +1339,310 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           tracked.canUserModify = () => true;
           hooks.get('deleteToken')(secondDocument);
           check(!bar.movementTracker.getSnapshot(secondDocument).success, '15C deleted token cleanup');
+          const openedItems = [];
+          const equipmentItem = (name, sort) => {
+            const document = { id: name, uuid: 'Actor.test.Item.' + name, name, sort, parent: actor, type: 'equipment',
+              canUserModify: () => true,
+              testUserPermission: () => true, img: 'icons/svg/item-bag.svg',
+              system: { description: '<p>Details of ' + name + '</p>' },
+              sheet: { render: force => { if (force) openedItems.push(name); } } };
+            actor.items.set(name, document);
+            return document;
+          };
+          actor.unsetFlag = async function(scope, key) {
+            const [group, id] = key.split('.');
+            delete this.flags[scope][group][id];
+          };
+          const weapons = Array.from({ length: 31 }, (_, i) => equipmentItem('weapon' + i, i));
+          const stored = equipmentItem('stored', -1);
+          const bag = equipmentItem('bag', 0);
+          bag.type = 'container';
+          actor.inventory = [
+            { category: 'weapon', items: [stored, ...weapons] },
+            { category: 'armor', items: [equipmentItem('armor', 4), equipmentItem('armor2', 8)] },
+            { category: 'shield', items: [equipmentItem('shield', 2), equipmentItem('shield2', 8)] },
+            { category: 'consumable', items: [equipmentItem('potion', 1)] },
+            { category: 'misc', items: [equipmentItem('rope', 1)] }
+          ];
+          actor.containers = [bag, bag];
+          actor.containedItemUuids = new Set([stored.uuid]);
+          bag.system.description += '<img src="invalid" onerror="globalThis.co2prismInjected=true">';
+          const equipment = bar.equipmentPanel;
+          const artBeforeEquipment = bar.art.getBoundingClientRect().toJSON();
+          bar.equipmentToggle.click();
+          await bar.configWrites.get(actor);
+          check(JSON.stringify(bar.art.getBoundingClientRect().toJSON()) === JSON.stringify(artBeforeEquipment),
+            'Equipment opening preserves portrait geometry');
+          const groupFor = key => bar.equipmentGroups.find(group => group.key === key);
+          const names = group => [...group.items.querySelectorAll('img')].map(img => img.alt);
+          const weaponGroup = groupFor('weapon');
+          const order = ['weapon', 'protection', 'consumable', 'misc', 'containers'];
+          check(!equipment.hidden && equipment.querySelectorAll('.co2prism-equipment-category').length === 5, 'Equipment open with five groups');
+          check(bar.equipmentGroups.map(group => group.key).join() === order.join(), 'Equipment category order');
+          check(names(groupFor('protection')).join() === 'shield,armor,armor2,shield2', 'Equipment merged native protection order');
+          check(names(groupFor('containers')).join() === 'bag' && names(weaponGroup).length === 31, 'Equipment exclusions and deduplication');
+          await bar.setPanelState('combat', true);
+          if (movementPanel.hidden) movementButton.click();
+          await bar.setPanelState('competences', true);
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; settings.position = { x: 1, y: 1 }; bar.position = settings.position; bar.layout();
+            const bounds = equipment.getBoundingClientRect();
+            const artBounds = bar.art.getBoundingClientRect();
+            const movementBounds = movementPanel.getBoundingClientRect();
+            const tiles = [...weaponGroup.items.children].map(tile => tile.getBoundingClientRect());
+            const scale = artBounds.width / 724;
+            const edgeGap = (261 * scale - (tiles[5].left + tiles[5].right) / 2 + artBounds.left
+              - tiles[5].bottom + artBounds.top) / scale;
+            check(edgeGap > 12 && edgeGap < 17 && bounds.left >= bar.skillsPanel.getBoundingClientRect().left - 1 &&
+              bounds.bottom < bar.skillsPanel.getBoundingClientRect().top && bounds.right <= movementBounds.left + 1,
+              'Equipment follows the upper-left edge clear of skills and movement at ' + size);
+            check(tiles[5].left > tiles[4].left && tiles[5].top < tiles[4].top &&
+              Math.abs(tiles[0].left - tiles[6].left) < 1 && tiles[6].top < tiles[0].top,
+              'Equipment diagonal wraps after six at ' + size);
+            const equipmentStyle = getComputedStyle(equipment);
+            const tileStyle = getComputedStyle(weaponGroup.items.firstElementChild);
+            const imageStyle = getComputedStyle(weaponGroup.items.querySelector('img'));
+            const rotation = new DOMMatrix(tileStyle.transform);
+            check(equipmentStyle.overflowY === 'visible' && equipmentStyle.maxHeight === 'none' &&
+              tiles.length === 31 && tiles[30].height > 0, 'All equipment remains rendered without internal scrolling at ' + size);
+            check(Math.abs(rotation.b + Math.SQRT1_2) < 0.001 && imageStyle.transform === 'none' &&
+              tileStyle.borderTopColor === 'rgb(0, 0, 0)' && tiles[0].width > 67 * scale,
+              'Equipment square and image share a counterclockwise rotation with a black border at ' + size);
+            check([...equipment.querySelectorAll('.co2prism-equipment-category')].every(button =>
+              getComputedStyle(button).backgroundColor === 'rgba(0, 0, 0, 0)'), 'Transparent categories at ' + size);
+          }
+          const categoryPosition = key => groupFor(key).button.getBoundingClientRect();
+          const setCollapsed = async keys => {
+            for (const key of order) {
+              const { button, items } = groupFor(key);
+              if (items.hidden !== keys.includes(key)) {
+                button.click(); await bar.configWrites.get(actor);
+              }
+            }
+          };
+          const fullHeight = equipment.getBoundingClientRect().height;
+          const allOpen = order.map(categoryPosition);
+          check(allOpen.every((point, i) => i === 0 || point.top < allOpen[i - 1].top),
+            'Expanded categories progress from the portrait outward in order');
+          for (const collapsed of [['protection'], ['consumable'], ['protection', 'consumable'], order]) {
+            await setCollapsed(collapsed);
+            const positions = collapsed.map(categoryPosition);
+            const pitch = 40 * bar.art.getBoundingClientRect().width / 724;
+            check(equipment.getBoundingClientRect().height < fullHeight &&
+              collapsed.every(key => groupFor(key).items.hidden && groupFor(key).button.getClientRects().length === 1),
+              'Collapsed categories release their item rows: ' + collapsed.join());
+            check(positions.every((point, i) => i === 0 ||
+              (Math.abs(point.left - positions[i - 1].left - pitch) < 1 &&
+               Math.abs(positions[i - 1].top - point.top - pitch) < 1)),
+              'Consecutive collapsed icons form a compact 45-degree diagonal: ' + collapsed.join());
+          }
+          await setCollapsed([]);
+          check(Math.abs(equipment.getBoundingClientRect().height - fullHeight) < 1 && names(weaponGroup).length === 31,
+            'Reopening categories restores all item rows');
+          const categoryColors = [];
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            weaponGroup.button.click(); await bar.configWrites.get(actor);
+            check(weaponGroup.items.hidden === locked && actor.flags.co2prism.equipmentCollapsed.weapon === locked,
+              'Equipment category writes independently of position lock');
+            categoryColors.push(getComputedStyle(weaponGroup.button).color);
+          }
+          check(categoryColors[0] !== categoryColors[1], 'Equipment category colors distinguish both states');
+          const tileFor = id => equipment.querySelector('[data-item-id="' + id + '"]');
+          for (const id of ['weapon0', 'shield', 'potion', 'rope', 'bag']) {
+            const tile = tileFor(id);
+            check(tile.dataset.tooltipHtml.includes('<strong>' + id + '</strong>') &&
+              tile.dataset.tooltipHtml.includes('Details of ' + id), 'Equipment tooltip for ' + id);
+            tile.click();
+          }
+          check(openedItems.join() === 'weapon0,shield,potion,rope,bag', 'Equipment opens each native Item sheet');
+          if (game.tooltip) {
+            game.tooltip.activate(tileFor('bag'));
+            check(game.tooltip.tooltip.textContent.includes('Details of bag') &&
+              !game.tooltip.tooltip.querySelector('[onerror]'), 'Native equipment tooltip sanitizes item description');
+            game.tooltip.deactivate();
+          }
+          const contextClick = node => !node.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true }));
+          const toggleAllEquipment = async () => {
+            check(contextClick(bar.equipmentToggle), 'Suitcase consumes its own context click');
+            await bar.configWrites.get(actor);
+          };
+          const allEquipmentCollapsed = state => bar.equipmentGroups.every(({ key, button, items }) =>
+            actor.flags.co2prism.equipmentCollapsed[key] === state && items.hidden === state &&
+            button.getAttribute('aria-expanded') === String(!state));
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            await toggleAllEquipment();
+            check(!equipment.hidden && allEquipmentCollapsed(true) && !bar.equipmentMenu.matches(':popover-open'),
+              'Suitcase collapses all groups in either lock mode');
+            await toggleAllEquipment();
+            check(!equipment.hidden && allEquipmentCollapsed(false), 'Second suitcase context click expands every group');
+          }
+          await setCollapsed(['protection']);
+          bar.equipmentToggle.click(); await bar.configWrites.get(actor);
+          await toggleAllEquipment();
+          check(equipment.hidden && Object.values(actor.flags.co2prism.equipmentCollapsed).every(Boolean),
+            'Suitcase context click collapses mixed categories without opening the panel');
+          bar.equipmentToggle.click(); await bar.configWrites.get(actor);
+          check(!equipment.hidden && allEquipmentCollapsed(true), 'Suitcase left click reopens with persisted categories');
+          await toggleAllEquipment();
+          check(allEquipmentCollapsed(false), 'Suitcase restores every category after reopening');
+          const initialColumn = tileFor('weapon0').style.getPropertyValue('--column');
+          check(contextClick(tileFor('weapon0').querySelector('img')), 'Unlocked equipment handles the context click');
+          await bar.configWrites.get(actor);
+          check(actor.flags.co2prism.hiddenEquipment.weapon0 === true &&
+            getComputedStyle(tileFor('weapon0').querySelector('img')).filter === 'grayscale(1)' &&
+            tileFor('weapon0').style.getPropertyValue('--column') === initialColumn, 'Masked equipment is grey in place');
+          tileFor('weapon0').click();
+          check(openedItems.at(-1) === 'weapon0', 'Grey equipment remains consultable');
+          settings.locked = true; bar.updateLock();
+          check(!tileFor('weapon0') && tileFor('weapon1').style.getPropertyValue('--column') === initialColumn &&
+            !contextClick(tileFor('weapon1')), 'Locked equipment compacts and leaves the context click alone');
+          settings.locked = false; bar.updateLock();
+          check(tileFor('weapon0').classList.contains('co2prism-equipment-masked'), 'Unlocking restores the masked equipment');
+          actor.testUserPermission = (_, permission) => permission !== 'OWNER';
+          bar.refreshActor();
+          check(!contextClick(tileFor('weapon0')), 'Observer cannot change the hidden flag');
+          const beforeObserver = openedItems.length;
+          tileFor('weapon0').click();
+          check(openedItems.length === beforeObserver + 1 && openedItems.at(-1) === 'weapon0',
+            'Observer can still consult a visible item');
+          actor.testUserPermission = () => true;
+          const selectedForMask = canvas.tokens.controlled;
+          const sameName = { ...weapons[0], uuid: 'Actor.other.Item.weapon0', parent: other };
+          other.flags.co2prism.panels.equipements = true;
+          other.items.set(sameName.id, sameName);
+          other.inventory = [{ category: 'weapon', items: [sameName] }];
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(!tileFor(sameName.id).classList.contains('co2prism-equipment-masked'), 'Item visibility is isolated by actor');
+          canvas.tokens.controlled = selectedForMask; bar.refreshActor();
+          other.flags.co2prism.panels.equipements = false;
+          await bar.setPanelState('equipements', false);
+          await bar.setPanelState('equipements', true);
+          const reloaded = new PrismBar();
+          check(tileFor('weapon0').classList.contains('co2prism-equipment-masked') &&
+            reloaded.readConfiguration(actor).hiddenEquipment.has('weapon0'), 'Visibility survives reopening and fresh configuration');
+          contextClick(tileFor('weapon0')); await bar.configWrites.get(actor);
+          check(!tileFor('weapon0').classList.contains('co2prism-equipment-masked') &&
+            !actor.flags.co2prism.hiddenEquipment.weapon0, 'Second context click restores normal equipment');
+          contextClick(tileFor('weapon30')); await bar.configWrites.get(actor);
+          actor.inventory[0].items.pop();
+          actor.items.delete('weapon30');
+          hooks.get('deleteItem')({ parent: actor });
+          check(names(weaponGroup).length === 30 && !tileFor('weapon30') && actor.flags.co2prism.hiddenEquipment.weapon30,
+            'Deleting masked equipment leaves no ghost and writes no cleanup');
+          weapons[0].name = 'Renamed weapon';
+          hooks.get('updateItem')({ parent: other });
+          check(names(weaponGroup)[0] === 'weapon0', 'Equipment ignores unrelated item changes');
+          hooks.get('updateItem')({ parent: actor });
+          check(names(weaponGroup)[0] === 'Renamed weapon', 'Equipment refreshes changed item labels');
+          const selected = canvas.tokens.controlled;
+          canvas.tokens.controlled = []; bar.refreshActor();
+          check(equipment.hidden && bar.equipmentToggle.disabled, 'Equipment hidden without a selected actor');
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(equipment.hidden && bar.equipmentToggle.getAttribute('aria-expanded') === 'false', 'Equipment state isolated per actor');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          check(!equipment.hidden && names(weaponGroup).length === 30, 'Equipment restores actor state');
+          actor.inventory = []; actor.containers = [];
+          hooks.get('createItem')({ parent: actor });
+          check(equipment.querySelectorAll('.co2prism-equipment-category').length === 5 && !equipment.querySelector('img'), 'Empty equipment keeps category controls');
+          const menu = bar.equipmentMenu;
+          const operations = () => [...menu.children].map(button => button.textContent);
+          const settled = () => new Promise(resolve => setTimeout(resolve, 0));
+          const equipmentPill = equipmentItem('elixir', 1);
+          const inventoryBlade = equipmentItem('blade', 2);
+          Object.assign(equipmentPill.system, { properties: { stackable: true }, quantity: { current: 1, max: 2 },
+            charges: { current: 4 } });
+          let quantityWrites = 0;
+          equipmentPill.update = async update => {
+            quantityWrites++;
+            check(Object.keys(update).join() === 'system.quantity.current', 'Equipment writes only the native quantity field');
+            await settled();
+            equipmentPill.system.quantity.current = update['system.quantity.current'];
+            hooks.get('updateItem')(equipmentPill);
+          };
+          Object.assign(inventoryBlade.system, { properties: { equipable: true }, equipped: false });
+          actor.inventory = [{ category: 'consumable', items: [equipmentPill, stored] },
+            { category: 'weapon', items: [inventoryBlade] }];
+          actor.containers = [bag];
+          settings.locked = true; bar.updateLock();
+          check(!tileFor('stored') && !contextClick(tileFor('bag')) && !menu.matches(':popover-open'),
+            'Contained items stay excluded and ordinary containers have no operation menu');
+          const openItemMenu = id => contextClick(tileFor(id)) && menu.matches(':popover-open');
+          check(openItemMenu('elixir') && operations().join() === 'Quantité −1,Quantité +1', 'Stack menu has both feasible operations');
+          tileFor('elixir').dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true,
+            clientX: innerWidth - 1, clientY: innerHeight - 1 }));
+          const menuBounds = menu.getBoundingClientRect();
+          check(menuBounds.right <= innerWidth && menuBounds.bottom <= innerHeight, 'Operations menu fits at the viewport edge');
+          const decrease = menu.firstElementChild;
+          decrease.click(); decrease.click();
+          check(!contextClick(tileFor('elixir')), 'An in-flight mutation prevents a second operation menu');
+          await settled(); await settled();
+          check(quantityWrites === 1 && equipmentPill.system.quantity.current === 0 && equipmentPill.system.charges.current === 4
+            && actor.items.get('elixir') === equipmentPill, 'Quantity reaches zero once, without changing charges or deleting the item');
+          check(openItemMenu('elixir') && operations().join() === 'Quantité +1', 'No decrease at zero');
+          menu.firstElementChild.click(); await settled(); await settled();
+          check(openItemMenu('elixir'), 'Quantity operation reopens after completion');
+          menu.lastElementChild.click(); await settled(); await settled();
+          check(openItemMenu('elixir') && operations().join() === 'Quantité −1', 'No increase at the native positive maximum');
+          bar.closeEquipmentMenu();
+          const equipCalls = [];
+          actor.toggleEquipmentEquipped = async (id, bypass) => {
+            equipCalls.push([id, bypass]);
+            if (bypass) actor.items.get(id).system.equipped = !actor.items.get(id).system.equipped;
+          };
+          check(openItemMenu('blade') && operations().join() === 'Équiper', 'Non-stackable blade only offers Equip');
+          menu.firstElementChild.click(); await settled();
+          check(openItemMenu('blade') && operations().join() === 'Équiper', 'Native refusal leaves the real label intact');
+          menu.firstElementChild.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })); await settled();
+          check(openItemMenu('blade') && operations().join() === 'Déséquiper' &&
+            JSON.stringify(equipCalls) === JSON.stringify([['blade', false], ['blade', true]]),
+            'Shift reaches the native equipment toggle once and uses the true equipment state');
+          inventoryBlade.canUserModify = () => false;
+          menu.firstElementChild.click(); await settled();
+          check(equipCalls.length === 2 && !contextClick(tileFor('blade')), 'Permission loss prevents both stale and new operations');
+          inventoryBlade.canUserModify = () => true;
+          const inventoryAction = (indice, actionName) => ({ indice, actionName, type: 'heal', actionTypeFinal: 'm',
+            properties: { visible: true }, isVisible: async () => true });
+          equipmentPill.actions = equipmentPill.system.actions = [inventoryAction(0, 'First'), inventoryAction(1, 'Second')];
+          const inventoryExecutions = [];
+          game.system.api.macros.useAction = async (source, indice, type) => {
+            const guards = [];
+            const details = { item: equipmentPill, source, indice, type, state: true, guard: promise => guards.push(promise) };
+            hooks.get('co2.preActivateAction')?.(actor, details);
+            if ((await Promise.all(guards)).includes(false)) return false;
+            inventoryExecutions.push([source, indice, type]);
+            hooks.get('co2.postActivateAction')?.(actor, { ...details, success: true });
+          };
+          await economy.reset();
+          await bar.setPanelState('combat', false);
+          const onlyAction = equipmentPill.actions.pop();
+          check(openItemMenu('elixir') && operations().filter(label => label.startsWith('Exécuter')).join() === 'Exécuter First',
+            'A single configured action shows a single action command');
+          equipmentPill.actions.push(onlyAction);
+          check(openItemMenu('elixir') && operations().filter(label => label.startsWith('Exécuter')).join() === 'Exécuter First,Exécuter Second',
+            'Multiple native actions display their actual names with Combat closed');
+          onlyAction.isVisible = async () => false;
+          [...menu.children].find(button => button.textContent === 'Exécuter Second').click();
+          await settled();
+          check(!inventoryExecutions.length && economy.getSnapshot().normal.m, 'Failed native action conditions leave the budget intact');
+          onlyAction.isVisible = async () => true;
+          check(openItemMenu('elixir'), 'Operations menu reopens after a failed action condition');
+          [...menu.children].find(button => button.textContent === 'Exécuter Second').click();
+          await settled();
+          check(JSON.stringify(inventoryExecutions) === JSON.stringify([[equipmentPill.uuid, 1, 'heal']]) &&
+            economy.getSnapshot().normal.m === false, 'Selected action uses native index and existing movement-action budget');
+          check(openItemMenu('elixir'), 'Operations menu available before document deletion');
+          actor.items.delete('elixir'); actor.inventory[0].items.shift();
+          hooks.get('deleteItem')(equipmentPill);
+          check(!menu.matches(':popover-open'), 'Deleting target closes operations menu');
+          check(openItemMenu('blade'), 'Operations menu available before switching token');
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(!menu.matches(':popover-open'), 'Switching token closes operations menu');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          check(openItemMenu('blade'), 'Operations menu available before closing the panel');
+          await bar.setPanelState('equipements', false);
+          check(!menu.matches(':popover-open'), 'Closing equipment panel dismisses operations menu');
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";

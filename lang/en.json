@@ -1,5 +1,29 @@
 {
   "CO2PRISM": {
+    "Equipment": {
+      "ToggleAllHint": "Right-click to collapse or expand all categories",
+      "Operations": {
+        "Title": "Item operations",
+        "Decrease": "Quantity −1",
+        "Increase": "Quantity +1",
+        "Action": "Run {action}",
+        "Equip": "Equip",
+        "Unequip": "Unequip"
+      },
+      "HiddenItem": "{item} (hidden in Prism)",
+      "Title": "Equipment",
+      "Open": "Open the equipment panel",
+      "Close": "Close the equipment panel",
+      "Expand": "Expand {category}",
+      "Collapse": "Collapse {category}",
+      "Groups": {
+        "misc": "Miscellaneous",
+        "containers": "Containers",
+        "consumable": "Consumables",
+        "protection": "Protection",
+        "weapon": "Weapons"
+      }
+    },
     "Title": "CO2 Prism",
     "Size": "Bar size",
     "SizeHint": "Choose S, M, L or XL. Changes apply immediately.",

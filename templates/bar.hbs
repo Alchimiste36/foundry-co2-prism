@@ -4,7 +4,7 @@
     <span class="co2prism-piece co2prism-name" style="--x:253;--y:455;--w:471;--h:60" ></span>
     <img class="co2prism-piece co2prism-portrait" src="icons/svg/mystery-man.svg" alt="" draggable="false" style="--x:88;--y:88;--w:346;--h:346">
     <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-movement-toggle" style="--x:237;--y:30;--w:48;--h:48" aria-label="{{localize 'CO2PRISM.Combat.Movement'}}" aria-controls="co2prism-movement-panel" aria-expanded="false" aria-pressed="false" title="{{localize 'CO2PRISM.Movement.Start'}}"><i class="fa-solid fa-shoe-prints" aria-hidden="true"></i></button>
-    <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:42;--y:204;--w:44;--h:46" aria-hidden="true"><i class="fa-solid fa-suitcase" aria-hidden="true"></i></span>
+    <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-equipment-toggle" style="--x:42;--y:204;--w:44;--h:46" aria-controls="co2prism-equipment" aria-expanded="false" aria-label="{{localize 'CO2PRISM.Equipment.Open'}}"><i class="fa-solid fa-suitcase" aria-hidden="true"></i></button>
     <span class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large" style="--x:42;--y:260;--w:44;--h:46" aria-hidden="true"><i class="fa-solid fa-award" aria-hidden="true"></i></span>
     <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-combat-toggle" style="--x:442;--y:232;--w:48;--h:48" aria-label="{{localize 'CO2PRISM.Combat.Title'}}" aria-controls="co2prism-combat" aria-expanded="false"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i></button>
     <button type="button" disabled class="co2prism-piece co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-skills-toggle" style="--x:237;--y:437;--w:48;--h:48" aria-controls="co2prism-skills" aria-expanded="false"><i class="fa-solid fa-user" aria-hidden="true"></i></button>
@@ -85,6 +85,7 @@
         </div>
       </div>
     </section>
+    <section id="co2prism-equipment" class="co2prism-equipment" hidden aria-label="{{localize 'CO2PRISM.Equipment.Title'}}"></section>
     <section id="co2prism-skills" class="co2prism-piece co2prism-skills" style="--x:-198;--y:339;--w:400;--h:264" hidden aria-label="{{localize 'CO2PRISM.Skills'}}">
       <button type="button" disabled class="co2prism-piece co2prism-skill" data-co2prism-ability="for" style="--col:1;--row:2">
         <span class="co2prism-skill-label">{{localize 'CO2PRISM.Abilities.for'}}</span>
@@ -124,4 +125,5 @@
     </section>
   </div>
 
+  <div popover="auto" class="co2prism-equipment-menu" role="group" aria-label="{{localize 'CO2PRISM.Equipment.Operations.Title'}}"></div>
 </div>

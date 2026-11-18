@@ -14,6 +14,15 @@ const BUDGET_ORIGIN = 308 + 43 + 20;
 const MOVEMENT_ORIGIN = 246;
 const MOVEMENT_BOTTOM = 28;
 const BASE_BOTTOM = 569;
+const EQUIPMENT_COLUMNS = 6;
+// Depuis le portrait vers l'extérieur du volet.
+const EQUIPMENT_GROUPS = [
+  ["weapon", "fa-axe", ["weapon"]],
+  ["protection", "fa-helmet-battle", ["armor", "shield"]],
+  ["consumable", "fa-flask-round-potion", ["consumable"]],
+  ["misc", "fa-backpack", ["misc"]],
+  ["containers", "fa-treasure-chest", []]
+];
 let bar;
 
 function economyEnabled() {
@@ -155,6 +164,7 @@ class PrismBar {
       event.stopPropagation();
       void this.writeConfiguration("panels.competences", value => !value);
     });
+    this.connectEquipment();
     this.skillNodes = ABILITIES.map(key => {
       const button = this.element.querySelector(`[data-co2prism-ability="${key}"]`);
       button.addEventListener("click", event => {
@@ -312,9 +322,267 @@ class PrismBar {
     this.configuration = this.readConfiguration(actor);
     this.updatePresets();
     const skillsChanged = this.updateSkills();
+    this.updateEquipment();
     const combatChanged = this.updateCombat();
     const movementChanged = this.updateMovementPanel();
     if (skillsChanged || combatChanged || movementChanged) this.layout({ preserveAnchor: true });
+  }
+
+  connectEquipment() {
+    this.equipmentPanel = this.element.querySelector(".co2prism-equipment");
+    this.equipmentToggle = this.element.querySelector(".co2prism-equipment-toggle");
+    this.equipmentMenu = this.element.querySelector(".co2prism-equipment-menu");
+    this.equipmentToggle.addEventListener("click", event => {
+      event.stopPropagation();
+      void this.writeConfiguration("panels.equipements", value => !value);
+    });
+    this.equipmentToggle.addEventListener("contextmenu", event => {
+      if (!this.canConfigure()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.writeConfiguration("equipmentCollapsed", states => !Object.values(states).every(Boolean));
+    });
+    this.equipmentPanel.addEventListener("click", event => {
+      const item = this.equipmentItem(event);
+      if (!item || event.button !== 0) return;
+      event.stopPropagation();
+      void this.openEquipmentSheet(item);
+    });
+    this.equipmentPanel.addEventListener("contextmenu", event => {
+      const actor = this.actor;
+      const item = this.equipmentItem(event);
+      if (!item) return;
+      if (game.settings.get(MODULE, "locked")) {
+        this.openEquipmentMenu(event, item);
+        return;
+      }
+      if (!this.canConfigure(actor)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.queueConfiguration(actor, async () => {
+        if (game.settings.get(MODULE, "locked") || !this.canConfigure(actor) || actor.items.get(item.id) !== item) return false;
+        const path = `hiddenEquipment.${item.id}`;
+        if (this.readConfiguration(actor).hiddenEquipment.has(item.id)) await actor.unsetFlag(MODULE, path);
+        else await actor.setFlag(MODULE, path, true);
+        return true;
+      });
+    });
+    this.equipmentGroups = EQUIPMENT_GROUPS.map(([key, glyph, subtypes]) => {
+      const group = document.createElement("div");
+      group.className = "co2prism-equipment-group";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "co2prism-equipment-category";
+      const icon = document.createElement("i");
+      icon.className = `fa-solid ${glyph}`;
+      icon.setAttribute("aria-hidden", "true");
+      button.append(icon);
+      const items = document.createElement("div");
+      items.className = "co2prism-equipment-items";
+      items.id = `co2prism-equipment-${key}`;
+      items.setAttribute("role", "group");
+      button.setAttribute("aria-controls", items.id);
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+        void this.writeConfiguration(`equipmentCollapsed.${key}`, value => !value);
+      });
+      group.append(button, items);
+      this.equipmentPanel.append(group);
+      return { key, subtypes, group, button, items };
+    });
+  }
+
+  equipmentItem(event) {
+    const tile = event.target.closest(".co2prism-equipment-tile[data-item-id]");
+    if (!tile || !this.equipmentPanel.contains(tile) || this.equipmentPanel.hidden || tile.closest("[hidden]")) return null;
+    return this.actor?.items.get(tile.dataset.itemId);
+  }
+
+  equipmentOperationItem({ actor, token, itemId }, config = this.readConfiguration(actor)) {
+    if (this.actor !== actor || this.token !== token || !game.settings.get(MODULE, "locked")
+      || !config.panels.equipements || config.hiddenEquipment.has(itemId)) return null;
+    const item = actor.items?.get(itemId);
+    if (!item || !["equipment", "container"].includes(item.type) || actor.containedItemUuids?.has(item.uuid)
+      || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
+      || !item.canUserModify?.(game.user, "update")) return null;
+    return item;
+  }
+
+  equipmentOperations(actor, item) {
+    const operations = [];
+    const { properties, quantity, equipped, actions } = item.system;
+    if (properties?.stackable === true && Number.isSafeInteger(quantity?.current) && quantity.current >= 0
+      && typeof item.update === "function") {
+      if (quantity.current > 0) operations.push({ key: "Decrease", quantity: quantity.current - 1 });
+      // CO2 n'affiche un plafond que lorsqu'il est strictement positif.
+      if (quantity.current < Number.MAX_SAFE_INTEGER && (!(quantity.max > 0) || quantity.current < quantity.max)) {
+        operations.push({ key: "Increase", quantity: quantity.current + 1 });
+      }
+    }
+    if (Array.isArray(actions)) for (const action of actions) {
+      if (typeof action?.type !== "string" || !action.type.trim()
+        || (!action.hasConditions && action.properties?.visible === false)) continue;
+      const reference = { itemId: item.id, source: item.uuid, indice: action.indice };
+      if (this.resolveShortcut(actor, reference)?.action !== action) continue;
+      const toggle = action.properties?.temporary === true && action.properties?.activable === true;
+      if (toggle ? typeof actor.activateAction !== "function" : typeof game.system.api?.macros?.useAction !== "function") continue;
+      operations.push({ key: "Action", name: action.actionName || item.name, action, reference });
+    }
+    if (item.type === "equipment" && properties?.equipable === true && typeof equipped === "boolean"
+      && typeof actor.toggleEquipmentEquipped === "function") {
+      operations.push({ key: equipped ? "Unequip" : "Equip" });
+    }
+    return operations;
+  }
+
+  closeEquipmentMenu() {
+    if (this.equipmentMenu?.matches(":popover-open")) this.equipmentMenu.hidePopover();
+  }
+
+  openEquipmentMenu(event, item) {
+    this.closeEquipmentMenu();
+    const context = { actor: this.actor, token: this.token, itemId: item.id, equipment: true };
+    if (this.busyEquipment || this.busyAction || this.equipmentOperationItem(context) !== item) return;
+    const operations = this.equipmentOperations(context.actor, item);
+    if (!operations.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    game.tooltip?.deactivate();
+    const menu = this.equipmentMenu;
+    menu.replaceChildren(...operations.map(operation => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = game.i18n.format(`CO2PRISM.Equipment.Operations.${operation.key}`, { action: operation.name });
+      button.addEventListener("click", event => {
+        if (!menu.matches(":popover-open") || event.detail > 1) return;
+        this.closeEquipmentMenu();
+        void this.runEquipmentOperation(event, context, operation);
+      });
+      return button;
+    }));
+    const tile = event.target.closest(".co2prism-equipment-tile").getBoundingClientRect();
+    const x = event.clientX || tile.left;
+    const y = event.clientY || tile.bottom;
+    menu.showPopover();
+    menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(y, innerHeight - menu.offsetHeight - 4))}px`;
+    menu.firstElementChild.focus({ preventScroll: true });
+  }
+
+  async runEquipmentOperation(event, context, chosen) {
+    if (this.busyEquipment || this.busyAction) return;
+    const item = this.equipmentOperationItem(context);
+    const operation = item && this.equipmentOperations(context.actor, item)
+      .find(entry => entry.key === chosen.key && entry.action === chosen.action);
+    if (!operation) return;
+    if (operation.action) {
+      await this.executeShortcut(event, { ...context, ...operation });
+      return;
+    }
+    this.busyEquipment = true;
+    try {
+      if (operation.quantity !== undefined) await item.update({ "system.quantity.current": operation.quantity });
+      else await context.actor.toggleEquipmentEquipped(item.id, event.shiftKey);
+    } catch (error) {
+      console.error("co2prism | Equipment operation", item.uuid, error);
+      ui.notifications.error(game.i18n.localize("CO2PRISM.ActionError"));
+    } finally {
+      this.busyEquipment = false;
+      this.refreshActor();
+    }
+  }
+
+  async openEquipmentSheet(item) {
+    try {
+      if (!item.testUserPermission(game.user, "LIMITED")) return;
+      const sheet = item.sheet;
+      if (sheet?.isVisible !== false) await sheet?.render?.(true);
+    } catch (error) {
+      console.warn("co2prism | Item sheet", item.uuid, error);
+    }
+  }
+
+  async prepareEquipmentTooltip(tile, item, description) {
+    const name = `<strong>${foundry.utils.escapeHTML(item.name)}</strong>`;
+    tile.dataset.tooltipHtml = name;
+    if (!description) return;
+    try {
+      const editor = foundry.applications.ux.TextEditor.implementation;
+      const html = await editor.enrichHTML(description, { relativeTo: item, secrets: item.isOwner });
+      tile.dataset.tooltipHtml = `${name}${foundry.utils.cleanHTML(html)}`;
+      if (game.tooltip?.element === tile) game.tooltip.activate(tile);
+    } catch (error) {
+      console.warn("co2prism | Item tooltip", item.uuid, error);
+    }
+  }
+
+  updateEquipment() {
+    if (!this.equipmentPanel) return;
+    this.closeEquipmentMenu();
+    const open = Boolean(this.actor && this.configuration.panels.equipements);
+    const canConfigure = this.canConfigure();
+    this.equipmentPanel.hidden = !open;
+    this.equipmentToggle.disabled = !canConfigure;
+    this.equipmentToggle.setAttribute("aria-expanded", String(open));
+    const label = game.i18n.localize(open ? "CO2PRISM.Equipment.Close" : "CO2PRISM.Equipment.Open");
+    this.equipmentToggle.setAttribute("aria-label", label);
+    this.equipmentToggle.title = canConfigure
+      ? `${label}\n${game.i18n.localize("CO2PRISM.Equipment.ToggleAllHint")}` : label;
+    if (!open) return;
+
+    const inventory = new Map((this.actor.inventory ?? []).map(({ category, items }) => [category, items]));
+    const seen = new Set(this.actor.containedItemUuids);
+    const locked = game.settings.get(MODULE, "locked");
+    const { hiddenEquipment } = this.configuration;
+    let compactColumn = 0;
+    for (const entry of this.equipmentGroups) {
+      const { key, subtypes, group, button, items } = entry;
+      const expanded = !this.configuration.equipmentCollapsed[key];
+      group.style.setProperty("--compact-column", expanded ? 0 : compactColumn);
+      compactColumn = expanded ? 0 : compactColumn + 1;
+      const label = game.i18n.localize(`CO2PRISM.Equipment.Groups.${key}`);
+      button.disabled = !canConfigure;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", label);
+      button.title = game.i18n.format(expanded ? "CO2PRISM.Equipment.Collapse" : "CO2PRISM.Equipment.Expand", { category: label });
+      items.setAttribute("aria-label", label);
+      items.hidden = !expanded;
+      const source = key === "containers" ? this.actor.containers ?? []
+        : subtypes.flatMap(subtype => inventory.get(subtype) ?? []);
+      // Le tri stable conserve l'ordre natif à sort égal au sein d'un sous-type.
+      const displayed = [...source].sort((a, b) => a.sort - b.sort).filter(item => {
+        if (seen.has(item.uuid)) return false;
+        seen.add(item.uuid);
+        return expanded && (!locked || !hiddenEquipment.has(item.id));
+      });
+      const rows = Math.max(1, Math.ceil(displayed.length / EQUIPMENT_COLUMNS));
+      group.style.setProperty("--rows", rows);
+      const descriptions = displayed.map(item =>
+        item.testUserPermission(game.user, "OBSERVER") ? item.system.description : "");
+      const signature = JSON.stringify(displayed.map((item, index) =>
+        [item.uuid, item.name, item.img, hiddenEquipment.has(item.id), descriptions[index], item.isOwner]));
+      if (signature === entry.signature) continue;
+      entry.signature = signature;
+      items.replaceChildren(...displayed.map((item, index) => {
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = "co2prism-equipment-tile";
+        tile.dataset.itemId = item.id;
+        if (hiddenEquipment.has(item.id)) {
+          tile.classList.add("co2prism-equipment-masked");
+          tile.setAttribute("aria-label", game.i18n.format("CO2PRISM.Equipment.HiddenItem", { item: item.name }));
+        }
+        tile.style.setProperty("--column", index % EQUIPMENT_COLUMNS + 1);
+        tile.style.setProperty("--row", Math.floor(index / EQUIPMENT_COLUMNS));
+        const image = document.createElement("img");
+        image.src = item.img || "icons/svg/item-bag.svg";
+        image.alt = item.name;
+        image.draggable = false;
+        tile.append(image);
+        void this.prepareEquipmentTooltip(tile, item, descriptions[index]);
+        return tile;
+      }));
+    }
   }
 
   movementToken() {
@@ -598,6 +866,7 @@ class PrismBar {
   }
 
   destroy() {
+    this.closeEquipmentMenu();
     this.movementDestroyed = true;
     this.movementZones.clear(); this.movementZonesObserver?.disconnect();
   }
@@ -1275,7 +1544,7 @@ class PrismBar {
     event.preventDefault(); event.stopPropagation();
     if ((event.button !== undefined && event.button !== 0) || event.detail > 1 || event.repeat
       || this.busyAction || this.changingHands.has(context.actor) || this.slotDrag || this.suppressShortcutClick) return false;
-    const mode = event.shiftKey ? "sheet" : event.ctrlKey ? "chat" : event.altKey ? "damage" : "use";
+    const mode = context.equipment ? "use" : event.shiftKey ? "sheet" : event.ctrlKey ? "chat" : event.altKey ? "damage" : "use";
     const warn = key => {
       if (this.shortcutWarning?.key !== key || Date.now() - this.shortcutWarning.time > 1500) {
         ui.notifications.warn(game.i18n.localize(key)); this.shortcutWarning = { key, time: Date.now() };
@@ -1285,16 +1554,21 @@ class PrismBar {
     if (event.currentTarget?.isConnected === false) return warn("CO2PRISM.Combat.UnavailableSlot");
     this.refreshActor();
     const { actor, token, preset, key, reference } = context;
-    const current = this.configuration.slots[key];
-    if (actor !== this.actor || token !== this.token || (this.handKey(key) && preset !== this.configuration.activePreset)
-      || !this.configuration.panels.combat || !current
-      || ["source", "indice", "itemId"].some(field => current[field] !== reference?.[field])
-      || !(game.user.isGM || actor?.testUserPermission(game.user, "OWNER"))) {
-      return warn("CO2PRISM.CommandUnavailable");
-    }
+    const currentReference = config => {
+      if (context.equipment) return this.equipmentOperationItem(context, config) ? reference : null;
+      const current = config.slots[key];
+      if (actor !== this.actor || token !== this.token || (this.handKey(key) && preset !== config.activePreset)
+        || !config.panels.combat || !current
+        || ["source", "indice", "itemId"].some(field => current[field] !== reference?.[field])
+        || !(game.user.isGM || actor?.testUserPermission(game.user, "OWNER"))) return null;
+      return current;
+    };
+    const current = currentReference(this.configuration);
+    if (!current) return warn("CO2PRISM.CommandUnavailable");
     const resolved = this.resolveShortcut(actor, current);
     if (!resolved) return warn("CO2PRISM.Combat.UnavailableSlot");
     const { action, item } = resolved;
+    if (context.equipment && action !== context.action) return warn("CO2PRISM.CommandUnavailable");
     if (this.handKey(key) && ["use", "damage"].includes(mode) && !item?.system.equipped) {
       return warn("CO2PRISM.Combat.HandUnequipped");
     }
@@ -1316,11 +1590,8 @@ class PrismBar {
       if (["use", "damage"].includes(mode) && typeof action.isVisible === "function"
         && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
       // Une condition asynchrone ne doit pas poursuivre une commande sur une ancienne sélection.
-      const latest = this.readConfiguration(actor);
-      if (this.actor !== actor || this.token !== token || (this.handKey(key) && latest.activePreset !== preset) || !latest.panels.combat
-        || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
-        || ["source", "indice", "itemId"].some(field => latest.slots[key]?.[field] !== reference?.[field])
-        || this.resolveShortcut(actor, latest.slots[key])?.action !== action) return warn("CO2PRISM.CommandUnavailable");
+      const stillAvailable = () => this.resolveShortcut(actor, currentReference(this.readConfiguration(actor)))?.action === action;
+      if (!stillAvailable()) return warn("CO2PRISM.CommandUnavailable");
       // UUID actuel du support, notamment pour les Items d'un acteur synthétique.
       const source = item?.uuid;
       const indice = action.indice;
@@ -1332,11 +1603,7 @@ class PrismBar {
       const economy = new ActionEconomy(actor);
       const ready = () => {
         this.refreshActor();
-        const config = this.readConfiguration(actor);
-        return this.actor === actor && this.token === token && (!this.handKey(key) || config.activePreset === preset) && config.panels.combat
-          && (game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
-          && ["source", "indice", "itemId"].every(field => config.slots[key]?.[field] === reference?.[field])
-          && this.resolveShortcut(actor, config.slots[key])?.action === action
+        return stillAvailable()
           && (!item || actor.items?.get(item.id) === item)
           && [action.properties?.activable, action.properties?.temporary, action.properties?.enabled].every((value, index) => value === activationState[index])
           && action.actionTypeFinal === time && !(toggle && action.properties.enabled === true)
@@ -1545,6 +1812,8 @@ class PrismBar {
     const active = read("hands.active");
     const activePreset = [1, 2, 3].includes(active) ? active : 1;
     const panels = read("panels");
+    const equipmentCollapsed = read("equipmentCollapsed");
+    const hiddenEquipment = read("hiddenEquipment");
     const presets = read("hands.presets");
     const storedShortcuts = read("shortcuts");
     const shortcuts = isObject(storedShortcuts) ? foundry.utils.deepClone(storedShortcuts) : {};
@@ -1553,6 +1822,10 @@ class PrismBar {
     return {
       activePreset, shortcuts, handPresets,
       slots: { ...shortcuts, ...handPresets[activePreset] },
+      equipmentCollapsed: Object.fromEntries(EQUIPMENT_GROUPS.map(([key]) =>
+        [key, isObject(equipmentCollapsed) && equipmentCollapsed[key] === true])),
+      hiddenEquipment: new Set(isObject(hiddenEquipment)
+        ? Object.keys(hiddenEquipment).filter(id => hiddenEquipment[id] === true) : []),
       panels: Object.fromEntries(["combat", "competences", "equipements"].map(key =>
         [key, isObject(panels) && panels[key] === true]))
     };
@@ -1596,9 +1869,13 @@ class PrismBar {
   }
 
   writeConfiguration(path, value) {
-    const toggle = ["panels.competences", "panels.combat"].includes(path) && typeof value === "function";
-    // Seuls ces champs sont modifiables à cette étape.
-    if (!(["panels.combat", "panels.competences", "panels.equipements"].includes(path) && typeof value === "boolean") && !toggle) {
+    if (typeof path !== "string") return Promise.resolve(false);
+    const [group, key, extra] = path.split(".");
+    const panel = group === "panels" && ["combat", "competences", "equipements"].includes(key);
+    const category = group === "equipmentCollapsed" && EQUIPMENT_GROUPS.some(([id]) => id === key);
+    const toggle = typeof value === "function";
+    const allCategories = path === "equipmentCollapsed" && toggle;
+    if (extra !== undefined || !(panel || category || allCategories) || !(toggle || typeof value === "boolean")) {
       return Promise.resolve(false);
     }
     this.refreshActor();
@@ -1608,7 +1885,13 @@ class PrismBar {
     return this.queueConfiguration(actor, async () => {
       if (!this.canConfigure(actor)) return false;
       const config = this.readConfiguration(actor);
-      const previous = config.panels[path.split(".")[1]];
+      if (allCategories) {
+        const next = value(config.equipmentCollapsed);
+        if (typeof next !== "boolean") return false;
+        await actor.setFlag(MODULE, path, Object.fromEntries(EQUIPMENT_GROUPS.map(([id]) => [id, next])));
+        return true;
+      }
+      const previous = config[group][key];
       const next = toggle ? value(previous) : value;
       if (toggle && typeof next !== "boolean") return false;
       if (previous === next) return false;
