@@ -101,12 +101,55 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           ] };
           canvas.tokens.controlled = [{ actor, document: { baseActor: actor } }];
           bar.refreshActor();
-          for (const action of ["sheet", "fortune", "fastRest", "fullRest"]) {
+          const portraitEvent = (type, options) => bar.portrait.dispatchEvent(new MouseEvent(type, { bubbles: true, ...options }));
+          const portraitDoubleClick = () => {
+            portraitEvent('click', { detail: 1 });
+            portraitEvent('click', { detail: 2 });
+            portraitEvent('dblclick', { detail: 2 });
+          };
+          const refreshTick = () => new Promise(resolve => setTimeout(resolve, 0));
+          check(!root.querySelector('[data-co2prism-action="sheet"], .fa-star'), 'Actor sheet star removed');
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            const count = calls.length;
+            portraitEvent('click', { detail: 1 });
+            check(calls.length === count, 'Single portrait click does not open the sheet');
+            portraitDoubleClick(); await refreshTick();
+            check(calls.length === count + 1 && calls.at(-1) === 'sheet', 'Portrait double click opens once in either lock mode');
+          }
+          const oldPosition = bar.position;
+          const oldBounds = root.getBoundingClientRect();
+          bar.portrait.setPointerCapture = () => {};
+          const portraitPointer = (type, x, y) => bar.portrait.dispatchEvent(new PointerEvent(type, {
+            button: 0, pointerId: 1, clientX: x, clientY: y, bubbles: true, cancelable: true
+          }));
+          portraitPointer('pointerdown', 200, 200);
+          portraitPointer('pointermove', 240, 180);
+          portraitPointer('pointerup', 240, 180);
+          check(root.getBoundingClientRect().left > oldBounds.left + 20, 'Unlocked portrait drag moves Prism');
+          portraitEvent('click', { detail: 1 });
+          portraitPointer('pointerdown', 240, 180);
+          portraitPointer('pointerup', 240, 180);
+          portraitEvent('click', { detail: 2 });
+          portraitEvent('dblclick', { detail: 2 });
+          check(calls.join() === 'sheet,sheet', 'A drag followed by a click does not open the actor sheet');
+          bar.position = oldPosition; bar.layout();
+          const originalSelection = canvas.tokens.controlled;
+          const nextActor = { ...actor, uuid: 'Actor.second', sheet: { render: () => calls.push('secondSheet') } };
+          canvas.tokens.controlled = [{ actor: nextActor, document: { baseActor: nextActor } }];
+          portraitDoubleClick(); await refreshTick();
+          check(calls.at(-1) === 'secondSheet', 'Portrait opens the currently selected actor sheet');
+          canvas.tokens.controlled = [];
+          portraitDoubleClick(); await refreshTick();
+          check(calls.join() === 'sheet,sheet,secondSheet', 'No sheet opens without a selected actor');
+          canvas.tokens.controlled = originalSelection; bar.refreshActor();
+          calls.length = 0;
+          for (const action of ["fortune", "fastRest", "fullRest"]) {
             if (bar.lastRest) bar.lastRest.at -= 1000;
             root.querySelector('[data-co2prism-action="' + action + '"]').click();
             await new Promise(resolve => setTimeout(resolve, 0));
           }
-          check(calls.join(",") === "sheet,fortune,fastRest,fullRest", "Raccordement des clics");
+          check(calls.join(",") === "fortune,fastRest,fullRest", "Raccordement des clics");
           await bar.setPanelState('combat', true);
           root.querySelector('[data-co2prism-preset="2"]').click();
           await bar.configWrites.get(actor);
@@ -1342,7 +1385,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const openedItems = [];
           const equipmentItem = (name, sort) => {
             const document = { id: name, uuid: 'Actor.test.Item.' + name, name, sort, parent: actor, type: 'equipment',
-              canUserModify: () => true,
+              canUserModify: () => true, actions: [],
               testUserPermission: () => true, img: 'icons/svg/item-bag.svg',
               system: { description: '<p>Details of ' + name + '</p>' },
               sheet: { render: force => { if (force) openedItems.push(name); } } };
@@ -1643,6 +1686,207 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(openItemMenu('blade'), 'Operations menu available before closing the panel');
           await bar.setPanelState('equipements', false);
           check(!menu.matches(':popover-open'), 'Closing equipment panel dismisses operations menu');
+          settings.locked = false; bar.updateLock();
+          await bar.setPanelState('combat', true);
+          await economy.reset();
+          inventoryBlade.actions = inventoryBlade.system.actions = ['First', 'Second', 'Third', 'Fourth'].map((name, index) =>
+            ({ ...inventoryAction(index, name), source: inventoryBlade.uuid, actionImg: 'icons/svg/' +
+              ['sword', 'shield', 'fire', 'sun'][index] + '.svg' }));
+          Object.assign(inventoryBlade.actions[0].properties, { activable: true, temporary: true, enabled: true });
+          Object.assign(inventoryBlade.actions[0], { iconFA: 'fa-solid fa-sword', manaCost: 2,
+            resolvers: [{ type: 'consumable' }] });
+          inventoryBlade.system.quantity = { current: 3 };
+          inventoryBlade.actions[1].isVisible = async () => false;
+          const groupCalls = [];
+          const groupActivation = async ({ source, indice, type, state }) => {
+            const guards = [];
+            const details = { item: inventoryBlade, source, indice, type, state, guard: promise => guards.push(promise) };
+            hooks.get('co2.preActivateAction')?.(actor, details);
+            if ((await Promise.all(guards)).includes(false)) return false;
+            groupCalls.push(['activate', source, indice, type ?? null, state]);
+            if (indice === 0) {
+              inventoryBlade.actions[0].properties.enabled = state;
+              if (state) inventoryBlade.system.quantity.current--;
+            }
+            hooks.get('co2.postActivateAction')?.(actor, { ...details, success: true });
+            hooks.get('updateItem')(inventoryBlade);
+            return true;
+          };
+          actor.activateAction = groupActivation;
+          game.system.api.macros.useAction = (source, indice, type) => groupActivation({ source, indice, type, state: true });
+          game.system.api.macros.openSheet = source => groupCalls.push(['sheet', source]);
+          game.system.api.macros.sendToChat = (source, _name, indice) => groupCalls.push(['chat', source, indice]);
+          const groupRow = bar.combatRows[1];
+          const groupSlot = () => root.querySelector('.co2prism-slot-group');
+          const dropAction = async (indice, target) => {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData('text/plain', JSON.stringify({ type: 'co.action', source: inventoryBlade.uuid, indice }));
+            target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+            await bar.configWrites.get(actor);
+          };
+          await dropAction(0, groupRow.lastElementChild);
+          const simple = [...groupRow.children].find(slot => slot.title.includes('First'));
+          await dropAction(1, simple);
+          const members = () => [...groupSlot().querySelectorAll('.co2prism-slot-quadrant')];
+          const quadrantCommand = index => members()[index].querySelector('.co2prism-quadrant-command');
+          const clickQuadrant = (index, options = {}) => quadrantCommand(index).dispatchEvent(new MouseEvent('click', { bubbles: true, ...options }));
+          const images = () => members().map(member => member.querySelector('img')?.getAttribute('src') ?? '');
+          const preview = bar.shortcutPreview;
+          const previewOpen = () => preview.matches(':popover-open');
+          const pointer = (node, type) => node.dispatchEvent(new PointerEvent(type, { pointerType: 'mouse' }));
+          const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+          pointer(members()[2], 'pointerenter');
+          await pause(360);
+          check(!previewOpen(), 'Empty quadrant never opens an action preview');
+          check(images().join() === 'icons/svg/sword.svg,icons/svg/shield.svg,,' &&
+            members().slice(2).every(member => getComputedStyle(member).backgroundColor === 'rgb(0, 0, 0)' &&
+              !member.querySelector('button')), 'Two actions leave two black, inert quadrants');
+          members()[2].click(); groupSlot().click();
+          clickQuadrant(1); await settled();
+          check(!groupCalls.length && economy.getSnapshot().normal.m, 'Empty zones and an unavailable action produce no execution');
+          clickQuadrant(0); await settled();
+          check(groupCalls.length === 1 && groupCalls[0][2] === 0 && groupCalls[0][4] === false &&
+            economy.getSnapshot().normal.m && !members()[0].classList.contains('co2prism-action-active'),
+            'Two-member group deactivates only its selected action without spending time');
+          clickQuadrant(0); await settled();
+          check(groupCalls.length === 2 && groupCalls[1][2] === 0 && groupCalls[1][4] === true &&
+            !economy.getSnapshot().normal.m && inventoryBlade.system.quantity.current === 2,
+            'Reactivation uses native consumption and the shared budget');
+          await economy.reset();
+          await dropAction(2, groupSlot());
+          check(images()[2] === 'icons/svg/fire.svg' && !images()[3], 'Third action fills the bottom-left quadrant');
+          clickQuadrant(2); await settled();
+          check(groupCalls.length === 3 && groupCalls[2][2] === 2 && !economy.getSnapshot().normal.m,
+            'Third quadrant executes its native index in a three-member group');
+          await economy.reset();
+          await dropAction(3, groupSlot());
+          await settled();
+          check(images()[3] === 'icons/svg/sun.svg' && groupSlot().querySelectorAll('button').length === 4 &&
+            !groupSlot().classList.contains('co2prism-slot-executable') &&
+            !groupSlot().querySelector('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost'),
+            'Full group has four images and individual remove buttons, without corner badges or execution');
+          check(members().map(member => member.classList.contains('co2prism-action-active')).join() === 'true,false,false,false'
+            && members().map(member => member.classList.contains('co2prism-condition-unavailable')).join() === 'false,true,false,false',
+            'Activation and unavailable conditions affect only the matching quadrant');
+          check(getComputedStyle(members()[0].querySelector('img')).filter.startsWith('brightness') &&
+            getComputedStyle(members()[1].querySelector('img')).filter.startsWith('grayscale') &&
+            getComputedStyle(members()[2].querySelector('img')).filter === 'none', 'Each quadrant renders its own visual filter');
+          pointer(members()[0], 'pointerenter');
+          await pause(100);
+          check(!previewOpen(), 'Hover stays hidden before the delay');
+          pointer(members()[0], 'pointerleave'); pointer(members()[1], 'pointerenter');
+          await pause(260);
+          check(!previewOpen(), 'Switching quadrants cancels the previous timer');
+          await pause(100);
+          check(previewOpen() && preview.textContent.includes('Second') &&
+            preview.querySelector('.co2prism-condition-unavailable'), 'Only the new quadrant opens with its own state');
+          members()[1].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+          check(!previewOpen(), 'Right click dismisses the preview');
+          inventoryBlade.actions[1].isVisible = async () => true;
+          Object.assign(inventoryBlade.actions[2], { type: 'melee', hasResolversWithDomage: true });
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(members()[0].classList.contains('co2prism-action-active') &&
+            !members()[1].classList.contains('co2prism-condition-unavailable'), 'Native Item update refreshes individual quadrant states');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const bounds = groupSlot().getBoundingClientRect(), plain = groupRow.lastElementChild.getBoundingClientRect();
+            const [topLeft, topRight, bottomLeft, bottomRight] = members().map(member => member.getBoundingClientRect());
+            check(Math.abs(bounds.width - plain.width) < 1 && Math.abs(bounds.height - plain.height) < 1 &&
+              topLeft.top === topRight.top && topLeft.left === bottomLeft.left && topRight.left === bottomRight.left &&
+              bottomRight.bottom <= bounds.bottom && bottomRight.right <= bounds.right &&
+              getComputedStyle(groupSlot()).borderTopColor === 'rgb(114, 14, 53)',
+              'Quadrants preserve square geometry and burgundy border at ' + size);
+            groupRow.scrollLeft = groupSlot().offsetLeft;
+            await settled();
+            pointer(members()[0], 'pointerenter');
+            await pause(360);
+            const popup = preview.getBoundingClientRect(), previewSquare = preview.firstElementChild?.getBoundingClientRect();
+            check(previewOpen() && Math.abs(previewSquare.width - bounds.width) < 1
+              && Math.abs(previewSquare.height - bounds.height) < 1 && popup.left >= 0 && popup.top >= 0
+              && popup.right <= innerWidth && popup.bottom <= innerHeight &&
+              getComputedStyle(preview.firstElementChild).pointerEvents === 'none' &&
+              preview.querySelectorAll('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost').length === 4 &&
+              preview.querySelector('.co2prism-action-active') && !preview.querySelector('button') &&
+              preview.querySelector('.co2prism-shortcut-preview-title').textContent === 'First',
+              'Preview preserves the full square, four badges, and viewport geometry at ' + size);
+            pointer(members()[0], 'pointerleave');
+            check(!previewOpen(), 'Leaving the quadrant dismisses its preview immediately');
+          }
+          settings.locked = true; bar.updateLock();
+          check(images().every(Boolean) && !groupSlot().querySelector('button') && !members().some(member => member.draggable),
+            'Locked group preserves images and hides all editing controls');
+          pointer(members()[3], 'pointerenter');
+          await pause(360);
+          check(previewOpen() && preview.textContent.includes('Fourth'), 'Locked quadrant previews its own action');
+          const storedGroup = JSON.stringify(actor.flags.co2prism.shortcuts);
+          clickQuadrant(3, { ctrlKey: true }); await settled();
+          check(!previewOpen() && groupCalls.at(-1).join() === ['chat', inventoryBlade.uuid, 3].join(),
+            'Locked Ctrl-click closes preview and sends exactly its action to chat');
+          clickQuadrant(3, { shiftKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['sheet', inventoryBlade.uuid].join(), 'Locked Shift-click opens the native sheet');
+          clickQuadrant(2, { altKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['activate', inventoryBlade.uuid, 2, 'damage', true].join() &&
+            economy.getSnapshot().normal.m, 'Alt-click uses the native damage command without an action-time debit');
+          actor.testUserPermission = (_, permission) => permission !== 'OWNER';
+          bar.refreshActor();
+          const beforeDenied = groupCalls.length;
+          clickQuadrant(3); await settled();
+          check(groupCalls.length === beforeDenied, 'Observer cannot execute a group action');
+          actor.testUserPermission = () => true;
+          bar.refreshActor();
+          const beforeFourth = groupCalls.length;
+          const fourth = quadrantCommand(3);
+          fourth.click(); fourth.click();
+          await settled();
+          check(groupCalls.length === beforeFourth + 1 && groupCalls.at(-1)[2] === 3 &&
+            !economy.getSnapshot().normal.m && JSON.stringify(actor.flags.co2prism.shortcuts) === storedGroup,
+            'Rapid locked clicks activate the fourth action once and preserve the references');
+          const staleFourth = quadrantCommand(3);
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          staleFourth.click();
+          check(groupCalls.length === beforeFourth + 1, 'A stale quadrant cannot execute after a token change');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          pointer(members()[3], 'pointerenter');
+          hooks.get('updateItem')(inventoryBlade);
+          check(!previewOpen() && !bar.shortcutHover, 'Rebuilding Combat clears the active preview and its timer');
+          pointer(members()[0], 'pointerenter');
+          await bar.setPanelState('combat', false);
+          check(!previewOpen() && !bar.shortcutHover, 'Closing Combat cancels a pending preview');
+          await bar.setPanelState('combat', true);
+          pointer(members()[0], 'pointerenter');
+          root.hidden = true;
+          await settled();
+          check(!previewOpen() && !bar.shortcutHover, 'Hiding Prism cancels a pending preview');
+          root.hidden = false;
+          settings.locked = false; bar.updateLock();
+          const wholeTransfer = new DataTransfer();
+          pointer(members()[0], 'pointerenter');
+          groupSlot().dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: wholeTransfer }));
+          check(!previewOpen() && !bar.shortcutHover, 'Starting a drag cancels a pending preview');
+          check(JSON.parse(wholeTransfer.getData('text/plain')).actionIndex === undefined, 'Group border starts a whole-slot drag');
+          bar.combatRows[0].lastElementChild.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: wholeTransfer }));
+          await bar.configWrites.get(actor);
+          check(groupSlot().parentElement === bar.combatRows[0] && images().every(Boolean), 'Moving the square preserves all four images');
+          const groupTransfer = new DataTransfer();
+          members()[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: groupTransfer }));
+          check(JSON.parse(groupTransfer.getData('text/plain')).actionIndex === 0, 'Member drag identifies the native slot and action index');
+          members()[2].dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: groupTransfer }));
+          await bar.configWrites.get(actor);
+          check(images().join() === 'icons/svg/shield.svg,icons/svg/fire.svg,icons/svg/sword.svg,icons/svg/sun.svg',
+            'Quadrant drop reorders the images within the group');
+          for (const index of [3, 0, 0]) {
+            members()[index].querySelector('button').click();
+            await bar.configWrites.get(actor);
+          }
+          check(!groupSlot() && [...bar.combatRows[0].children].some(slot => slot.title.includes('First') &&
+            slot.classList.contains('co2prism-slot-executable') && slot.querySelector('.co2prism-slot-time')),
+            'Removing quadrants restores a normal executable shortcut with its corner indicators');
+          const finalShortcut = [...bar.combatRows[0].children].find(slot => slot.title.includes('First'));
+          finalShortcut.querySelector('.co2prism-slot-remove').click();
+          await bar.configWrites.get(actor);
+          check(![...bar.combatRows[0].children].some(slot => slot.title.includes('First')),
+            'The final remaining action is removed with the ordinary shortcut command');
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";

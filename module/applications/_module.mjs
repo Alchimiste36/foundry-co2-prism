@@ -10,6 +10,8 @@ const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
 const COMBAT_ROW_ORIGIN = 948;
 const COMBAT_SLOT_SIZE = 172;
 const COMBAT_SLOT_GAP = 8;
+const MAX_SHORTCUT_ACTIONS = 4;
+const SHORTCUT_PREVIEW_DELAY = 350;
 const BUDGET_ORIGIN = 308 + 43 + 20;
 const MOVEMENT_ORIGIN = 246;
 const MOVEMENT_BOTTOM = 28;
@@ -102,6 +104,8 @@ class PrismBar {
     this.combatEffects = this.element.querySelector(".co2prism-effects");
     this.combatSlots = this.element.querySelector(".co2prism-combat-slots");
     this.combatRows = [...this.combatSlots.querySelectorAll(".co2prism-combat-row")];
+    this.shortcutPreview = this.element.querySelector(".co2prism-shortcut-preview");
+    for (const row of this.combatRows) row.addEventListener("scroll", () => this.clearShortcutPreview());
     this.combatHands = Object.fromEntries([...this.combatSlots.querySelectorAll("[data-co2prism-hand-container]")]
       .map(node => [node.dataset.co2prismHandContainer, node]));
     this.budgetScroll = this.element.querySelector(".co2prism-budget-scroll");
@@ -124,9 +128,11 @@ class PrismBar {
       event.preventDefault(); event.stopPropagation(); void this.toggleMovementZones();
     });
     this.movementZonesObserver = new MutationObserver(() => {
+      if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
       if (!this.element.isConnected) { this.movementZones.clear(); this.movementZonesObserver.disconnect(); }
     });
     this.movementZonesObserver.observe(document.body, { childList: true });
+    this.movementZonesObserver.observe(this.element, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
     this.movementToggle.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation();
       if (event.detail > 1) return;
@@ -147,6 +153,7 @@ class PrismBar {
     });
     // Observer le début/la fin du drag, sans intercepter les dépôts hors Prism.
     document.addEventListener("dragstart", event => {
+      this.clearShortcutPreview();
       if (this.combatSlots.contains(event.target)) return;
       this.refreshActor();
       this.slotDrag = { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
@@ -199,11 +206,23 @@ class PrismBar {
     this.lock.addEventListener("click", () => {
       void game.settings.set(MODULE, "locked", !game.settings.get(MODULE, "locked"));
     });
-    this.handle.addEventListener("pointerdown", event => this.startDrag(event));
+    this.handle.addEventListener("pointerdown", event => {
+      if (event.button === 0) this.portraitMoved = false;
+      this.startDrag(event);
+    });
     this.handle.addEventListener("pointermove", event => this.moveDrag(event));
     this.handle.addEventListener("pointerup", event => this.endDrag(event));
     this.handle.addEventListener("pointercancel", event => this.endDrag(event));
     this.handle.addEventListener("lostpointercapture", event => this.endDrag(event));
+    this.portrait.addEventListener("click", event => {
+      if (event.detail === 1) this.portraitFirstClickMoved = this.portraitMoved;
+    });
+    this.portrait.addEventListener("dblclick", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!this.portraitFirstClickMoved && !this.portraitMoved) void this.performAction("sheet");
+    });
     window.addEventListener("resize", () => this.layout());
     this.updateLock();
     this.layout();
@@ -866,6 +885,7 @@ class PrismBar {
   }
 
   destroy() {
+    this.clearShortcutPreview();
     this.closeEquipmentMenu();
     this.movementDestroyed = true;
     this.movementZones.clear(); this.movementZonesObserver?.disconnect();
@@ -996,7 +1016,10 @@ class PrismBar {
       this.combatToggle.setAttribute("aria-expanded", String(open));
     }
     this.updateEffects();
-    if (!open) return changed;
+    if (!open) {
+      this.clearShortcutPreview();
+      return changed;
+    }
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const economy = new ActionEconomy(this.actor).getSnapshot();
     const movements = economyEnabled() ? economy.movementsRemaining : 1;
@@ -1145,6 +1168,29 @@ class PrismBar {
     rows.forEach((row, index) => row.push({ row: index + 1, order: 1 + Math.max(-1,
       ...row.filter(slot => !slot.hand).map(slot => slot.order)), terminal: true }));
     return rows;
+  }
+
+  shortcutReferences(entry) {
+    if (entry === undefined) return [];
+    if (Array.isArray(entry?.actions)) return entry.actions;
+    return [entry];
+  }
+
+  shortcutEntry(entry, references) {
+    const { actions, source, indice, itemId, ...slot } = entry;
+    if (references.length === 1) {
+      const { source, indice, itemId } = references[0];
+      return { ...slot, source, indice, itemId, ...(actions ? { "-=actions": null } : {}) };
+    }
+    return { ...slot, actions: references.map(reference =>
+      ({ source: reference?.source, indice: reference?.indice, itemId: reference?.itemId })),
+      ...(source !== undefined || indice !== undefined || itemId !== undefined
+        ? { "-=source": null, "-=indice": null, "-=itemId": null } : {}) };
+  }
+
+  sameShortcutReference(a, b) {
+    return Boolean(a && b && a.indice === b.indice && (a.itemId || null) === (b.itemId || null)
+      && (a.itemId || a.source === b.source));
   }
 
   resolveShortcut(actor, reference) {
@@ -1301,7 +1347,9 @@ class PrismBar {
         return matches.length === 0 || (matches.length === 1 && actions[reference.indice] !== matches[0]);
       } catch { return false; }
     };
-    const invalid = rows.flat().filter(slot => !slot.hand && !slot.terminal && slot.reference !== undefined && missing(slot.reference));
+    const survivors = entry => this.shortcutReferences(entry).filter(reference => !missing(reference));
+    const invalid = rows.flat().filter(slot => !slot.hand && !slot.terminal && slot.reference !== undefined
+      && (!this.shortcutReferences(slot.reference).length || this.shortcutReferences(slot.reference).some(missing)));
     if (!invalid.length) return;
     this.prunedSignatures ??= new WeakMap();
     const signature = JSON.stringify(invalid.map(slot => [slot.key, slot.reference]));
@@ -1313,11 +1361,19 @@ class PrismBar {
         this.prunedSignatures.delete(actor); return false;
       }
       const slots = config.shortcuts;
-      const keys = invalid.filter(slot => JSON.stringify(slots[slot.key]) === JSON.stringify(slot.reference)
-        && missing(slots[slot.key])).map(slot => slot.key);
-      if (!keys.length) { this.prunedSignatures.delete(actor); return false; }
+      const keys = [];
+      let changed = false;
+      for (const { key, reference } of invalid) {
+        if (JSON.stringify(slots[key]) !== JSON.stringify(reference)) continue;
+        const kept = survivors(slots[key]);
+        if (!kept.length) keys.push(key);
+        else if (kept.length < this.shortcutReferences(slots[key]).length) slots[key] = this.shortcutEntry(slots[key], kept);
+        else continue;
+        changed = true;
+      }
+      if (!changed) { this.prunedSignatures.delete(actor); return false; }
       for (const key of keys) delete slots[key];
-      for (const row of this.slotRows(actor)) row.filter(slot => !slot.hand && !slot.terminal && !keys.includes(slot.key))
+      if (keys.length) for (const row of this.slotRows(actor)) row.filter(slot => !slot.hand && !slot.terminal && !keys.includes(slot.key))
         .forEach((slot, order) => { slots[slot.key] = { ...slots[slot.key], order }; });
       for (const key of keys) slots[`-=${key}`] = null;
       await actor.setFlag(MODULE, "shortcuts", slots);
@@ -1327,12 +1383,14 @@ class PrismBar {
   }
 
   renderCombatSlots() {
+    this.clearShortcutPreview();
     const editable = !game.settings.get(MODULE, "locked") && this.canConfigure();
+    const disabled = Boolean(this.busyAction) || !(game.user.isGM || this.actor?.testUserPermission(game.user, "OWNER"));
     const generation = this.conditionRender = {};
     const allRows = this.slotRows();
     this.pruneShortcuts(allRows);
     const rows = allRows.map(row => row.filter(slot => !game.settings.get(MODULE, "locked")
-      || slot.hand || (slot.reference !== undefined && this.resolveShortcut(this.actor, slot.reference))));
+      || slot.hand || this.shortcutReferences(slot.reference).some(reference => this.resolveShortcut(this.actor, reference))));
     for (const [index, row] of rows.entries()) {
       const scroll = this.combatRows[index].scrollLeft;
       const nodes = row.flatMap(slot => {
@@ -1345,7 +1403,11 @@ class PrismBar {
           : slot.hand === "right" ? "CO2PRISM.Combat.RightHand" : "CO2PRISM.Combat.EmptySlot");
         const direct = slot.hand && slot.reference?.kind === "equipment";
         const equipment = direct ? this.handItem(this.actor, slot.reference) : null;
-        const resolved = slot.reference && !direct ? this.resolveShortcut(this.actor, slot.reference) : null;
+        const references = slot.hand ? [slot.reference] : this.shortcutReferences(slot.reference);
+        const group = references.length > 1;
+        const editContext = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
+          key: slot.key, reference: slot.reference };
+        const resolved = references.length === 1 && !direct ? this.resolveShortcut(this.actor, references[0]) : null;
         const add = (tag, cls, text) => {
           const child = document.createElement(tag); child.className = cls;
           if (text !== undefined) child.textContent = text;
@@ -1379,7 +1441,68 @@ class PrismBar {
           this.combatHands[slot.hand].replaceChildren(node);
           return [];
         }
-        if (equipment) {
+        if (group) {
+          node.title = game.i18n.format("CO2PRISM.Combat.ShortcutGroup", { count: references.length });
+          node.classList.add("co2prism-slot-group");
+          node.dataset.co2prismSlotKey = slot.key;
+          for (let index = 0; index < MAX_SHORTCUT_ACTIONS; index++) {
+            const quadrant = add("div", "co2prism-slot-quadrant");
+            if (index >= references.length) {
+              quadrant.setAttribute("aria-hidden", "true");
+              continue;
+            }
+            quadrant.dataset.co2prismActionIndex = String(index);
+            quadrant.dataset.co2prismSlotKey = slot.key;
+            const reference = references[index];
+            const context = { ...editContext, actionIndex: index };
+            const member = this.resolveShortcut(this.actor, reference);
+            if (member) {
+              const { action, item } = member;
+              const image = this.shortcutImage(action, item);
+              if (image) {
+                const img = document.createElement("img");
+                img.className = "co2prism-slot-image";
+                img.src = image;
+                img.alt = "";
+                img.draggable = false;
+                quadrant.append(img);
+              }
+              const command = document.createElement("div");
+              command.className = "co2prism-quadrant-command";
+              command.setAttribute("aria-label", action.actionName || item?.name || label);
+              command.setAttribute("aria-description", game.i18n.localize("CO2PRISM.Combat.ShortcutControls"));
+              if (action.properties?.activable === true) {
+                command.setAttribute("aria-pressed", String(action.properties.enabled === true));
+              }
+              quadrant.append(command);
+              this.bindShortcutInteraction(command, { ...context, reference }, disabled);
+              quadrant.classList.toggle("co2prism-action-active", this.shortcutActive(action));
+              quadrant.classList.toggle("co2prism-action-exhausted", this.shortcutUses(action, item)?.value === 0);
+              quadrant.classList.toggle("co2prism-time-insufficient",
+                economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[action.actionTypeFinal] === false);
+              if (typeof action.isVisible === "function") command.setAttribute("aria-disabled", "true");
+              this.renderShortcutConditions(quadrant, member, context, generation, available => {
+                command.setAttribute("aria-disabled", String(disabled || !available));
+                if (this.shortcutHover?.quadrant === quadrant && this.shortcutPreview.firstElementChild) {
+                  this.copyShortcutCondition(quadrant, this.shortcutPreview.firstElementChild);
+                }
+              });
+              quadrant.addEventListener("pointerenter", event => {
+                if (event.pointerType !== "touch") this.scheduleShortcutPreview(quadrant, context);
+              });
+              quadrant.addEventListener("pointerleave", () => {
+                if (this.shortcutHover?.quadrant === quadrant) this.clearShortcutPreview();
+              });
+              for (const type of ["pointerdown", "pointercancel", "click", "contextmenu"]) {
+                quadrant.addEventListener(type, () => this.clearShortcutPreview(), { capture: true });
+              }
+            } else quadrant.classList.add("co2prism-slot-unavailable");
+            if (editable) {
+              quadrant.draggable = true;
+              this.addShortcutRemove(quadrant, context);
+            }
+          }
+        } else if (equipment) {
           if (equipment.img) {
             const img = add("img", "co2prism-slot-image"); img.src = equipment.img; img.alt = equipment.name; img.draggable = false;
           }
@@ -1394,104 +1517,51 @@ class PrismBar {
           node.title = game.i18n.localize("CO2PRISM.Combat.UnavailableSlot");
         } else if (resolved) {
           const { action, item } = resolved;
-          const read = key => { try { return action[key]; } catch { return undefined; } };
-          const image = read("actionImg") || read("img") || item?.img;
-          if (typeof image === "string" && image) {
-            const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = read("actionName") || item?.name || ""; img.draggable = false;
-          }
-          const icon = read("iconFA");
-          if (typeof icon === "string" && icon) add("i", "co2prism-slot-type fa-solid "
-            + icon.split(/\s+/).filter(cls => /^fa-[a-z0-9-]+$/.test(cls) && cls !== "fa-solid").join(" "));
-          const time = { l: "L", a: "A", m: "M", f: "G" }[read("actionTypeFinal")];
-          if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
-          const uses = this.shortcutUses(action, item);
-          if (uses) {
-            const badge = add("span", "co2prism-slot-uses", `${uses.value} `);
-            badge.title = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
-            const icon = document.createElement("i");
-            icon.className = `fa-solid fa-${uses.icon}`; badge.append(icon);
-            if (uses.value === 0) node.classList.add("co2prism-action-exhausted");
-          }
-          const cost = read("manaCost");
-          if (Number.isFinite(cost) && cost > 0) {
-            const badge = add("span", "co2prism-slot-cost", `${cost} `);
-            const bolt = document.createElement("i"); bolt.className = "fa-solid fa-bolt"; badge.append(bolt);
-          }
-          node.title = [read("actionName") || item?.name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
+          const name = this.renderShortcutVisual(node, resolved);
+          node.title = [name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
           node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ShortcutControls")}`;
           const unequipped = Boolean(slot.hand && !item?.system.equipped);
           if (unequipped) {
             node.classList.add("co2prism-hand-unequipped");
             node.title += `\n${game.i18n.localize("CO2PRISM.Combat.HandUnequipped")}`;
           }
-          if (economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[read("actionTypeFinal")] === false) {
-            node.classList.add("co2prism-time-insufficient");
+          if (node.classList.contains("co2prism-time-insufficient")) {
             node.title += `\n${game.i18n.localize("CO2PRISM.Combat.InsufficientTimeHint")}`;
           }
-          node.classList.add("co2prism-slot-executable");
-          node.setAttribute("role", "button");
           if (action.properties?.activable === true) {
             node.setAttribute("aria-pressed", String(action.properties.enabled === true));
             node.title += `\n${game.i18n.localize(action.properties.enabled ? "CO2PRISM.Combat.Active" : "CO2PRISM.Combat.Inactive")}`;
-            if (action.properties.temporary === true && action.properties.enabled === true) node.classList.add("co2prism-action-active");
           }
-          const disabled = Boolean(this.busyAction) || !(game.user.isGM || this.actor.testUserPermission(game.user, "OWNER"));
-          node.setAttribute("aria-disabled", String(disabled || unequipped));
-          node.tabIndex = disabled ? -1 : 0;
           const context = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
-            key: slot.key, reference: slot.reference };
-          if (typeof action.isVisible === "function") {
-            node.classList.add("co2prism-condition-pending");
-            node.setAttribute("aria-disabled", "true");
-            Promise.resolve().then(() => action.isVisible(item, context.actor)).then(available => {
-              if (this.conditionRender !== generation || !node.isConnected || this.actor !== context.actor
-                || this.token !== context.token || (context.preset && this.configuration.activePreset !== context.preset)) return;
-              node.classList.remove("co2prism-condition-pending");
-              node.classList.toggle("co2prism-condition-unavailable", !available);
-              node.setAttribute("aria-disabled", String(disabled || unequipped || !available));
-              if (!available) node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ConditionsUnavailable")}`;
-              node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
-            }).catch(error => {
-              if (this.conditionRender !== generation || !node.isConnected) return;
-              node.classList.remove("co2prism-condition-pending");
-              node.classList.add("co2prism-condition-unavailable");
-              node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ConditionsUnknown")}`;
-              node.setAttribute("aria-label", node.title);
-              console.warn("co2prism | Conditions", error);
-            });
-          }
-          node.addEventListener("click", event => { void this.executeShortcut(event, context); });
-          node.addEventListener("keydown", event => {
-            if (event.key === "Enter" || event.key === " ") void this.executeShortcut(event, context);
+            key: slot.key, reference: references[0] };
+          this.bindShortcutInteraction(node, context, disabled, unequipped);
+          if (typeof action.isVisible === "function") node.setAttribute("aria-disabled", "true");
+          this.renderShortcutConditions(node, resolved, context, generation, (available, error) => {
+            if (!error) node.setAttribute("aria-disabled", String(disabled || unequipped || !available));
+            if (!available) node.title += `\n${game.i18n.localize(error
+              ? "CO2PRISM.Combat.ConditionsUnknown" : "CO2PRISM.Combat.ConditionsUnavailable")}`;
+            node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
           });
         } else add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.EmptySlot"));
         if (editable && slot.reference !== undefined) {
-          const context = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
-            key: slot.key, reference: slot.reference };
-          const remove = add("button", "co2prism-slot-remove");
-          remove.type = "button";
-          remove.title = game.i18n.localize("CO2PRISM.Combat.RemoveShortcut");
-          remove.setAttribute("aria-label", remove.title);
-          const icon = document.createElement("i"); icon.className = "fa-solid fa-trash"; remove.append(icon);
-          for (const type of ["pointerdown", "mousedown", "dragstart", "keydown"]) remove.addEventListener(type, event => event.stopPropagation());
-          remove.addEventListener("dragstart", event => event.preventDefault());
-          remove.addEventListener("click", event => {
-            event.preventDefault(); event.stopPropagation(); void this.manageShortcut(context);
-          });
+          if (!group) this.addShortcutRemove(node, editContext);
           if (!slot.hand) {
             node.draggable = true;
             node.addEventListener("dragstart", event => {
+              this.clearShortcutPreview();
               event.stopPropagation();
-              if (event.target.closest?.(".co2prism-slot-remove") || !this.validShortcutContext(context)) { event.preventDefault(); return; }
-              this.slotDrag = { ...context, internal: true };
+              if (event.target.closest?.(".co2prism-slot-remove") || !this.validShortcutContext(editContext)) { event.preventDefault(); return; }
+              const actionIndex = this.shortcutActionIndex(event, slot);
+              this.slotDrag = { ...editContext, actionIndex, internal: true };
               this.suppressShortcutClick = true;
-              event.dataTransfer.setData("text/plain", JSON.stringify({ type: "co2prism.shortcut", key: slot.key }));
+              event.dataTransfer.setData("text/plain", JSON.stringify({ type: "co2prism.shortcut", key: slot.key, actionIndex }));
               event.dataTransfer.effectAllowed = "move";
             });
             node.addEventListener("dragend", () => { setTimeout(() => { this.suppressShortcutClick = false; }, 0); });
           }
         }
         node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
+        if (group) node.removeAttribute("title");
         node.addEventListener("dragenter", event => this.hoverSlot(event, slot, node));
         node.addEventListener("dragover", event => this.hoverSlot(event, slot, node));
         node.addEventListener("dragleave", () => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
@@ -1516,6 +1586,154 @@ class PrismBar {
     return resized;
   }
 
+  shortcutImage(action, item) {
+    const read = key => { try { return action[key]; } catch { return undefined; } };
+    return read("actionImg") || read("img") || item?.img;
+  }
+
+  bindShortcutInteraction(node, context, disabled, unequipped = false) {
+    node.classList.add("co2prism-slot-executable");
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-disabled", String(disabled || unequipped));
+    node.tabIndex = disabled ? -1 : 0;
+    node.addEventListener("click", event => { void this.executeShortcut(event, context); });
+    node.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") void this.executeShortcut(event, context);
+    });
+  }
+
+  renderShortcutVisual(node, { action, item }) {
+    const read = key => { try { return action[key]; } catch { return undefined; } };
+    const add = (tag, className, text) => {
+      const child = document.createElement(tag);
+      child.className = className;
+      if (text !== undefined) child.textContent = text;
+      node.append(child);
+      return child;
+    };
+    const name = read("actionName") || item?.name || "";
+    const image = this.shortcutImage(action, item);
+    if (typeof image === "string" && image) {
+      const img = add("img", "co2prism-slot-image");
+      img.src = image; img.alt = name; img.draggable = false;
+    }
+    const icon = read("iconFA");
+    if (typeof icon === "string" && icon) add("i", "co2prism-slot-type fa-solid "
+      + icon.split(/\s+/).filter(cls => /^fa-[a-z0-9-]+$/.test(cls) && cls !== "fa-solid").join(" "));
+    const actionTime = read("actionTypeFinal");
+    const time = { l: "L", a: "A", m: "M", f: "G" }[actionTime];
+    if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
+    const uses = this.shortcutUses(action, item);
+    if (uses) {
+      const badge = add("span", "co2prism-slot-uses", `${uses.value} `);
+      badge.title = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
+      const icon = document.createElement("i");
+      icon.className = `fa-solid fa-${uses.icon}`; badge.append(icon);
+      if (uses.value === 0) node.classList.add("co2prism-action-exhausted");
+    }
+    const cost = read("manaCost");
+    if (Number.isFinite(cost) && cost > 0) {
+      const badge = add("span", "co2prism-slot-cost", `${cost} `);
+      const bolt = document.createElement("i"); bolt.className = "fa-solid fa-bolt"; badge.append(bolt);
+    }
+    if (this.shortcutActive(action)) node.classList.add("co2prism-action-active");
+    if (economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[actionTime] === false) {
+      node.classList.add("co2prism-time-insufficient");
+    }
+    return name;
+  }
+
+  copyShortcutCondition(quadrant, square) {
+    for (const state of ["co2prism-condition-pending", "co2prism-condition-unavailable"]) {
+      square.classList.toggle(state, quadrant.classList.contains(state));
+    }
+  }
+
+  clearShortcutPreview() {
+    if (this.shortcutHover) clearTimeout(this.shortcutHover.delay);
+    this.shortcutHover = null;
+    if (this.shortcutPreview?.matches(":popover-open")) {
+      this.shortcutPreview.hidePopover();
+      this.shortcutPreview.replaceChildren();
+    }
+  }
+
+  scheduleShortcutPreview(quadrant, { actor, token, key, actionIndex }) {
+    if (this.shortcutHover?.quadrant === quadrant) return;
+    this.clearShortcutPreview();
+    if (this.slotDrag || !this.shortcutPreview) return;
+    const hover = { quadrant };
+    this.shortcutHover = hover;
+    hover.delay = setTimeout(() => {
+      if (this.shortcutHover !== hover) return;
+      if (this.element.hidden || !quadrant.getClientRects().length || this.combatPanel.hidden
+        || this.actor !== actor || this.token !== token) {
+        this.clearShortcutPreview();
+        return;
+      }
+      const entry = this.readConfiguration(actor).shortcuts[key];
+      const references = this.shortcutReferences(entry);
+      const resolved = references.length > 1 && this.resolveShortcut(actor, references[actionIndex]);
+      if (!resolved) {
+        this.clearShortcutPreview();
+        return;
+      }
+      const preview = this.shortcutPreview;
+      const square = document.createElement("div");
+      square.className = "co2prism-combat-slot";
+      const name = this.renderShortcutVisual(square, resolved);
+      this.copyShortcutCondition(quadrant, square);
+      const title = document.createElement("div");
+      title.className = "co2prism-shortcut-preview-title";
+      title.textContent = name;
+      preview.replaceChildren(square, title);
+      preview.showPopover();
+      const anchor = quadrant.getBoundingClientRect();
+      const bounds = preview.getBoundingClientRect();
+      const gap = Math.max(4, anchor.width * 0.12);
+      const above = anchor.top - bounds.height - gap;
+      const left = (anchor.left + anchor.right - bounds.width) / 2;
+      const top = above >= 4 ? above : anchor.bottom + gap;
+      preview.style.left = `${Math.max(4, Math.min(left, innerWidth - bounds.width - 4))}px`;
+      preview.style.top = `${Math.max(4, Math.min(top, innerHeight - bounds.height - 4))}px`;
+    }, SHORTCUT_PREVIEW_DELAY);
+  }
+
+  shortcutActive(action) {
+    const properties = action.properties;
+    return properties?.activable === true && properties.temporary === true && properties.enabled === true;
+  }
+
+  renderShortcutConditions(node, { action, item }, context, generation, onState) {
+    if (typeof action.isVisible !== "function") return;
+    node.classList.add("co2prism-condition-pending");
+    const apply = (available, error = false) => {
+      if (this.conditionRender !== generation || !node.isConnected || this.actor !== context.actor
+        || this.token !== context.token || (context.preset && this.configuration.activePreset !== context.preset)) return;
+      node.classList.remove("co2prism-condition-pending");
+      node.classList.toggle("co2prism-condition-unavailable", !available);
+      onState?.(available, error);
+      if (error) console.warn("co2prism | Conditions", error);
+    };
+    Promise.resolve().then(() => action.isVisible(item, context.actor))
+      .then(available => apply(available), error => apply(false, error));
+  }
+
+  addShortcutRemove(node, context) {
+    const remove = document.createElement("button");
+    remove.className = "co2prism-slot-remove";
+    remove.type = "button";
+    remove.title = game.i18n.localize("CO2PRISM.Combat.RemoveShortcut");
+    remove.setAttribute("aria-label", remove.title);
+    const icon = document.createElement("i"); icon.className = "fa-solid fa-trash"; remove.append(icon);
+    for (const type of ["pointerdown", "mousedown", "dragstart", "keydown"]) remove.addEventListener(type, event => event.stopPropagation());
+    remove.addEventListener("dragstart", event => event.preventDefault());
+    remove.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation(); void this.manageShortcut(context);
+    });
+    node.append(remove);
+  }
+
   hoverSlot(event, slot, node) {
     node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert");
     if (!this.slotDrag) {
@@ -1524,6 +1742,9 @@ class PrismBar {
     const context = this.slotDrag;
     if (context.internal) {
       if (slot.hand || !this.validShortcutContext(context)) return;
+      const actionIndex = this.shortcutActionIndex(event, slot);
+      if (context.actionIndex !== undefined && (slot.key !== context.key || actionIndex === undefined
+        || actionIndex === context.actionIndex)) return;
       event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move";
       node.classList.add("co2prism-drop-insert"); return;
     }
@@ -1540,7 +1761,15 @@ class PrismBar {
     node.classList.add(raw ? "co2prism-drop-target" : "co2prism-drop-candidate");
   }
 
+  shortcutActionIndex(event, slot) {
+    const target = event.target?.closest?.("[data-co2prism-action-index]");
+    if (slot.hand || !target || !/^\d+$/.test(target.dataset.co2prismActionIndex)) return undefined;
+    const index = Number(target.dataset.co2prismActionIndex);
+    return index < this.shortcutReferences(slot.reference).length ? index : undefined;
+  }
+
   async executeShortcut(event, context) {
+    if (context.actionIndex !== undefined) this.clearShortcutPreview();
     event.preventDefault(); event.stopPropagation();
     if ((event.button !== undefined && event.button !== 0) || event.detail > 1 || event.repeat
       || this.busyAction || this.changingHands.has(context.actor) || this.slotDrag || this.suppressShortcutClick) return false;
@@ -1553,10 +1782,15 @@ class PrismBar {
     };
     if (event.currentTarget?.isConnected === false) return warn("CO2PRISM.Combat.UnavailableSlot");
     this.refreshActor();
-    const { actor, token, preset, key, reference } = context;
+    const { actor, token, preset, key, reference, actionIndex } = context;
     const currentReference = config => {
       if (context.equipment) return this.equipmentOperationItem(context, config) ? reference : null;
-      const current = config.slots[key];
+      const entry = config.slots[key];
+      const references = this.handKey(key) ? [entry] : this.shortcutReferences(entry);
+      const groupMember = !this.handKey(key) && references.length > 1
+        && Number.isInteger(actionIndex) && actionIndex >= 0 && actionIndex < MAX_SHORTCUT_ACTIONS;
+      const current = actionIndex === undefined && references.length === 1
+        ? references[0] : groupMember ? references[actionIndex] : null;
       if (actor !== this.actor || token !== this.token || (this.handKey(key) && preset !== config.activePreset)
         || !config.panels.combat || !current
         || ["source", "indice", "itemId"].some(field => current[field] !== reference?.[field])
@@ -1725,7 +1959,8 @@ class PrismBar {
     return !context.cancelled && context.actor === this.actor && context.token === this.token
       && (!this.handKey(context.key) || context.preset === current.activePreset) && current.panels.combat
       && !game.settings.get(MODULE, "locked") && this.canConfigure(context.actor)
-      && reference && ["kind", "source", "indice", "itemId", "row", "order"].every(key => reference[key] === context.reference?.[key]);
+      && reference && ["kind", "source", "indice", "itemId", "row", "order"].every(key => reference[key] === context.reference?.[key])
+      && (this.handKey(context.key) || JSON.stringify(reference.actions) === JSON.stringify(context.reference?.actions));
   }
 
   manageShortcut(context, target) {
@@ -1738,6 +1973,21 @@ class PrismBar {
       if (this.handKey(context.key)) return this.updateHands(context.actor, config, context.preset, context.key, null);
       const slots = config.shortcuts;
       const rows = this.slotRows(context.actor).map(row => row.filter(slot => !slot.hand && !slot.terminal));
+      const references = this.shortcutReferences(slots[context.key]);
+      if (context.actionIndex !== undefined) {
+        const index = context.actionIndex;
+        const destination = target?.actionIndex;
+        if (!Number.isInteger(index) || index < 0 || index >= references.length
+          || (target && (target.key !== context.key || !Number.isInteger(destination)
+            || destination < 0 || destination >= references.length || destination === index))) return false;
+        const updated = [...references];
+        const [reference] = updated.splice(index, 1);
+        if (target) updated.splice(destination, 0, reference);
+        if (updated.length) {
+          await context.actor.setFlag(MODULE, `shortcuts.${context.key}`, this.shortcutEntry(slots[context.key], updated));
+          return true;
+        }
+      } else if (!target && references.length > 1) return false;
       if (target) {
         if (![1, 2].includes(target.row)) return false;
         const source = rows.flat().find(slot => slot.key === context.key);
@@ -1764,7 +2014,7 @@ class PrismBar {
     const context = this.slotDrag ?? { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
     this.slotDrag = null;
     this.refreshActor();
-    if (context.internal) return this.manageShortcut(context, slot);
+    if (context.internal) return this.manageShortcut(context, { ...slot, actionIndex: this.shortcutActionIndex(event, slot) });
     let data;
     try { data = JSON.parse(event.dataTransfer.getData("text/plain")); } catch { /* Dépôt non CO2. */ }
     if (game.settings.get(MODULE, "locked") || context.cancelled || context.actor !== this.actor || context.token !== this.token
@@ -1786,9 +2036,10 @@ class PrismBar {
       || (slot.key && (!/^[A-Za-z0-9_-]+$/.test(slot.key) || ["__proto__", "constructor", "prototype"].includes(slot.key)))) {
       ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return Promise.resolve(false);
     }
+    const token = this.token;
     return this.queueConfiguration(actor, async () => {
       const resolved = slot.hand ? this.handItem(actor, reference) : this.resolveShortcut(actor, reference);
-      if (game.settings.get(MODULE, "locked") || !this.canConfigure(actor) || !resolved) {
+      if (game.settings.get(MODULE, "locked") || this.actor !== actor || this.token !== token || !this.canConfigure(actor) || !resolved) {
         ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
       }
       if (slot.hand) {
@@ -1799,7 +2050,15 @@ class PrismBar {
       const rows = this.slotRows(actor);
       const terminal = rows[slot.row - 1].at(-1);
       const key = slot.key ?? `slot-${foundry.utils.randomID()}`;
-      const value = { ...reference, row: slot.row, order: slot.terminal ? terminal.order : slot.order };
+      const existing = this.readConfiguration(actor).shortcuts[key];
+      const references = this.shortcutReferences(existing).filter(entry => entry && typeof entry === "object");
+      if (references.length >= MAX_SHORTCUT_ACTIONS || references.some(entry => this.sameShortcutReference(entry, reference))) {
+        const reason = references.length >= MAX_SHORTCUT_ACTIONS ? "ShortcutGroupFull" : "ShortcutGroupDuplicate";
+        ui.notifications.warn(game.i18n.localize(`CO2PRISM.Combat.${reason}`));
+        return false;
+      }
+      const value = references.length ? this.shortcutEntry(existing, [...references, reference])
+        : { ...reference, row: slot.row, order: slot.terminal ? terminal.order : slot.order };
       await actor.setFlag(MODULE, `shortcuts.${key}`, value);
       return true;
     });
@@ -2046,6 +2305,7 @@ class PrismBar {
 
   layout({ preserveAnchor = false } = {}) {
     if (!this.element) return;
+    this.clearShortcutPreview();
     this.endDrag();
     const previous = this.element.getBoundingClientRect();
     const anchor = { x: previous.left + (this.panelOffset?.x ?? 0), y: previous.top + (this.panelOffset?.y ?? 0) };
@@ -2125,6 +2385,7 @@ class PrismBar {
     const dy = event.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
+    this.portraitMoved = true;
     this.place(drag.left + dx, drag.top + dy);
   }
 

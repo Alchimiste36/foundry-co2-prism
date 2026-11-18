@@ -45,6 +45,9 @@
     "Save": "Enregistrer",
     "Preset": "Preset de mains",
     "Combat": {
+      "ShortcutGroup": "Groupe de {count} actions",
+      "ShortcutGroupFull": "Un groupe peut contenir quatre actions au maximum.",
+      "ShortcutGroupDuplicate": "Cette action est déjà présente dans ce groupe.",
       "HandsInvalidItem": "Il faut un équipement équipable de cet acteur ou une action de son arme ou de son bouclier.",
       "HandOccupied": "Main occupée par un équipement à deux mains.",
       "HandsConflict": "Cette combinaison dépasse les mains disponibles.",
