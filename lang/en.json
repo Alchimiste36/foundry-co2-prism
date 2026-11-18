@@ -1,5 +1,11 @@
 {
   "CO2PRISM": {
+    "PresetAction": {
+      "Title": "Action automation",
+      "activate": "Automatically activate with this weapon selection",
+      "deactivate": "Automatically deactivate with this weapon selection",
+      "unchanged": "Leave state unchanged with this weapon selection"
+    },
     "Paths": {
       "ToggleAllHint": "Right-click to collapse or expand all paths",
       "Title": "Paths and Capacities",

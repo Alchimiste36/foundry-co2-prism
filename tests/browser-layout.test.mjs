@@ -1713,6 +1713,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             return true;
           };
           actor.activateAction = groupActivation;
+          inventoryBlade.actions[0].toObject = function() {
+            return { source: this.source, indice: this.indice, label: this.actionName, properties: { ...this.properties } };
+          };
           game.system.api.macros.useAction = (source, indice, type) => groupActivation({ source, indice, type, state: true });
           game.system.api.macros.openSheet = source => groupCalls.push(['sheet', source]);
           game.system.api.macros.sendToChat = (source, _name, indice) => groupCalls.push(['chat', source, indice]);
@@ -1725,8 +1728,37 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await bar.configWrites.get(actor);
           };
           await dropAction(0, groupRow.lastElementChild);
-          const simple = [...groupRow.children].find(slot => slot.title.includes('First'));
-          await dropAction(1, simple);
+          const firstShortcut = () => [...groupRow.children].find(slot => slot.title.includes('First'));
+          const presetMenu = bar.presetActionMenu;
+          const presetMenuOpen = () => presetMenu.matches(':popover-open');
+          const ruleIcon = node => node.querySelector('.co2prism-slot-rule');
+          const selectRule = async index => {
+            presetMenu.children[index].click();
+            await bar.configWrites.get(actor);
+          };
+          actor.flags.co2prism.hands.presets = {};
+          await bar.setActivePreset(1);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-circle-dashed') &&
+            contextClick(firstShortcut()) && presetMenuOpen() && presetMenu.children.length === 3 &&
+            presetMenu.children[2].getAttribute('aria-pressed') === 'true', 'Eligible simple shortcut offers three exclusive rules');
+          await selectRule(0);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-toggle-large-on') && !groupCalls.length,
+            'Choosing Activate only updates the rule indicator');
+          await bar.setActivePreset(2);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-circle-dashed'), 'Second preset initially has its own default');
+          contextClick(firstShortcut()); await selectRule(1);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-toggle-large-off'), 'Second preset has its own deactivation indicator');
+          await bar.setActivePreset(3);
+          contextClick(firstShortcut());
+          settings.locked = true; bar.updateLock();
+          presetMenu.children[0].click();
+          check(!presetMenuOpen() && !ruleIcon(firstShortcut()) && contextClick(firstShortcut()) && !presetMenuOpen(),
+            'Locked default is hidden and neither a right click nor a stale menu can edit it');
+          await bar.setActivePreset(1);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-toggle-large-on') && !groupCalls.length &&
+            inventoryBlade.actions[0].properties.enabled, 'Locked active rule stays visible and preset switching does not activate anything');
+          settings.locked = false; bar.updateLock();
+          await dropAction(1, firstShortcut());
           const members = () => [...groupSlot().querySelectorAll('.co2prism-slot-quadrant')];
           const quadrantCommand = index => members()[index].querySelector('.co2prism-quadrant-command');
           const clickQuadrant = (index, options = {}) => quadrantCommand(index).dispatchEvent(new MouseEvent('click', { bubbles: true, ...options }));
@@ -1735,6 +1767,12 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const previewOpen = () => preview.matches(':popover-open');
           const pointer = (node, type) => node.dispatchEvent(new PointerEvent(type, { pointerType: 'mouse' }));
           const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+          check(contextClick(quadrantCommand(0)) && presetMenuOpen() &&
+            presetMenu.children[0].getAttribute('aria-pressed') === 'true' &&
+            !ruleIcon(groupSlot()), 'Eligible quadrant uses the same saved rule without drawing it in the miniature');
+          await selectRule(1);
+          check(!contextClick(quadrantCommand(1)) && !presetMenuOpen() && !groupCalls.length,
+            'Ineligible quadrant has no automation menu and configuring its neighbor has no action effect');
           pointer(members()[2], 'pointerenter');
           await pause(360);
           check(!previewOpen(), 'Empty quadrant never opens an action preview');
@@ -1808,6 +1846,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               getComputedStyle(preview.firstElementChild).pointerEvents === 'none' &&
               preview.querySelectorAll('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost').length === 4 &&
               preview.querySelector('.co2prism-action-active') && !preview.querySelector('button') &&
+              ruleIcon(preview).classList.contains('fa-toggle-large-off') &&
+              ruleIcon(preview).getBoundingClientRect().left >= preview.querySelector('.co2prism-slot-type').getBoundingClientRect().right &&
+              ruleIcon(preview).getBoundingClientRect().right <= preview.querySelector('.co2prism-slot-time').getBoundingClientRect().left &&
               preview.querySelector('.co2prism-shortcut-preview-title').textContent === 'First',
               'Preview preserves the full square, four badges, and viewport geometry at ' + size);
             pointer(members()[0], 'pointerleave');

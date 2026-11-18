@@ -1519,9 +1519,11 @@ test("presets de mains : équipement, restauration, raccourcis communs et modifi
   assert.equal(await bar.saveShortcut(a, 2, bar.slotRows()[0][1], reference(shield)), false);
   item.system.equipped = false;
   assert.equal(await bar.setActivePreset(2), true);
-  assert.deepEqual(calls.splice(0), [item.id]);
+  assert.deepEqual(calls.splice(0), []);
+  assert.equal(item.system.equipped, false);
   assert.equal(await bar.setActivePreset(2), true);
   assert.deepEqual(calls, []);
+  item.system.equipped = true;
   a.items.delete(shield.id);
   assert.equal(await bar.setActivePreset(1), false);
   assert.equal(bar.configuration.activePreset, 2);
@@ -1663,6 +1665,158 @@ test("groupes de raccourcis : capacité, persistance, déplacement et nettoyage 
   assert.equal(bar.resolveShortcut(a, getSlot().reference).action, item.actions[0]);
   assert.equal(await bar.manageShortcut(capture()), true);
   assert.equal(getSlot(), undefined);
+});
+
+test("actions temporaires : les deux propriétés CO2 sont nécessaires indépendamment de l'état actif", () => {
+  const { bar } = setup();
+  for (const activable of [true, false, undefined]) {
+    for (const temporary of [true, false, undefined]) {
+      for (const enabled of [true, false]) {
+        const action = { properties: { activable, temporary, enabled } };
+        const eligible = activable === true && temporary === true;
+        assert.equal(bar.shortcutCanToggle(action), eligible);
+        assert.equal(bar.shortcutActive(action), eligible && enabled);
+      }
+    }
+  }
+  assert.equal(bar.shortcutCanToggle(null), false);
+});
+
+test("règles de preset : défauts, isolation, identité CO2 et invalidation prudente", async () => {
+  const { bar, a, item, create, select, writes } = setupShortcuts();
+  const installAction = (support, label) => {
+    const action = { source: support.uuid, indice: 0, label,
+      properties: { activable: true, temporary: true, enabled: false },
+      toObject() { return { source: this.source, indice: this.indice, label: this.label, properties: { ...this.properties } }; } };
+    support.actions = [action];
+    return action;
+  };
+  const action = installAction(item, "Posture");
+  const reference = { itemId: item.id, indice: 0, source: item.uuid };
+  const rule = (preset, actor = a, ref = reference) => bar.getPresetActionRule(actor, ref, preset);
+  const save = (preset, value) => bar.setPresetActionRule(a, reference, preset, value);
+  const original = JSON.stringify(a.flags);
+  assert.deepEqual([1, 2, 3].map(preset => rule(preset)), ["unchanged", "unchanged", "unchanged"]);
+  assert.equal(JSON.stringify(a.flags), original);
+  assert.equal(await save(1, "activate"), true);
+  assert.equal(await save(2, "deactivate"), true);
+  assert.equal(await save(3, "unchanged"), false);
+  assert.equal(await save(3, "invalid"), false);
+  assert.deepEqual([1, 2, 3].map(preset => rule(preset)), ["activate", "deactivate", "unchanged"]);
+  const entry = a.flags.co2prism.presetActionRules["item:0"];
+  assert.deepEqual(Object.keys(entry).sort(), ["1", "2", "fingerprint"]);
+  entry[3] = "invalid";
+  assert.equal(rule(3), "unchanged");
+  action.properties.enabled = true;
+  assert.equal(rule(1, a, { ...reference, source: "Scene.s.Token.t.Actor.a.Item.item" }), "activate");
+  await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), reference);
+  const slot = bar.slotRows()[0].at(-2);
+  await bar.manageShortcut({ actor: a, token: bar.token, ...slot }, bar.slotRows()[1].at(-1));
+  assert.equal(rule(1, a, bar.slotRows()[1][0].reference), "activate");
+  item.actions.push({ ...action, indice: 1, label: "Deuxième posture" });
+  assert.equal(await bar.saveShortcut(a, 1, bar.slotRows()[1][0], { ...reference, indice: 1 }), true);
+  const [first, second] = bar.slotRows()[1][0].reference.actions;
+  assert.equal(rule(1, a, first), "activate");
+  assert.equal(rule(1, a, second), "unchanged");
+  assert.equal(setupShortcuts().bar.getPresetActionRule(a, first, 2), "deactivate");
+  const { actor: other, item: otherItem } = create("other-rules");
+  installAction(otherItem, "Posture"); select(other);
+  assert.equal(rule(1, other, { ...reference, source: otherItem.uuid }), "unchanged");
+  select(a);
+  action.properties.temporary = false;
+  assert.equal(rule(1), "unchanged");
+  assert.equal(await save(1, "deactivate"), false);
+  action.properties.temporary = true;
+  a.items.delete(item.id);
+  const writesBeforeMissing = writes.length;
+  assert.equal(rule(1), "unchanged");
+  assert.equal(writes.length, writesBeforeMissing);
+  a.items.set(item.id, item);
+  const replacement = installAction(item, "Autre posture");
+  assert.deepEqual([1, 2, 3].map(preset => rule(preset)), ["unchanged", "unchanged", "unchanged"]);
+  a.testUserPermission = (_, permission) => permission !== "OWNER";
+  assert.equal(await save(1, "activate"), false);
+  a.testUserPermission = () => true;
+  a.unsetFlag = async (scope, path) => delete a.flags[scope].presetActionRules[path.split(".")[1]];
+  assert.equal(await save(2, "activate"), true);
+  assert.equal(rule(1), "unchanged");
+  assert.equal(rule(2), "activate");
+  assert.equal(await save(2, "unchanged"), true);
+  assert.equal(a.flags.co2prism.presetActionRules["item:0"], undefined);
+  a.activateAction = () => assert.fail("Le preset déjà actif ne doit pas exécuter d'action");
+  await save(1, "activate");
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.equal(replacement.properties.enabled, false);
+});
+
+test("automatisation : preset entrant validé, transitions natives séquentielles et no-op strict", async () => {
+  const { bar, a, item, create, select, context, hooks, writes } = setupShortcuts();
+  let locked = false, blockEquipment = true, blockedCondition = true;
+  context.game.settings.get = (_scope, key) => key === "locked" ? locked : key === "economyMode" ? "always" : undefined;
+  const action = (indice, enabled, time = "f") => ({
+    indice, source: item.uuid, type: "heal", actionTypeFinal: time,
+    properties: { activable: true, temporary: true, enabled },
+    toObject() { return { source: this.source, indice: this.indice, type: this.type, properties: { ...this.properties } }; }
+  });
+  item.actions = [action(0, false, "m"), action(1, true), action(2, true), action(3, false), action(4, false), action(5, false)];
+  item.system.actions = item.actions;
+  item.actions[3].isVisible = async () => !blockedCondition;
+  const reference = indice => ({ itemId: item.id, source: item.uuid, indice });
+  a.flags.co2prism.hands = { presets: { 2: { "left-hand": { kind: "equipment", itemId: item.id } } } };
+  for (const [indice, preset, rule] of [[0, 2, "activate"], [0, 1, "deactivate"], [1, 2, "deactivate"],
+    [3, 2, "activate"], [4, 2, "activate"], [5, 2, "activate"]]) {
+    assert.equal(await bar.setPresetActionRule(a, reference(indice), preset, rule), true);
+  }
+  item.actions[5].properties.temporary = false;
+  const { actor: other } = create("observer");
+  const operations = [];
+  a.toggleEquipmentEquipped = async (id, shift) => {
+    operations.push(["equip", id, shift]);
+    if (!blockEquipment) item.system.equipped = !item.system.equipped;
+  };
+  a.activateAction = async ({ source, indice, state, type }) => {
+    operations.push(["action", indice, state]);
+    assert.equal(source, item.uuid);
+    assert.equal(type, undefined);
+    assert.equal(item.system.equipped, a.flags.co2prism.hands.active === 2);
+    const guards = [];
+    const details = { item, indice, state, type, guard: promise => guards.push(promise) };
+    hooks.get("co2.preActivateAction")?.(a, details);
+    if ((await Promise.all(guards)).includes(false) || indice === 4) return false;
+    item.actions[indice].properties.enabled = state;
+    hooks.get("co2.postActivateAction")?.(a, { ...details, success: true });
+    hooks.get("updateItem")(item);
+    return true;
+  };
+  assert.equal(await bar.setActivePreset(2), false);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false]]);
+  assert.equal(bar.configuration.activePreset, 1);
+  blockEquipment = false;
+  await bar.setPanelState("combat", false);
+  locked = true;
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false], ["action", 0, true], ["action", 1, false], ["action", 4, true]]);
+  assert.deepEqual(item.actions.map(entry => entry.properties.enabled), [true, false, true, false, false, false]);
+  assert.equal(context.game.settings.get("co2prism", "locked"), true);
+  assert.equal(a.flags.co2prism.actionEconomy.normal.m, false);
+  item.actions[0].properties.enabled = false;
+  item.system.equipped = false;
+  const beforeSamePreset = writes.length;
+  assert.equal(await bar.setActivePreset(2), true);
+  bar.refreshActor();
+  select(other); select(a);
+  assert.deepEqual(operations, []);
+  assert.equal(writes.length, beforeSamePreset);
+  item.system.equipped = true;
+  item.actions[0].properties.enabled = true;
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false], ["action", 0, false]]);
+  item.actions[0].properties.enabled = true;
+  blockedCondition = false;
+  item.actions.pop();
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false], ["action", 3, true], ["action", 4, true]]);
+  assert.equal(item.actions[3].properties.enabled, true);
 });
 
 test("raccourcis : références natives seules, restauration, isolation et disparition", async () => {

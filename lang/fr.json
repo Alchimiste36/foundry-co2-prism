@@ -1,5 +1,11 @@
 {
   "CO2PRISM": {
+    "PresetAction": {
+      "Title": "Automatisation des actions",
+      "activate": "Activation auto avec cette sélection d’arme",
+      "deactivate": "Désactivation auto avec cette sélection d’arme",
+      "unchanged": "Ne pas changer l’état avec cette sélection d’arme"
+    },
     "Paths": {
       "ToggleAllHint": "Clic droit pour replier ou déplier toutes les voies",
       "Title": "Voies et Capacités",
