@@ -1,5 +1,12 @@
 {
   "CO2PRISM": {
+    "Paths": {
+      "ToggleAllHint": "Right-click to collapse or expand all paths",
+      "Title": "Paths and Capacities",
+      "Open": "Open the Paths and Capacities panel",
+      "Close": "Close the Paths and Capacities panel",
+      "OffPaths": "Off-path"
+    },
     "Equipment": {
       "ToggleAllHint": "Right-click to collapse or expand all categories",
       "Operations": {

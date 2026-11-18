@@ -17,6 +17,9 @@ const MOVEMENT_ORIGIN = 246;
 const MOVEMENT_BOTTOM = 28;
 const BASE_BOTTOM = 569;
 const EQUIPMENT_COLUMNS = 6;
+const CAPACITY_COLUMNS = 5;
+const PANELS = ["combat", "competences", "equipements", "voies"];
+const EXCLUSIVE_PANELS = { equipements: "voies", voies: "equipements" };
 // Depuis le portrait vers l'extérieur du volet.
 const EQUIPMENT_GROUPS = [
   ["weapon", "fa-axe", ["weapon"]],
@@ -172,6 +175,7 @@ class PrismBar {
       void this.writeConfiguration("panels.competences", value => !value);
     });
     this.connectEquipment();
+    this.connectPaths();
     this.skillNodes = ABILITIES.map(key => {
       const button = this.element.querySelector(`[data-co2prism-ability="${key}"]`);
       button.addEventListener("click", event => {
@@ -341,10 +345,186 @@ class PrismBar {
     this.configuration = this.readConfiguration(actor);
     this.updatePresets();
     const skillsChanged = this.updateSkills();
-    this.updateEquipment();
+    // Fermer d'abord le volet qui partage la même zone.
+    if (this.configuration.panels.voies) {
+      this.updateEquipment();
+      this.updatePaths();
+    } else {
+      this.updatePaths();
+      this.updateEquipment();
+    }
     const combatChanged = this.updateCombat();
     const movementChanged = this.updateMovementPanel();
     if (skillsChanged || combatChanged || movementChanged) this.layout({ preserveAnchor: true });
+  }
+
+  readPathGroups(actor) {
+    // Les groupes de la feuille enrichissent aussi les capacités liées. Prism ne lit que les Items embarqués.
+    const paths = [...(actor.paths ?? [])].sort((a, b) => a.sort - b.sort);
+    const groups = new Map(paths.map(path => [path.id, { path, capacities: [] }]));
+    const resolve = (uuid, type) => {
+      if (!uuid || typeof uuid !== "string") return null;
+      const item = actor.getEmbeddedItemByUuid(uuid);
+      const base = actor.isToken ? this.token?.document.baseActor : null;
+      if (item?.type !== type || (item.uuid !== uuid && base?.items.get(item.id)?.uuid !== uuid)) return null;
+      return item;
+    };
+    const seen = new Set();
+    const add = (group, capacity) => {
+      if (seen.has(capacity.id)) return;
+      seen.add(capacity.id);
+      group.capacities.push(capacity);
+    };
+    for (const group of groups.values()) {
+      for (const uuid of group.path.system.capacities) {
+        const capacity = resolve(uuid, "capacity");
+        // Un détachement explicite prime sur une ancienne liste de la voie.
+        if (!capacity || capacity.system.path === null || capacity.system.path === "") continue;
+        const linkedPath = resolve(capacity.system.path, "path");
+        if (!linkedPath || linkedPath.id === group.path.id) add(group, capacity);
+      }
+    }
+    const offPaths = { path: null, capacities: [] };
+    for (const capacity of actor.capacities ?? []) {
+      const path = resolve(capacity.system.path, "path");
+      const group = groups.get(path?.id);
+      if (group) add(group, capacity);
+      // Un lien encore non résolu reste distinct d'une capacité sans voie.
+      else if (!capacity.system.path) add(offPaths, capacity);
+    }
+    const result = [...groups.values()];
+    if (offPaths.capacities.length) result.push(offPaths);
+    for (const group of result) group.capacities.sort((a, b) => a.system.rank - b.system.rank);
+    return result;
+  }
+
+  connectPaths() {
+    this.pathsPanel = this.element.querySelector(".co2prism-paths");
+    this.pathsToggle = this.element.querySelector(".co2prism-paths-toggle");
+    this.pathsToggle.addEventListener("click", event => {
+      event.stopPropagation();
+      void this.writeConfiguration("panels.voies", value => !value);
+    });
+    this.pathsToggle.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.togglePathGroups();
+    });
+    this.pathsPanel.addEventListener("click", event => {
+      const tile = event.target.closest(".co2prism-path-tile[data-item-id]");
+      if (!tile || event.button !== 0 || this.pathsPanel.hidden) return;
+      event.stopPropagation();
+      const item = this.actor?.items.get(tile.dataset.itemId);
+      if (item?.uuid === tile.dataset.itemUuid && ["path", "capacity"].includes(item.type)) void this.openItemSheet(item);
+    });
+    this.pathsPanel.addEventListener("contextmenu", event => {
+      const header = event.target.closest(".co2prism-path-header");
+      if (!header || this.pathsPanel.hidden) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.togglePathGroups(header.closest(".co2prism-path-group").dataset.pathKey);
+    });
+  }
+
+  togglePathGroups(key) {
+    const { actor, token } = this;
+    if (!this.canConfigure(actor)) return Promise.resolve(false);
+    return this.queueConfiguration(actor, async () => {
+      if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)) return false;
+      const keys = this.readPathGroups(actor).map(({ path }) => path?.id ?? "off-paths");
+      const targets = key === undefined ? keys : keys.filter(id => id === key);
+      if (!targets.length) return false;
+      const { pathCollapsed } = this.readConfiguration(actor);
+      const next = !targets.every(id => pathCollapsed.has(id));
+      if (key === undefined) {
+        const states = Object.fromEntries([...pathCollapsed].map(id => [id, true]));
+        for (const id of targets) states[id] = next;
+        await actor.setFlag(MODULE, "pathCollapsed", states);
+      } else await actor.setFlag(MODULE, `pathCollapsed.${key}`, next);
+      return true;
+    });
+  }
+
+  updatePaths() {
+    if (!this.pathsPanel) return;
+    const open = Boolean(this.actor && this.configuration.panels.voies);
+    this.pathsPanel.hidden = !open;
+    this.pathsToggle.disabled = !this.canConfigure();
+    this.pathsToggle.setAttribute("aria-expanded", String(open));
+    const label = game.i18n.localize(open ? "CO2PRISM.Paths.Close" : "CO2PRISM.Paths.Open");
+    this.pathsToggle.setAttribute("aria-label", label);
+    this.pathsToggle.title = this.pathsToggle.disabled ? label
+      : `${label}\n${game.i18n.localize("CO2PRISM.Paths.ToggleAllHint")}`;
+    const dismissTooltip = () => {
+      if (game.tooltip?.element && this.pathsPanel.contains(game.tooltip.element)) game.tooltip.deactivate();
+    };
+    if (!open) {
+      dismissTooltip();
+      return;
+    }
+
+    const groups = this.readPathGroups(this.actor);
+    const itemSignature = item => [item.uuid, item.name, item.img, this.itemTooltipDescription(item), item.isOwner];
+    const signature = JSON.stringify(groups.map(({ path, capacities }) => [
+      path && itemSignature(path), capacities.map(capacity => [...itemSignature(capacity), capacity.system.learned]),
+      this.configuration.pathCollapsed.has(path?.id ?? "off-paths")
+    ]));
+    if (signature === this.pathsSignature) return;
+    this.pathsSignature = signature;
+    dismissTooltip();
+    let compactColumn = 0;
+    this.pathsPanel.replaceChildren(...groups.map(({ path, capacities }) => {
+      const key = path?.id ?? "off-paths";
+      const collapsed = this.configuration.pathCollapsed.has(key);
+      const rows = collapsed ? 1 : Math.max(1, Math.ceil(capacities.length / CAPACITY_COLUMNS));
+      const group = document.createElement("section");
+      group.className = "co2prism-path-group";
+      group.dataset.pathKey = key;
+      group.dataset.collapsed = String(collapsed);
+      group.style.setProperty("--rows", rows);
+      if (collapsed) {
+        group.style.setProperty("--compact-column", compactColumn);
+        compactColumn = (compactColumn + 1) % CAPACITY_COLUMNS;
+      } else compactColumn = 0;
+      const title = document.createElement("span");
+      title.className = "co2prism-path-label";
+      title.textContent = path?.name ?? game.i18n.localize("CO2PRISM.Paths.OffPaths");
+      group.setAttribute("aria-label", title.textContent);
+      const tile = (item, column, row) => {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = "co2prism-path-tile";
+        node.dataset.itemId = item.id;
+        node.dataset.itemUuid = item.uuid;
+        node.style.setProperty("--column", column);
+        node.style.setProperty("--row", row);
+        const image = document.createElement("img");
+        image.src = item.img || "icons/svg/item-bag.svg";
+        image.alt = item.name;
+        image.draggable = false;
+        node.append(image);
+        void this.prepareItemTooltip(node, item, this.itemTooltipDescription(item));
+        return node;
+      };
+      const header = path ? tile(path, 0, rows - 1) : document.createElement("span");
+      header.classList.add("co2prism-path-header");
+      if (!path) {
+        header.style.setProperty("--row", rows - 1);
+        header.classList.add("co2prism-path-off");
+        header.dataset.tooltipText = title.textContent;
+        const icon = document.createElement("i");
+        icon.className = "fa-solid fa-circle-star";
+        icon.setAttribute("aria-hidden", "true");
+        header.append(icon);
+      }
+      group.append(title, header);
+      if (!collapsed) capacities.forEach((capacity, index) => {
+        const node = tile(capacity, index % CAPACITY_COLUMNS + 1, rows - 1 - Math.floor(index / CAPACITY_COLUMNS));
+        node.dataset.learned = String(capacity.system.learned === true);
+        group.append(node);
+      });
+      return group;
+    }));
   }
 
   connectEquipment() {
@@ -365,7 +545,7 @@ class PrismBar {
       const item = this.equipmentItem(event);
       if (!item || event.button !== 0) return;
       event.stopPropagation();
-      void this.openEquipmentSheet(item);
+      void this.openItemSheet(item);
     });
     this.equipmentPanel.addEventListener("contextmenu", event => {
       const actor = this.actor;
@@ -511,7 +691,7 @@ class PrismBar {
     }
   }
 
-  async openEquipmentSheet(item) {
+  async openItemSheet(item) {
     try {
       if (!item.testUserPermission(game.user, "LIMITED")) return;
       const sheet = item.sheet;
@@ -521,7 +701,11 @@ class PrismBar {
     }
   }
 
-  async prepareEquipmentTooltip(tile, item, description) {
+  itemTooltipDescription(item) {
+    return item.testUserPermission(game.user, "OBSERVER") ? item.system.description : "";
+  }
+
+  async prepareItemTooltip(tile, item, description) {
     const name = `<strong>${foundry.utils.escapeHTML(item.name)}</strong>`;
     tile.dataset.tooltipHtml = name;
     if (!description) return;
@@ -576,8 +760,7 @@ class PrismBar {
       });
       const rows = Math.max(1, Math.ceil(displayed.length / EQUIPMENT_COLUMNS));
       group.style.setProperty("--rows", rows);
-      const descriptions = displayed.map(item =>
-        item.testUserPermission(game.user, "OBSERVER") ? item.system.description : "");
+      const descriptions = displayed.map(item => this.itemTooltipDescription(item));
       const signature = JSON.stringify(displayed.map((item, index) =>
         [item.uuid, item.name, item.img, hiddenEquipment.has(item.id), descriptions[index], item.isOwner]));
       if (signature === entry.signature) continue;
@@ -598,7 +781,7 @@ class PrismBar {
         image.alt = item.name;
         image.draggable = false;
         tile.append(image);
-        void this.prepareEquipmentTooltip(tile, item, descriptions[index]);
+        void this.prepareItemTooltip(tile, item, descriptions[index]);
         return tile;
       }));
     }
@@ -2072,12 +2255,15 @@ class PrismBar {
     const activePreset = [1, 2, 3].includes(active) ? active : 1;
     const panels = read("panels");
     const equipmentCollapsed = read("equipmentCollapsed");
+    const pathCollapsed = read("pathCollapsed");
     const hiddenEquipment = read("hiddenEquipment");
     const presets = read("hands.presets");
     const storedShortcuts = read("shortcuts");
     const shortcuts = isObject(storedShortcuts) ? foundry.utils.deepClone(storedShortcuts) : {};
     const handPresets = Object.fromEntries([1, 2, 3].map(number => [number,
       isObject(presets?.[number]) ? foundry.utils.deepClone(presets[number]) : {}]));
+    const panelStates = Object.fromEntries(PANELS.map(key => [key, isObject(panels) && panels[key] === true]));
+    if (panelStates.voies) panelStates.equipements = false;
     return {
       activePreset, shortcuts, handPresets,
       slots: { ...shortcuts, ...handPresets[activePreset] },
@@ -2085,8 +2271,9 @@ class PrismBar {
         [key, isObject(equipmentCollapsed) && equipmentCollapsed[key] === true])),
       hiddenEquipment: new Set(isObject(hiddenEquipment)
         ? Object.keys(hiddenEquipment).filter(id => hiddenEquipment[id] === true) : []),
-      panels: Object.fromEntries(["combat", "competences", "equipements"].map(key =>
-        [key, isObject(panels) && panels[key] === true]))
+      pathCollapsed: new Set(isObject(pathCollapsed)
+        ? Object.keys(pathCollapsed).filter(id => pathCollapsed[id] === true) : []),
+      panels: panelStates
     };
   }
 
@@ -2121,7 +2308,7 @@ class PrismBar {
   }
 
   setPanelState(panel, open) {
-    if (!["combat", "competences", "equipements"].includes(panel) || typeof open !== "boolean") {
+    if (!PANELS.includes(panel) || typeof open !== "boolean") {
       return Promise.resolve(false);
     }
     return this.writeConfiguration(`panels.${panel}`, open);
@@ -2130,7 +2317,7 @@ class PrismBar {
   writeConfiguration(path, value) {
     if (typeof path !== "string") return Promise.resolve(false);
     const [group, key, extra] = path.split(".");
-    const panel = group === "panels" && ["combat", "competences", "equipements"].includes(key);
+    const panel = group === "panels" && PANELS.includes(key);
     const category = group === "equipmentCollapsed" && EQUIPMENT_GROUPS.some(([id]) => id === key);
     const toggle = typeof value === "function";
     const allCategories = path === "equipmentCollapsed" && toggle;
@@ -2154,6 +2341,11 @@ class PrismBar {
       const next = toggle ? value(previous) : value;
       if (toggle && typeof next !== "boolean") return false;
       if (previous === next) return false;
+      const other = panel && EXCLUSIVE_PANELS[key];
+      if (other && actor.getFlag(MODULE, `panels.${other}`) === true) {
+        await actor.setFlag(MODULE, "panels", { ...actor.getFlag(MODULE, "panels"), [key]: next, [other]: false });
+        return true;
+      }
       // Un chemin précis préserve les autres presets, volets et champs inconnus.
       await actor.setFlag(MODULE, path, next);
       return true;

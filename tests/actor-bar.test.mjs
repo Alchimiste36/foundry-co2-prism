@@ -952,7 +952,7 @@ test("volets indépendants, mises à jour distantes et aucune sauvegarde en bouc
   const a = configuredActor("a", { co2prism: { panels: { future: true } } }); select(a);
   await Promise.all([bar.setPanelState("combat", true), bar.setPanelState("competences", true),
     bar.setPanelState("equipements", true)]);
-  assert.ok(Object.values(bar.configuration.panels).every(value => value === true));
+  assert.deepEqual({ ...bar.configuration.panels }, { combat: true, competences: true, equipements: true, voies: false });
   await bar.setPanelState("combat", false);
   assert.equal(bar.configuration.panels.competences, true);
   assert.equal(bar.configuration.panels.equipements, true);

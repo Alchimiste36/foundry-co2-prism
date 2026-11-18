@@ -1,5 +1,12 @@
 {
   "CO2PRISM": {
+    "Paths": {
+      "ToggleAllHint": "Clic droit pour replier ou déplier toutes les voies",
+      "Title": "Voies et Capacités",
+      "Open": "Ouvrir le volet Voies et Capacités",
+      "Close": "Fermer le volet Voies et Capacités",
+      "OffPaths": "Hors-voies"
+    },
     "Equipment": {
       "ToggleAllHint": "Clic droit pour replier ou déplier toutes les catégories",
       "Operations": {

@@ -1887,6 +1887,232 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await bar.configWrites.get(actor);
           check(![...bar.combatRows[0].children].some(slot => slot.title.includes('First')),
             'The final remaining action is removed with the ordinary shortcut command');
+          const pathSheets = [];
+          const makePathItem = (owner, type, id, sort, system, img) => {
+            const document = { id, uuid: owner.uuid + '.Item.' + id, type, name: id, sort, img, parent: owner,
+              system: { description: '<p>Details of ' + id + '</p>', ...system },
+              testUserPermission: () => true, sheet: { render: force => { if (force) pathSheets.push(id); } } };
+            owner.items.set(id, document);
+            return document;
+          };
+          for (const owner of [actor, other]) {
+            owner.getEmbeddedItemByUuid = uuid => owner.items.get(uuid.split('.').at(-1));
+            owner.paths = []; owner.capacities = [];
+          }
+          for (const count of [12, 7, 6, 5, 3, 1, 0]) {
+            const path = makePathItem(actor, 'path', 'path' + count, count, { capacities: [] }, 'icons/svg/sun.svg');
+            actor.paths.push(path);
+            for (let rank = count; rank > 0; rank--) {
+              const capacity = makePathItem(actor, 'capacity', path.id + 'rank' + rank, rank,
+                { path: path.uuid, rank, learned: rank % 2 === 1 }, 'icons/svg/sword.svg');
+              actor.capacities.push(capacity);
+              path.system.capacities.push(capacity.uuid);
+            }
+            if (count) path.system.capacities.push(path.system.capacities[0], actor.uuid + '.Item.deleted');
+          }
+          const foreign = makePathItem(actor, 'capacity', 'foreign', 0,
+            { path: 'Actor.other.Item.missing', rank: 0 }, 'icons/svg/fire.svg');
+          actor.capacities.push(foreign);
+          actor.paths[0].system.capacities.push('Actor.other.Item.foreign');
+          actor.capacities.push(makePathItem(actor, 'capacity', 'free', 0, { path: null, rank: 0 }, 'icons/svg/fire.svg'));
+          const encounterPath = makePathItem(other, 'path', 'encounter-path', 0, { capacities: [] }, 'icons/svg/sun.svg');
+          other.type = 'encounter';
+          other.paths.push(encounterPath);
+          for (let rank = 1; rank <= 3; rank++) {
+            const capacity = makePathItem(other, 'capacity', 'encounter-rank' + rank, rank,
+              { path: encounterPath.uuid, rank }, 'icons/svg/sword.svg');
+            other.capacities.push(capacity);
+            encounterPath.system.capacities.push(capacity.uuid);
+          }
+          other.capacities.push(...Array.from({ length: 6 }, (_, index) => makePathItem(other, 'capacity',
+            'encounter-free' + index, index, { path: null, rank: index }, 'icons/svg/fire.svg')));
+          const pathPanel = bar.pathsPanel;
+          const pathGroup = id => pathPanel.querySelector('[data-path-key="' + id + '"]');
+          const pathCapacities = id => [...pathGroup(id).querySelectorAll('[data-learned]')];
+          const togglePaths = async () => { bar.pathsToggle.click(); await bar.configWrites.get(bar.actor); };
+          const pathHeader = id => pathGroup(id).querySelector('.co2prism-path-header');
+          const togglePathGroup = async target => {
+            check(contextClick(target), 'Paths context click is handled locally');
+            await bar.configWrites.get(bar.actor);
+          };
+          await bar.setPanelState('equipements', true);
+          await togglePaths();
+          check(!pathPanel.hidden && equipment.hidden && actor.flags.co2prism.panels.equipements === false,
+            'Opening Paths closes Equipment in the same configuration');
+          check([...pathPanel.children].map(node => node.dataset.pathKey).join() === 'path0,path1,path3,path5,path6,path7,path12,off-paths',
+            'Native path sort and final off-path block');
+          for (const count of [0, 1, 3, 5, 6, 7, 12]) {
+            const id = 'path' + count, tiles = pathCapacities(id);
+            check(tiles.length === count && tiles.every((tile, index) => tile.dataset.itemId === id + 'rank' + (index + 1)
+              && Number(tile.style.getPropertyValue('--column')) === index % 5 + 1 &&
+              tile.dataset.learned === String(index % 2 === 0)), 'Path rank order, deduplication, learning and wrapping: ' + count);
+          }
+          check(pathGroup('path12').querySelector('.co2prism-path-header img').alt === 'path12' &&
+            pathGroup('path12').querySelector('.co2prism-path-label').textContent === 'path12' &&
+            pathGroup('off-paths').querySelector('.fa-circle-star') && pathCapacities('off-paths').length === 1 &&
+            !pathPanel.querySelector('[data-item-id="foreign"]'), 'Path image, off-path icon, and actor-scoped UUID resolution');
+          await settled();
+          for (const node of [pathHeader('path12'), ...pathCapacities('path12').slice(0, 2)]) {
+            check(node.dataset.tooltipHtml.includes('Details of ' + node.dataset.itemId), 'Path or capacity tooltip uses its own description');
+            node.querySelector('img').click();
+          }
+          pathHeader('off-paths').click();
+          check(pathSheets.join() === 'path12,path12rank1,path12rank2' &&
+            pathHeader('off-paths').dataset.tooltipText && !pathHeader('off-paths').dataset.tooltipHtml,
+            'Native sheets open for both learning states, while Off-path only has its category label');
+          const pathProjection = node => {
+            const bounds = node.getBoundingClientRect();
+            const x = (bounds.left + bounds.right) / 2, y = (bounds.top + bounds.bottom) / 2;
+            return { along: (x - y) / Math.SQRT2, across: (x + y) / Math.SQRT2,
+              width: node.offsetWidth, height: node.offsetHeight };
+          };
+          const pathOverlap = (a, b) => Math.abs(a.along - b.along) < (a.width + b.width) / 2 - 1 &&
+            Math.abs(a.across - b.across) < (a.height + b.height) / 2 - 1;
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const tiles = pathCapacities('path12'), first = tiles[0].getBoundingClientRect(), fifth = tiles[4].getBoundingClientRect();
+            const sixth = tiles[5].getBoundingClientRect();
+            check(first.width > 0 && fifth.left > first.left && fifth.top < first.top && sixth.top > first.top &&
+              Math.abs(sixth.left - first.left) < 1 && getComputedStyle(pathPanel).overflowY === 'visible' &&
+              new DOMMatrix(getComputedStyle(tiles[0]).transform).b < 0, 'Paths share scaled diagonal geometry at ' + size);
+            for (const count of [3, 5, 7, 12]) {
+              const id = 'path' + count, group = pathGroup(id), capacities = pathCapacities(id);
+              const header = pathProjection(group.querySelector('.co2prism-path-header'));
+              const title = pathProjection(group.querySelector('.co2prism-path-label'));
+              const leading = pathProjection(capacities[0]);
+              check(Math.abs(header.width / leading.width - 1.5) < 0.075 &&
+                header.along + header.width / 2 < leading.along - leading.width / 2 &&
+                title.along - title.width / 2 > header.along + header.width / 2 &&
+                title.across + title.height / 2 < leading.across - leading.height / 2 &&
+                Math.abs(header.across + header.height / 2 - leading.across - leading.height / 2) < 1.5,
+                'Larger header and aligned title keep the portrait margin for ' + count + ' capacities at ' + size);
+              check(capacities.filter((_, index) => index % 5 === 0).every(tile =>
+                Math.abs(tile.getBoundingClientRect().left - capacities[0].getBoundingClientRect().left) < 1),
+                'Continuation rows align with the first capacity at ' + size);
+            }
+            const shapes = [...pathPanel.querySelectorAll('.co2prism-path-tile, .co2prism-path-label')].map(pathProjection);
+            check(!shapes.some((shape, index) => shapes.slice(index + 1).some(other => pathOverlap(shape, other))),
+              'Rotated tiles and titles do not overlap at ' + size);
+            const offHeader = pathGroup('off-paths').querySelector('.co2prism-path-header');
+            check(!offHeader.querySelector('img') && Math.abs(pathCapacities('off-paths')[0].getBoundingClientRect().left - first.left) < 1,
+              'Off-path icon shares the first-capacity alignment at ' + size);
+            check(getComputedStyle(tiles[0]).boxShadow !== 'none' && getComputedStyle(tiles[1]).boxShadow === 'none' &&
+              getComputedStyle(tiles[0].querySelector('img')).filter === 'none' &&
+              getComputedStyle(tiles[1].querySelector('img')).filter === 'none' &&
+              getComputedStyle(pathHeader('path12')).boxShadow === 'none' && getComputedStyle(offHeader).boxShadow === 'none',
+              'Only learned capacities receive a perimeter halo at ' + size);
+          }
+          const expandedPathsHeight = pathPanel.getBoundingClientRect().height;
+          await togglePathGroup(pathHeader('path7').querySelector('img'));
+          check(pathCapacities('path7').length === 0 && pathGroup('path7').querySelector('.co2prism-path-header img') &&
+            getComputedStyle(pathGroup('path7').querySelector('.co2prism-path-label')).display === 'none' &&
+            pathPanel.getBoundingClientRect().height < expandedPathsHeight && pathCapacities('path12').length === 12,
+            'Collapsed path retains only its enlarged image and compacts the next blocks');
+          await togglePathGroup(pathHeader('off-paths').querySelector('i'));
+          check(!pathCapacities('off-paths').length && pathHeader('off-paths').querySelector('.fa-circle-star'), 'Off-path collapses and retains its icon');
+          await togglePathGroup(bar.pathsToggle);
+          check([...pathPanel.children].every(group => group.dataset.collapsed === 'true'), 'Global click collapses mixed states');
+          await togglePathGroup(bar.pathsToggle);
+          check(pathCapacities('path7').length === 7 && pathCapacities('off-paths').length === 1,
+            'Global reopening restores the individual paths and Off-path');
+          settings.locked = true; bar.updateLock();
+          await togglePathGroup(pathHeader('path7'));
+          check(pathGroup('path7').dataset.collapsed === 'true', 'Individual path collapse works locked');
+          await togglePaths();
+          await togglePathGroup(bar.pathsToggle);
+          check(pathPanel.hidden && actor.flags.co2prism.panels.voies === false &&
+            Object.values(actor.flags.co2prism.pathCollapsed).every(Boolean), 'Global collapse works locked without reopening Paths');
+          await togglePaths();
+          check([...pathPanel.children].every(group => group.dataset.collapsed === 'true'), 'Opening Paths reads the persisted collapse flags');
+          const compactHeaders = [...pathPanel.children].map(group => group.querySelector('.co2prism-path-header').getBoundingClientRect());
+          check(compactHeaders[1].left > compactHeaders[0].left && compactHeaders[1].top < compactHeaders[0].top &&
+            Math.abs(compactHeaders[5].left - compactHeaders[0].left) < 1, 'Collapsed headers pack in diagonal runs of five');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const shapes = [...pathPanel.querySelectorAll('.co2prism-path-tile')].map(pathProjection);
+            check(!shapes.some((shape, index) => shapes.slice(index + 1).some(other => pathOverlap(shape, other))),
+              'Compact path images remain clear of each other at ' + size);
+          }
+          actor.testUserPermission = (_, permission) => permission !== 'OWNER'; bar.refreshActor();
+          contextClick(pathHeader('path12'));
+          check(pathGroup('path12').dataset.collapsed === 'true', 'Observer cannot change path flags');
+          pathHeader('path12').click();
+          check(pathSheets.at(-1) === 'path12', 'Observer can still consult an Item sheet');
+          actor.testUserPermission = () => true; bar.refreshActor();
+          await togglePathGroup(pathHeader('path12'));
+          check(pathCapacities('path12').length === 12 && !pathCapacities('path7').length, 'Individual reopening after global collapse stays independent');
+          await togglePathGroup(bar.pathsToggle);
+          await togglePathGroup(bar.pathsToggle);
+          settings.locked = false; bar.updateLock();
+          await bar.setPanelState('equipements', true);
+          check(pathPanel.hidden && !equipment.hidden && actor.flags.co2prism.panels.voies === false, 'Equipment closes Paths');
+          await togglePaths();
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(pathPanel.hidden, 'Different actor has its own Paths panel state');
+          await togglePaths();
+          check(pathCapacities('encounter-path').length === 3 && pathCapacities('off-paths').length === 6, 'Encounter Paths and off-path inventory');
+          other.capacities = other.capacities.filter(capacity => capacity.system.path);
+          hooks.get('deleteItem')({ parent: other });
+          check(!pathGroup('off-paths'), 'No empty off-path category after an Item update');
+          await togglePathGroup(bar.pathsToggle);
+          check(other.flags.co2prism.pathCollapsed['encounter-path'] && !('off-paths' in other.flags.co2prism.pathCollapsed),
+            'Global collapse does not persist an absent Off-path category');
+          await togglePaths();
+          check(pathPanel.hidden && bar.pathsToggle.getAttribute('aria-expanded') === 'false', 'Paths button closes its own panel');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          check(!pathPanel.hidden && pathCapacities('path12').length === 12, 'Returning to actor restores its panel and items');
+          const learnedTile = () => pathPanel.querySelector('[data-item-id="path12rank2"]');
+          const learningCapacity = actor.items.get('path12rank2');
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            for (const learned of [true, false]) {
+              learningCapacity.system.learned = learned;
+              hooks.get('updateItem')(learningCapacity);
+              check((getComputedStyle(learnedTile()).boxShadow !== 'none') === learned,
+                'Native learning update toggles the halo in lock mode ' + locked);
+            }
+          }
+          const changedPath = actor.items.get('path12');
+          changedPath.name = 'Voie renommée';
+          changedPath.img = 'icons/svg/fire.svg';
+          hooks.get('updateItem')(changedPath);
+          check(pathGroup('path12').querySelector('.co2prism-path-label').textContent === changedPath.name &&
+            pathHeader('path12').querySelector('img').getAttribute('src') === changedPath.img, 'Path title and image follow native updates');
+          Object.assign(learningCapacity, { name: 'Capacité renommée', img: 'icons/svg/sun.svg' });
+          Object.assign(learningCapacity.system, { rank: 0, description: '<p>Description mise à jour</p>' });
+          hooks.get('updateItem')(learningCapacity);
+          await settled();
+          check(pathCapacities('path12')[0] === learnedTile() &&
+            learnedTile().querySelector('img').getAttribute('src') === learningCapacity.img &&
+            learnedTile().dataset.tooltipHtml.includes(learningCapacity.name) &&
+            learnedTile().dataset.tooltipHtml.includes('Description mise à jour'), 'Native rank, name, image and description update together');
+          learningCapacity.system.path = actor.items.get('path3').uuid;
+          hooks.get('updateItem')(learningCapacity);
+          check(pathCapacities('path3')[0] === learnedTile() && pathCapacities('path12').length === 11 &&
+            pathPanel.querySelectorAll('[data-item-id="path12rank2"]').length === 1, 'Reassociation moves the tile without duplicating it');
+          learningCapacity.system.path = null;
+          learningCapacity.system.learned = true;
+          hooks.get('updateItem')(learningCapacity);
+          check(pathCapacities('off-paths').includes(learnedTile()) && pathCapacities('path3').length === 3 &&
+            getComputedStyle(learnedTile()).boxShadow !== 'none', 'A detached and learned capacity moves to Off-path with its halo');
+          const newPath = makePathItem(actor, 'path', 'new-path', 20, { capacities: [] }, 'icons/svg/sun.svg');
+          actor.paths.push(newPath);
+          hooks.get('createItem')(newPath);
+          const newCapacity = makePathItem(actor, 'capacity', 'new-capacity', 1,
+            { path: newPath.uuid, rank: 1, learned: true }, 'icons/svg/fire.svg');
+          actor.capacities.push(newCapacity);
+          hooks.get('createItem')(newCapacity);
+          check(pathCapacities('new-path').length === 1, 'New embedded capacity appears in the new path');
+          await togglePathGroup(pathHeader('new-path'));
+          actor.items.delete(newCapacity.id);
+          actor.capacities = actor.capacities.filter(capacity => capacity !== newCapacity);
+          hooks.get('deleteItem')(newCapacity);
+          check(pathGroup('new-path').dataset.collapsed === 'true', 'Deleting an item preserves its path preference');
+          actor.items.delete(newPath.id);
+          actor.paths = actor.paths.filter(path => path !== newPath);
+          hooks.get('deleteItem')(newPath);
+          check(!pathGroup('new-path') && actor.flags.co2prism.pathCollapsed['new-path'] &&
+            pathCapacities('path12').length === 11, 'Deleting a collapsed path leaves no visual ghost or affects other paths');
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";
