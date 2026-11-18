@@ -40,19 +40,6 @@
   background: black;
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
-.co2prism-presets {
-  background: black;
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
-}
-.co2prism-art:has(.co2prism-combat:not([hidden])) .co2prism-presets { display: none; }
-.co2prism-art:has(.co2prism-combat:not([hidden])) .co2prism-number {
-  left: calc(705 * var(--co2prism-unit));
-  top: calc(var(--combat-y) * var(--co2prism-unit));
-  width: calc(40 * var(--co2prism-unit));
-  height: calc(40 * var(--co2prism-unit));
-  border-radius: calc(5 * var(--co2prism-unit));
-  z-index: 2;
-}
 .co2prism-portrait {
   object-fit: cover;
   border: 0;
@@ -123,7 +110,7 @@
     sans-serif;
   color: black;
   background: #bbb;
-  border-radius: 50%;
+  border-radius: calc(5 * var(--co2prism-unit));
 }
 .co2prism-icon {
   font-size: calc(32 * 100cqw / 724);
@@ -144,7 +131,6 @@
 }
 /* Seules les surfaces visibles captent les interactions. */
 .co2prism-diamond,
-.co2prism-presets,
 .co2prism-gauge,
 .co2prism-portrait {
   pointer-events: auto;
@@ -201,7 +187,9 @@
   cursor: default;
 }
 .co2prism-bar .co2prism-number[aria-pressed="true"] {
-  box-shadow: inset 0 0 0 calc(4 * 100cqw / 724) white;
+  color: white;
+  background: #bd1826;
+  box-shadow: 0 0 calc(9 * var(--co2prism-unit)) calc(2 * var(--co2prism-unit)) #ff434e;
 }
 .co2prism-number:focus-visible {
   outline: calc(2 * 100cqw / 724) solid #ffcf60;
@@ -459,7 +447,7 @@
 .co2prism-budget-content { position: relative; width: calc(var(--budget-width, 228) * var(--co2prism-unit)); height: calc(42 * var(--co2prism-unit)); }
 .co2prism-combat-row::-webkit-scrollbar, .co2prism-budget-scroll::-webkit-scrollbar { height: calc(6 * var(--co2prism-unit)); }
 .co2prism-combat-row::-webkit-scrollbar-thumb, .co2prism-budget-scroll::-webkit-scrollbar-thumb { background: #888; }
-.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost, .co2prism-slot-hand {
+.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost {
   z-index: 1; color: white; background: #000e; padding: calc(4 * var(--co2prism-unit));
   font-size: calc(30 * var(--co2prism-unit)); line-height: 1; pointer-events: none;
 }
@@ -467,7 +455,13 @@
 .co2prism-slot-time-A { background: #ed1520; }
 .co2prism-slot-time-M { background: #25aae1; }
 .co2prism-slot-time-G { background: #198c48; }
-.co2prism-slot-hand { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: calc(18 * var(--co2prism-unit)); }
+.co2prism-slot-hand {
+  position: absolute; top: calc(4 * var(--co2prism-unit)); inset-inline: 0; width: max-content; margin-inline: auto;
+  z-index: 1; font-size: calc(30 * var(--co2prism-unit)); line-height: 1;
+  color: var(--co2prism-hand-leather); -webkit-text-stroke: calc(var(--co2prism-unit)) white;
+  paint-order: stroke fill; pointer-events: none;
+}
+[data-co2prism-hand="left"] > .co2prism-slot-hand { transform: scaleX(-1); }
 .co2prism-slot-unavailable { background: #b7b0b0; }
 .co2prism-combat-slot.co2prism-drop-target { box-shadow: inset 0 0 0 calc(5 * var(--co2prism-unit)) #50baf0; }
 .co2prism-combat-slot.co2prism-drop-candidate { box-shadow: inset 0 0 0 calc(3 * var(--co2prism-unit)) #aaa; }
@@ -483,14 +477,15 @@
 }
 
 .co2prism-slot-remove { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 2; width: auto; height: auto; min-height: 0; margin: 0; padding: calc(3 * var(--co2prism-unit)); border: 0; border-radius: 0; background: #000e; color: white; font-size: calc(24 * var(--co2prism-unit)); line-height: 1; cursor: pointer; }
-.co2prism-combat-slot:has(.co2prism-slot-remove) .co2prism-slot-hand { bottom: calc(32 * var(--co2prism-unit)); }
 .co2prism-combat-slot.co2prism-drop-insert { border-left-color: #50baf0; }
 .co2prism-action-exhausted { background: #777; }
 .co2prism-action-exhausted .co2prism-slot-image { filter: grayscale(1) brightness(.5); }
+.co2prism-hand-unequipped .co2prism-slot-image,
 .co2prism-condition-unavailable .co2prism-slot-image,
 .co2prism-condition-pending .co2prism-slot-image { filter: grayscale(1) brightness(.55); }
+.co2prism-combat-slot[data-co2prism-hand] { --co2prism-hand-leather: #78492e; border-color: var(--co2prism-hand-leather); }
 .co2prism-combat-slot.co2prism-hand-empty { background: transparent; border-color: transparent; pointer-events: none; }
-.co2prism-hand-empty > i { color: white; opacity: .28; font-size: calc(100 * var(--co2prism-unit)); pointer-events: none; }
+.co2prism-hand-mirror .co2prism-slot-image { opacity: 0.35; }
 
 .co2prism-time-indicator {
   flex: 0 0 calc(var(--budget-icon-width, 40) * var(--co2prism-unit));

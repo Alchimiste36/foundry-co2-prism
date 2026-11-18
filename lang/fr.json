@@ -19,8 +19,14 @@
       "fullRest": "Récupération complète"
     },
     "Save": "Enregistrer",
-    "Preset": "Preset",
+    "Preset": "Preset de mains",
     "Combat": {
+      "HandsInvalidItem": "Il faut un équipement équipable de cet acteur ou une action de son arme ou de son bouclier.",
+      "HandOccupied": "Main occupée par un équipement à deux mains.",
+      "HandsConflict": "Cette combinaison dépasse les mains disponibles.",
+      "HandsEquipmentFailed": "Le changement d’équipement CO2 a échoué. Les modifications effectuées ont été annulées.",
+      "HandsRestoreFailed": "La restauration de l’équipement a échoué. Vérifiez les objets équipés sur la fiche CO2.",
+      "HandUnequipped": "Cet équipement est déséquipé dans CO2.",
       "Title": "Combat",
       "Meters": "Mètres",
       "Cells": "Cases",

@@ -19,8 +19,14 @@
       "fullRest": "Full recovery"
     },
     "Save": "Save",
-    "Preset": "Preset",
+    "Preset": "Hand preset",
     "Combat": {
+      "HandsInvalidItem": "Drop this actor’s equippable Item or an action from their weapon or shield.",
+      "HandOccupied": "Hand occupied by two-handed equipment.",
+      "HandsConflict": "This combination exceeds the available hands.",
+      "HandsEquipmentFailed": "CO2 refused the equipment change.",
+      "HandsRestoreFailed": "Equipment restoration failed. Check the equipped Items on the CO2 sheet.",
+      "HandUnequipped": "This Item is unequipped in CO2.",
       "Title": "Combat",
       "Meters": "Meters",
       "Cells": "Squares",

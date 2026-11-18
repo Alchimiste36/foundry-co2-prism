@@ -102,13 +102,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await new Promise(resolve => setTimeout(resolve, 0));
           }
           check(calls.join(",") === "sheet,fortune,fastRest,fullRest", "Raccordement des clics");
+          await bar.setPanelState('combat', true);
           root.querySelector('[data-co2prism-preset="2"]').click();
           await bar.configWrites.get(actor);
-          check(actor.flags.co2prism.activePreset === 2 && bar.configuration.activePreset === 2,
+          check(actor.flags.co2prism.hands.active === 2 && bar.configuration.activePreset === 2,
             "Preset non enregistré au clic");
-          check(actor.flags.co2prism.panels.combat === true && !bar.combatPanel.hidden, "Combat non ouvert par le preset");
-          root.querySelector('[data-co2prism-preset="2"]').click(); await bar.configWrites.get(actor);
-          check(bar.combatPanel.hidden, "Combat non replié par le preset actif");
+          check(!bar.combatPanel.hidden, 'Selector preserves combat');
+          await bar.setPanelState('combat', false);
           check(bar.combatEffects.children.length > 0, "Effets absents avec le combat fermé");
           bar.combatToggle.click(); await bar.configWrites.get(actor);
           check(!bar.combatPanel.hidden && bar.combatToggle.getAttribute("aria-expanded") === "true"
@@ -145,16 +145,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(style.backgroundColor === "rgba(0, 0, 0, 0)" && style.borderTopWidth === "0px" && style.opacity === "1",
                 size + " décoration de bouton inattendue");
             }
-            for (const button of bar.presetButtons) {
-              const b = button.getBoundingClientRect();
-              check(!button.disabled && button.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)),
-                size + " preset inaccessible");
-              const active = button.dataset.co2prismPreset === "2";
-              check(button.getAttribute("aria-pressed") === String(active), size + " sélection preset");
-              check(!active || getComputedStyle(button).boxShadow !== "none", size + " sélection invisible");
-              check(Math.abs(b.width - 47 * r.width / 724) < 0.1 && Math.abs(b.height - 47 * r.width / 724) < 0.1,
-                size + " géométrie preset modifiée");
-            }
+            check(bar.presetButtons.every(button => !button.getClientRects().length), "Closed preset controls");
             for (const nodes of Object.values(bar.gauges)) {
               const g = nodes.fill.getBoundingClientRect();
               check(document.elementFromPoint(g.right - 2, g.y + g.height / 2) === nodes.fill, size + " jauge inaccessible");
@@ -237,10 +228,10 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           for (const [size, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
             settings.size = size; bar.position = { x: 300, y: 350 }; bar.layout();
             const before = bar.portrait.getBoundingClientRect();
-            root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
+            await bar.setPanelState('combat', true); await bar.setActivePreset(1);
             const r = root.getBoundingClientRect(), after = bar.portrait.getBoundingClientRect();
             combatDimensions.push({ size, width: r.width, height: r.height });
-            check(!bar.combatPanel.hidden && actor.flags.co2prism.activePreset === 1, size + " Combat fermé");
+            check(!bar.combatPanel.hidden && actor.flags.co2prism.hands.active === 1, size + " Combat fermé");
             check(Math.abs(r.width - width * 1120 / 724) < 0.1, size + " étendue Combat");
             check(Math.abs(before.x - after.x) < 0.1 && Math.abs(before.y - after.y) < 0.1, size + " base déplacée par Combat");
             check(bar.combatValues.meters.textContent === "20" && bar.combatValues.cells.textContent === "10"
@@ -344,30 +335,32 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const combined = root.getBoundingClientRect();
             check(document.elementFromPoint(combined.x + 2, combined.y + 2)?.id === "board", size + " coin transparent Combat");
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
-            root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
+            await bar.setPanelState('combat', false);
           }
           result.combatDimensions = combatDimensions;
           // Ouverture au bord droit : déplacer Prism, sans retour arbitraire au repli.
           settings.size = "M"; bar.position = { x: innerWidth - 432, y: 400 }; bar.layout();
           const edgeBefore = bar.portrait.getBoundingClientRect();
-          await bar.selectCombatPreset(1);
+          await bar.setPanelState('combat', true);
           const edgeOpen = bar.portrait.getBoundingClientRect();
           check(root.getBoundingClientRect().right <= innerWidth + 0.1 && edgeOpen.x < edgeBefore.x, "Combat hors écran au dépliage");
-          await bar.selectCombatPreset(1);
+          await bar.setPanelState('combat', false);
           check(Math.abs(bar.portrait.getBoundingClientRect().x - edgeOpen.x) < 0.1, "Saut arbitraire au repli");
           await bar.setPanelState("competences", true);
           bar.position = { x: innerWidth - 432, y: 400 }; bar.layout();
-          await bar.selectCombatPreset(1);
+          await bar.setPanelState('combat', true);
           check(!bar.skillsPanel.hidden && !bar.combatPanel.hidden && root.getBoundingClientRect().right <= innerWidth + 0.1,
             "Combat hors écran avec Compétences");
-          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "capacity", parent: actor,
-            system: { description: "<b>Description native</b>", hasFrequency: true, frequency: "daily", charges: { current: 3 } },
+          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "equipment", parent: actor,
+            system: { description: "<b>Description native</b>", hasFrequency: true, frequency: "daily", isWeapon: true, useHands: true, equipped: false,
+              usage: { oneHand: false, twoHand: true }, properties: { equipable: true, reloadable: true }, charges: { current: 3 } },
             testUserPermission: () => true };
           const nativeAction = { source: item.uuid, indice: 0, actionName: "Action réelle",
             actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "f",
             type: "melee", properties: { temporary: false, enabled: false, activable: true }, autoAttack: false, hasResolversWithDomage: true,
             hasCharges: true, charges: 3, manaCost: 2 };
           item.actions = [nativeAction]; actor.items = new Map([[item.id, item]]);
+          actor.toggleEquipmentEquipped = async id => { const model = actor.items.get(id).system; model.equipped = !model.equipped; hooks.get("updateItem")(item, {}); };
           Object.defineProperty(actor, "actions", { get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
           const shortcutCalls = [];
           actor.activateAction = async options => {
@@ -403,7 +396,55 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
           };
           check(lengths() === "3,1", "Preset vide différent de 3/1");
-          await dropAt(1, 0); await dropAt(1, 1);
+          const shield = { id: "shield", uuid: "Actor.test.Item.shield", name: "Shield", type: "equipment",
+            parent: actor, img: nativeAction.actionImg, actions: [], system: {
+              properties: { equipable: true }, equipped: false, usage: { oneHand: true, twoHand: false }
+            } };
+          actor.items.set(shield.id, shield);
+          const shieldPayload = { type: "Item", uuid: shield.uuid };
+          const removeHand = async index => {
+            cards(0)[index].querySelector(".co2prism-slot-remove").click();
+            await bar.configWrites.get(actor);
+          };
+          await dropAt(1, 2, shieldPayload);
+          check(lengths() === "3,1", "Item direct refusé dans les raccourcis");
+          for (const index of [0, 1]) {
+            await dropAt(1, index, shieldPayload);
+            const direct = cards(0)[index];
+            check(shield.system.equipped && direct.querySelector("img")?.src === shield.img
+              && !direct.querySelector(".co2prism-slot-time, .co2prism-slot-type, .co2prism-slot-uses, .co2prism-slot-cost")
+              && direct.querySelector(".co2prism-slot-remove"), "Bouclier direct sans action");
+            await removeHand(index);
+            check(!shield.system.equipped, "Retrait du bouclier direct");
+          }
+          const checkMirror = index => {
+            const mirror = cards(0)[index];
+            const illustration = mirror.querySelector("img");
+            check(mirror.classList.contains("co2prism-hand-mirror") && illustration?.src === nativeAction.actionImg
+              && Number(getComputedStyle(illustration).opacity) < 1 && mirror.children.length === 2
+              && mirror.querySelector(".co2prism-slot-hand"), "Miroir avec repère de main et sans commandes");
+          };
+          await dropAt(1, 1); checkMirror(0);
+          await dropAt(1, 0, shieldPayload);
+          check(!shield.system.equipped && !bar.configuration.handPresets[1]["left-hand"], "Dépôt refusé sur le miroir");
+          await removeHand(1);
+          await dropAt(1, 0); checkMirror(1);
+          settings.locked = true; bar.updateLock();
+          check(bar.presetButtons.map(button => button.hidden).join() === "false,true,true", "Presets vides masqués");
+          check(getComputedStyle(bar.presetButtons[0]).backgroundColor === "rgb(189, 24, 38)"
+            && getComputedStyle(bar.presetButtons[0]).boxShadow !== "none", "Halo rouge du preset actif");
+          settings.locked = false; bar.updateLock();
+          check(bar.presetButtons.every(button => !button.hidden), "Presets vides visibles en édition");
+          const selectPreset = bar.setActivePreset.bind(bar);
+          let requestedShift;
+          bar.setActivePreset = (number, shift) => {
+            requestedShift = shift;
+            return selectPreset(number, shift);
+          };
+          bar.presetButtons[0].dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+          await bar.configWrites.get(actor);
+          bar.setActivePreset = selectPreset;
+          check(requestedShift === true && item.system.equipped, "MAJ issue du clic et preset actif réappliqué");
           check(lengths() === "3,1", "Les mains font croître la ligne");
           const occupied = cards(0)[0];
           check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.title.includes("Description native"), "Image ou description copiée incorrectement");
@@ -463,7 +504,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           hooks.get("updateItem")(item, { "system.actions": [] });
           const toggleFlags = JSON.stringify(actor.flags);
           await clickShortcut({});
-          check(nativeAction.properties.enabled && root.querySelectorAll(".co2prism-action-active").length === 4,
+          check(nativeAction.properties.enabled && root.querySelectorAll(".co2prism-action-active").length === 3,
             "Activation non synchronisée entre raccourcis");
           await clickShortcut({});
           check(!nativeAction.properties.enabled && !root.querySelector(".co2prism-action-active"), "Second clic sans désactivation");
@@ -487,13 +528,12 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(JSON.stringify(actor.flags) === toggleFlags, "État actif écrit dans les flags Prism");
           const toggleReference = bar.shortcutFromDrop(actor, payload);
           for (const preset of [2, 3]) {
-            await bar.saveShortcut(actor, preset, bar.slotRows(actor, preset)[0][0], toggleReference);
-            await bar.selectCombatPreset(preset);
-            check(root.querySelectorAll(".co2prism-action-active").length === 1, "État actif différent selon le preset");
+            await bar.setActivePreset(preset);
+            check(root.querySelectorAll(".co2prism-action-active").length === 2, "Raccourcis actifs communs");
           }
           nativeAction.properties.enabled = false; hooks.get("updateItem")(item, { "system.actions": [] });
           check(!root.querySelector(".co2prism-action-active"), "Changement depuis feuille non synchronisé");
-          await bar.selectCombatPreset(1);
+          await bar.setActivePreset(1);
           check(!root.querySelector(".co2prism-action-active"), "État précédent conservé au retour du preset");
           const nativeToggle = actor.activateAction;
           actor.activateAction = async () => false;
@@ -517,13 +557,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           bar.refreshActor();
           check(cards(0)[0].title.includes("Action modifiée")
             && cards(0)[0].querySelector(".co2prism-slot-uses").textContent.trim() === "0", "Données non actualisées");
-          const removedSlots = structuredClone(actor.flags.co2prism.presets[1].slots);
+          const removedSlots = structuredClone(actor.flags.co2prism.shortcuts);
           actor.items.delete(item.id); bar.refreshActor(); await bar.configWrites.get(actor);
-          check(lengths() === "3,1" && Object.keys(actor.flags.co2prism.presets[1].slots).length === 0, "Raccourcis supprimés non nettoyés");
-          actor.flags.co2prism.presets[1].slots = removedSlots;
+          check(lengths() === "3,1" && Object.keys(actor.flags.co2prism.shortcuts).length === 0, "Raccourcis supprimés non nettoyés");
+          actor.flags.co2prism.shortcuts = removedSlots;
           actor.items.set(item.id, item); bar.refreshActor();
-          await bar.selectCombatPreset(2); check(lengths() === "3,1", "Slots mélangés entre presets");
-          await bar.selectCombatPreset(1); check(lengths() === "4,2", "Ordre non restauré");
+          await bar.setActivePreset(2); check(lengths() === "4,2", "Raccourcis communs au preset 2");
+          await bar.setActivePreset(1); check(lengths() === "4,2", "Ordre non restauré");
           settings.size = "XL"; bar.layout();
           for (let index = 0; index < 12; index++) await dropAt(1, cards(0).length - 1);
           check(lengths() === "16,2", "Limite arbitraire de cases");
@@ -533,7 +573,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(row.scrollWidth > row.clientWidth && terminal.right <= viewport.right + 1 && terminal.right > viewport.left, "Fin de ligne inaccessible");
           check(root.getBoundingClientRect().right <= innerWidth + 0.1, "Racine plus large que l'écran");
           check(document.elementFromPoint(innerWidth - 2, innerHeight - 2)?.id === "board", "Overlay après croissance");
-          const savedPreset = JSON.stringify(actor.flags.co2prism.presets[1]);
+          const savedPreset = JSON.stringify(actor.flags.co2prism.hands.presets[1]);
           const fullRows = label => {
             for (const row of bar.combatRows) {
               const bounds = row.getBoundingClientRect(), last = row.lastElementChild.getBoundingClientRect();
@@ -544,8 +584,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           for (const [size, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
             for (const skills of [false, true]) {
               // Preset isolé pour tester les largeurs sans modifier les raccourcis précédents.
-              actor.flags.co2prism.presets[3] = { slots: {} };
-              actor.flags.co2prism.activePreset = 3;
+              actor.flags.co2prism.shortcuts = {};
+              actor.flags.co2prism.hands.active = 3;
               actor.flags.co2prism.panels = { combat: true, competences: skills, equipements: false };
               settings.size = size; bar.refreshActor();
               bar.position = { x: 300, y: 350 }; bar.layout();
@@ -573,9 +613,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(root.getBoundingClientRect().right <= innerWidth + 0.1, label + " réouverture hors écran");
             }
           }
-          check(JSON.stringify(actor.flags.co2prism.presets[1]) === savedPreset, "Autre preset modifié par les tests de largeur");
-          await bar.selectCombatPreset(2); check(lengths() === "3,1", "Dimensions fantômes après changement de preset");
-          await bar.selectCombatPreset(3); check(lengths() === "3,4", "Seconde ligne non restaurée");
+          check(JSON.stringify(actor.flags.co2prism.hands.presets[1]) === savedPreset, "Autre preset modifié par les tests de largeur");
+          await bar.setActivePreset(2); check(lengths() === "3,4", "Raccourcis communs au preset 2");
+          await bar.setActivePreset(3); check(lengths() === "3,4", "Seconde ligne non restaurée");
           fullRows("retour au preset");
           const originalToken = canvas.tokens.controlled[0];
           const other = { ...actor, uuid: "Actor.other", flags: { co2prism: { panels: { combat: true } } }, items: new Map() };
@@ -583,7 +623,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(lengths() === "3,1", "Cases de l'acteur précédent conservées"); fullRows("autre acteur");
           canvas.tokens.controlled = [originalToken]; bar.refreshActor();
           check(lengths() === "3,4", "Seconde ligne non restaurée après changement d'acteur"); fullRows("retour à l'acteur");
-          result.restoredSlots = actor.flags.co2prism.presets[3].slots;
+          result.restoredSlots = actor.flags.co2prism.shortcuts;
           await bar.setPanelState("combat", false); await bar.setPanelState("competences", false);
           if (${Boolean(process.env.CO2PRISM_SCREENSHOT)}) {
             settings.size = "L"; bar.position = { x: 300, y: 350 }; bar.layout();
@@ -596,8 +636,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           result.board = { width: board.width, height: board.height };
 
           // Repartir avec un preset court pour les interactions de configuration.
-          actor.flags.co2prism.activePreset = 1; actor.flags.co2prism.panels.combat = true;
-          actor.flags.co2prism.presets[1].slots = {}; settings.locked = false; bar.refreshActor();
+          actor.flags.co2prism.hands.active = 1; actor.flags.co2prism.panels.combat = true;
+          actor.flags.co2prism.shortcuts = {}; actor.flags.co2prism.hands.presets[1] = {}; item.system.equipped = false; settings.locked = false; bar.refreshActor();
           for (let i = 0; i < 3; i++) await dropAt(1, cards(0).length - 1);
           const orderKeys = row => bar.slotRows()[row].filter(s => !s.hand && !s.terminal).map(s => s.key);
           const initialKeys = orderKeys(0);
@@ -651,6 +691,11 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           item.system.charges.current = 2;
           cards(0)[2].click(); await new Promise(resolve => setTimeout(resolve, 0));
           check(shortcutCalls.length > lockedCalls, 'Locked execution blocked');
+          settings.locked = false; bar.updateLock();
+          const remainingHand = bar.slotRows()[0][1];
+          await bar.manageShortcut({ actor, token: bar.token, key: remainingHand.key, preset: 1, reference: remainingHand.reference });
+          settings.locked = true; bar.updateLock();
+          item.type = "capacity";
           item.system.charges.current = 0; item.system.frequency = 'daily'; nativeAction.properties.noChargesUsed = false;
           hooks.get('updateItem')(item, {});
           const exhausted = cards(0)[2];
@@ -707,11 +752,11 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           nativeAction.isVisible = () => new Promise(resolve => completions.push(resolve));
           bar.refreshActor(); await Promise.resolve();
           nativeAction.isVisible = async () => true;
-          await bar.selectCombatPreset(2); await new Promise(resolve => setTimeout(resolve, 0));
+          await bar.setActivePreset(2); await new Promise(resolve => setTimeout(resolve, 0));
           for (const resolve of completions) resolve(false);
           await new Promise(resolve => setTimeout(resolve, 0));
           check(!root.querySelector('.co2prism-condition-unavailable'), 'Late condition applied to new preset');
-          await bar.selectCombatPreset(1); await new Promise(resolve => setTimeout(resolve, 0));
+          await bar.setActivePreset(1); await new Promise(resolve => setTimeout(resolve, 0));
           check(JSON.stringify(actor.flags) === flagsBeforeConsumption, 'False conditions removed shortcut');
           nativeAction.type = 'heal'; nativeAction.properties.temporary = false;
           hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));
@@ -741,20 +786,21 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
           await bar.configWrites.get(actor);
           check(!actor.items.has(item.id) && cards(0).length === 2 && bar.combatRows[1].children.length === 0, 'Destroyed Item reference removed');
-          check(Object.keys(actor.flags.co2prism.presets[1].slots).length === 0, 'Destroyed references persisted');
+          check(Object.keys(actor.flags.co2prism.shortcuts).length === 0, 'Destroyed references persisted');
           game.system.api.macros.useAction = previousUse;
           // Matrice mains vides/occupées : mêmes positions, aucune écriture au verrouillage.
           actor.items.set(item.id, item); item.system.quantity.current = 3;
           const handReference = Object.values(removedSlots)[0];
           for (const preset of [1, 2, 3]) for (const size of ['S', 'M', 'L', 'XL']) {
             for (const occupiedHands of [[], ['left-hand'], ['right-hand'], ['left-hand', 'right-hand']]) {
-              actor.flags.co2prism.activePreset = preset;
+              actor.flags.co2prism.hands.active = preset;
               const slots = {
                 'ordinary-first': { ...handReference, row: 1, order: 0, hand: null },
                 'ordinary-second': { ...handReference, row: 2, order: 0, hand: null }
               };
               for (const key of occupiedHands) slots[key] = { ...handReference, row: 1, hand: key.split('-')[0] };
-              actor.flags.co2prism.presets[preset] = { slots };
+              actor.flags.co2prism.shortcuts = Object.fromEntries(Object.entries(slots).filter(([key]) => !occupiedHands.includes(key)));
+              actor.flags.co2prism.hands.presets[preset] = Object.fromEntries(occupiedHands.map(key => [key, slots[key]]));
               settings.size = size; settings.locked = false; bar.refreshActor(); bar.layout();
               const flags = JSON.stringify(actor.flags);
               const before = cards(0).slice(0, 3).map(node => node.getBoundingClientRect());
@@ -765,13 +811,22 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
                 const rect = node.getBoundingClientRect();
                 check(['left', 'top', 'width', 'height'].every(key => Math.abs(rect[key] - before[index][key]) < 1), size + ' hand position changed');
                 if (index >= 2) return;
+                const hand = index === 0 ? 'left' : 'right';
+                const marker = node.querySelector('.co2prism-slot-hand.fa-hand');
+                const markerStyle = marker && getComputedStyle(marker);
+                const markerBounds = marker?.getBoundingClientRect();
+                check(markerBounds && Math.abs((markerBounds.left + markerBounds.right - rect.left - rect.right) / 2) < 1
+                  && markerBounds.top < rect.top + rect.height / 4 && markerStyle.pointerEvents === 'none'
+                  && markerStyle.color === 'rgb(120, 73, 46)' && !marker.textContent
+                  && markerStyle.transform === (hand === 'left' ? 'matrix(-1, 0, 0, 1, 0, 0)' : 'none'),
+                  size + ' repère de main centré en haut');
                 if (occupiedHands.includes(index === 0 ? 'left-hand' : 'right-hand')) {
                   check(node.classList.contains('co2prism-slot-executable') && !node.classList.contains('co2prism-hand-empty'), 'Occupied hand hidden');
                 } else {
-                  const style = getComputedStyle(node), icon = node.querySelector('.fa-solid.fa-hand');
-                  check(icon && Number(getComputedStyle(icon).opacity) < 1 && style.pointerEvents === 'none', 'Hand icon interactivity');
+                  const style = getComputedStyle(node);
+                  check(style.pointerEvents === 'none', 'Hand icon interactivity');
                   check(style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderLeftColor === 'rgba(0, 0, 0, 0)', 'Empty hand square visible');
-                  check(!node.draggable && !node.querySelector('.co2prism-slot-remove, .co2prism-slot-empty, .co2prism-slot-hand'), 'Empty hand controls');
+                  check(!node.draggable && !node.querySelector('.co2prism-slot-remove, .co2prism-slot-empty'), 'Empty hand controls');
                   const callCount = shortcutCalls.length;
                   node.click(); node.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer }));
                   check(shortcutCalls.length === callCount, 'Empty hand action');
@@ -860,7 +915,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const scene = canvas.scene; canvas.scene = undefined; bar.refreshActor(); movement('10', 'CO2PRISM.Unavailable'); canvas.scene = scene;
           await resetBudget(); movement('20', '4');
           const persistedBudget = JSON.stringify(actor.flags.co2prism.actionEconomy);
-          for (const preset of [1, 2, 3]) { await bar.selectCombatPreset(preset); if (bar.combatPanel.hidden) await bar.selectCombatPreset(preset); }
+          for (const preset of [1, 2, 3]) { await bar.setActivePreset(preset); if (bar.combatPanel.hidden) await bar.setActivePreset(preset); }
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === persistedBudget, 'Preset reset economy');
           const shortcutBudget = JSON.stringify(economy.getSnapshot());
           cards(0)[0].click(); await new Promise(resolve => setTimeout(resolve, 0));
@@ -1313,7 +1368,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const persistedSlots = ${JSON.stringify(result.restoredSlots)};
           const actor = { uuid: "Actor.test", name: "Narrow", type: "character", system: {},
             testUserPermission: () => true, getSkillBonuses: () => [],
-            flags: { co2prism: { activePreset: 3, panels: { combat: false, competences: true }, presets: { 3: { slots: persistedSlots } } } },
+            flags: { co2prism: { hands: { active: 3 }, panels: { combat: false, competences: true }, shortcuts: persistedSlots } },
             getFlag(scope, key) { return key.split(".").reduce((value, part) => value?.[part], this.flags[scope]); },
             async setFlag(scope, key, value) {
               let target = this.flags[scope]; const parts = key.split(".");
@@ -1327,7 +1382,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           canvas.tokens.controlled = [{ actor, document: { baseActor: actor } }];
           bar.refreshActor();
           bar.position = { x: innerWidth - 432, y: 350 }; bar.layout();
-          await bar.selectCombatPreset(3);
+          await bar.setPanelState("combat", true);
           const root = document.getElementById("co2prism-bar"), scale = 430 / 724;
           const [first, second] = bar.combatRows;
           check(first.children.length === 1 && second.children.length === 4, "Restauration après relance du navigateur incorrecte");
