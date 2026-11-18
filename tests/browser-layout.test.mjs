@@ -1928,6 +1928,151 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await bar.configWrites.get(actor);
           check(![...bar.combatRows[0].children].some(slot => slot.title.includes('First')),
             'The final remaining action is removed with the ordinary shortcut command');
+          inventoryBlade.actions[0].properties.enabled = true;
+          inventoryBlade.actions[1].conditions = [{ predicate: 'isLinkedActionActivated', object: '0' }];
+          await dropAction(0, groupRow.lastElementChild);
+          await settled();
+          const linkedGroup = () => bar.conditionalActionGroups.find(group => group.source.itemId === inventoryBlade.id);
+          const conditionalZone = bar.conditionalZone;
+          check(linkedGroup()?.available[0]?.indice === 1 && conditionalZone.children.length === 1,
+            'Combat renders the available native dependent references');
+          inventoryBlade.actions[0].properties.enabled = false;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(linkedGroup()?.dependencies.length === 1 && linkedGroup()?.available.length === 0 &&
+            conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            'An Item update removes availability but keeps the dependency');
+          let releaseLinkedVisibility;
+          inventoryBlade.actions[0].properties.enabled = true;
+          inventoryBlade.actions[1].isVisible = () => new Promise(resolve => { releaseLinkedVisibility = resolve; });
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          releaseLinkedVisibility(true);
+          await settled();
+          check(!linkedGroup() && conditionalZone.hidden, 'An old visibility result cannot escape its actor context');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          inventoryBlade.actions[1].isVisible = async () => true;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(linkedGroup()?.available[0]?.indice === 1, 'Returning to the actor rebuilds the conditional data');
+          const conditionalLink = object => ({ predicate: 'isLinkedActionActivated', object });
+          inventoryBlade.actions[2].conditions = [conditionalLink('0')];
+          inventoryBlade.actions[3].conditions = [conditionalLink('0'), conditionalLink('2')];
+          inventoryBlade.actions[3].isVisible = async () => inventoryBlade.actions[2].properties.enabled;
+          inventoryBlade.actions[2].properties.enabled = true;
+          await dropAction(2, [...groupRow.children].find(slot => slot.title.includes('First')));
+          await dropAction(0, bar.combatRows[0].lastElementChild);
+          await dropAction(1, bar.combatRows[0].lastElementChild);
+          await settled();
+          const temporaryIndices = () => [...conditionalZone.children].map(row =>
+            [...row.children].map(square => square.dataset.co2prismIndice).join()).join('|');
+          check(temporaryIndices() === '1,2,3|3' && conditionalZone.querySelectorAll('.co2prism-slot-time').length === 4,
+            'Two sources render separate rows in native order with the ordinary badges');
+          check(groupSlot().querySelectorAll('.co2prism-slot-quadrant.co2prism-conditional-halo').length === 2 &&
+            !groupSlot().classList.contains('co2prism-conditional-halo') &&
+            [...bar.combatRows[0].children].some(slot => slot.title.includes('First') && slot.classList.contains('co2prism-conditional-halo')) &&
+            [...bar.combatRows[0].children].some(slot => slot.title.includes('Second') && !slot.classList.contains('co2prism-conditional-halo')),
+            'All source representations are highlighted and the manually saved dependent remains separate');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.position = { x: 40, y: 500 }; bar.layout();
+            const normal = bar.combatRows[0].getBoundingClientRect();
+            const firstRow = conditionalZone.firstElementChild;
+            const square = firstRow.firstElementChild.getBoundingClientRect();
+            const base = bar.combatRows[0].firstElementChild.getBoundingClientRect();
+            check(firstRow.getBoundingClientRect().bottom < normal.top && Math.abs(square.width - base.width) < 1 &&
+              Math.abs(square.height - base.height) < 1 && Math.abs(square.left - normal.left) < 1 &&
+              conditionalZone.getBoundingClientRect().top >= 0 && getComputedStyle(conditionalZone).pointerEvents === 'none',
+              'Conditional rows keep exact card size and stay above normal rows at ' + size);
+          }
+          conditionalZone.style.setProperty('--conditional-width', '172');
+          check(conditionalZone.firstElementChild.scrollWidth > conditionalZone.firstElementChild.clientWidth,
+            'A long conditional row scrolls without reducing the squares');
+          bar.layout();
+          const conditionalSquare = (index, row = 0) =>
+            conditionalZone.children[row].querySelector('[data-co2prism-indice="' + index + '"]');
+          document.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+          await settled();
+          const dispatchConditional = (index, options) => conditionalSquare(index).dispatchEvent(
+            new MouseEvent('click', { bubbles: true, ...options }));
+          const persistentDependent = () => [...bar.combatRows[0].children].find(slot => slot.title.includes('Second'));
+          check(conditionalSquare(1).title === persistentDependent().title &&
+            !conditionalSquare(1).draggable && !conditionalSquare(1).querySelector('.co2prism-slot-remove'),
+            'Temporary and permanent action share the tooltip, while temporary actions cannot be edited');
+          for (const locked of [false, true]) {
+            settings.locked = locked; bar.updateLock(); await settled();
+            check(contextClick(conditionalSquare(1)) && !presetMenuOpen(), 'Conditional right-click opens no configuration menu');
+          }
+          const conditionalCalls = groupCalls.length;
+          for (const index of [1, 2, 3]) {
+            await economy.reset(); bar.refreshActor(); await settled();
+            const square = conditionalSquare(index);
+            square.click(); square.click();
+            await settled();
+            check(groupCalls.length === conditionalCalls + index && groupCalls.at(-1)[2] === index &&
+              groupCalls.at(-1)[1] === inventoryBlade.uuid && !economy.getSnapshot().normal.m,
+              'Locked conditional action executes the right native index once and uses the shared budget: ' + index);
+          }
+          dispatchConditional(1, { ctrlKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['chat', inventoryBlade.uuid, 1].join(), 'Conditional Ctrl-click uses native chat');
+          dispatchConditional(1, { shiftKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['sheet', inventoryBlade.uuid].join(), 'Conditional Shift-click uses the native sheet');
+          await economy.reset(); bar.refreshActor(); await settled();
+          persistentDependent().click(); await settled();
+          check(groupCalls.at(-1)[2] === 1, 'The same dependent remains executable as a permanent shortcut');
+          const beforeInvalidConditional = groupCalls.length;
+          inventoryBlade.actions[3].isVisible = async () => false;
+          conditionalSquare(3).click(); await settled();
+          check(groupCalls.length === beforeInvalidConditional && temporaryIndices() === '1,2',
+            'A now-false native condition denies a stale card and refreshes the rows');
+          inventoryBlade.actions[3].isVisible = async () => inventoryBlade.actions[2].properties.enabled;
+          hooks.get('updateItem')(inventoryBlade); await settled();
+          const obsoleteConditional = conditionalSquare(1);
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          obsoleteConditional.click();
+          check(groupCalls.length === beforeInvalidConditional && conditionalZone.hidden,
+            'Switching actor invalidates a previously attached temporary shortcut');
+          canvas.tokens.controlled = selected; bar.refreshActor(); await settled();
+          settings.locked = false; bar.updateLock(); await settled();
+          const anchoredRow = bar.combatRows[0].getBoundingClientRect().toJSON();
+          inventoryBlade.actions[2].properties.enabled = false;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(temporaryIndices() === '1,2' && groupSlot().querySelectorAll('.co2prism-conditional-halo').length === 1 &&
+            JSON.stringify(bar.combatRows[0].getBoundingClientRect().toJSON()) === JSON.stringify(anchoredRow),
+            'A second false condition removes only the affected row and halo without moving normal slots');
+          inventoryBlade.actions[0].properties.enabled = false;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(conditionalZone.hidden && !conditionalZone.children.length && !root.querySelector('.co2prism-conditional-halo'),
+            'Deactivation clears the conditional cards and every highlight');
+          const conditionalSource = { itemId: inventoryBlade.id, source: inventoryBlade.uuid, indice: 0 };
+          const permanentShortcuts = JSON.stringify(actor.flags.co2prism.shortcuts);
+          await economy.reset();
+          await bar.setPresetActionRule(actor, conditionalSource, 3, 'activate');
+          await bar.setActivePreset(3);
+          await settled();
+          check(temporaryIndices() === '1,2' && JSON.stringify(actor.flags.co2prism.shortcuts) === permanentShortcuts,
+            'Preset automation shows conditional rows without writing permanent shortcuts');
+          await bar.setActivePreset(1);
+          await settled();
+          check(conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            'Preset deactivation removes the temporary row and highlights');
+          await economy.reset();
+          await bar.setActivePreset(3);
+          await settled();
+          game.system.api.macros.useAction = async (source, indice, type) => {
+            const result = await groupActivation({ source, indice, type, state: true });
+            if (result && indice === 1) {
+              inventoryBlade.actions[0].properties.enabled = false;
+              hooks.get('updateItem')(inventoryBlade);
+            }
+            return result;
+          };
+          await economy.reset(); bar.refreshActor(); await settled();
+          conditionalSquare(1).click(); await settled();
+          check(conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            'A dependent action changing the native source state clears the temporary row');
           const pathSheets = [];
           const makePathItem = (owner, type, id, sort, system, img) => {
             const document = { id, uuid: owner.uuid + '.Item.' + id, type, name: id, sort, img, parent: owner,
@@ -2164,7 +2309,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
     const execution = spawnSync(edge, ["--headless", "--no-sandbox", "--disable-gpu", "--in-process-gpu",
       "--disable-software-rasterizer", "--no-first-run", "--no-default-browser-check",
       "--allow-file-access-from-files", `--user-data-dir=${join(directory, "profile")}`,
-      "--window-size=2400,1400", "--virtual-time-budget=4000",
+      "--window-size=2400,1400", "--virtual-time-budget=6000",
       ...(process.env.CO2PRISM_SCREENSHOT ? [`--screenshot=${process.env.CO2PRISM_SCREENSHOT}`] : []),
       "--dump-dom", pathToFileURL(fixture).href], {
       encoding: "utf8", timeout: 25000, maxBuffer: 2000000, windowsHide: true

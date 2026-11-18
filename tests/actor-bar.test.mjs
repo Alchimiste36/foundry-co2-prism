@@ -1819,6 +1819,52 @@ test("automatisation : preset entrant validé, transitions natives séquentielle
   assert.equal(item.actions[3].properties.enabled, true);
 });
 
+test("actions conditionnelles : index CO2, visibilité native, ordre et origines multiples", async () => {
+  const { bar, a, item, create, writes } = setupShortcuts();
+  const linked = object => ({ predicate: "isLinkedActionActivated", object });
+  const checks = [];
+  const add = (indice, conditions = [], visible = true) => ({
+    indice, source: item.uuid, conditions, properties: { enabled: false },
+    async isVisible(source, actor) {
+      assert.equal(source, item);
+      assert.equal(actor, a);
+      checks.push(indice);
+      return visible && conditions.every(condition => condition.predicate !== "isLinkedActionActivated"
+        || source.system.actions[condition.object]?.properties.enabled);
+    }
+  });
+  item.actions = item.system.actions = [add(0), add(1, [linked("0")]), add(2, [{ predicate: "isEquipped" }, linked("0")]),
+    add(3, [linked("0")]), add(4), add(5, [linked(4)]), add(6, [linked("99")])];
+  const ref = indice => ({ source: item.uuid, itemId: item.id, indice });
+  const rows = [[{ key: "group", row: 1, reference: { actions: [ref(4), ref(0)] } },
+    { key: "manual", row: 1, reference: ref(2) }], [{ key: "repeat", row: 2, reference: ref(0) }]];
+  const collect = actor => bar.collectConditionalActions(actor, rows, { visibility: new Map() });
+  const bySource = (groups, index) => groups.find(group => group.source.indice === index);
+  const indices = refs => Array.from(refs, ref => ref.indice);
+  const inactive = await collect(a);
+  assert.deepEqual(indices(bySource(inactive, 0).dependencies), [1, 2, 3]);
+  assert.deepEqual(indices(bySource(inactive, 0).available), []);
+  assert.deepEqual(checks, []);
+  item.actions[0].properties.enabled = item.actions[4].properties.enabled = true;
+  const active = await collect(a);
+  assert.equal(active.length, 2);
+  assert.deepEqual(indices(bySource(active, 0).available), [1, 2, 3]);
+  assert.deepEqual(indices(bySource(active, 4).available), [5]);
+  assert.deepEqual(Array.from(bySource(active, 0).origins, origin => [origin.key, origin.row, origin.actionIndex]),
+    [["group", 1, 1], ["repeat", 2, undefined]]);
+  item.actions[2] = add(2, [{ predicate: "isEquipped" }, linked("0")], false);
+  item.actions[3].conditions.push(linked("4"));
+  item.actions[4].properties.enabled = false;
+  const restricted = bySource(await collect(a), 0);
+  assert.deepEqual(indices(restricted.dependencies), [1, 2, 3]);
+  assert.deepEqual(indices(restricted.available), [1]);
+  a.items.delete(item.id);
+  assert.equal((await collect(a)).length, 0);
+  const other = create("other-context").actor;
+  assert.equal((await collect(other)).length, 0);
+  assert.equal(writes.length, 0);
+});
+
 test("raccourcis : références natives seules, restauration, isolation et disparition", async () => {
   const { bar, context, a, item, payload, create, select, writes } = setupShortcuts();
   const original = structuredClone(a.system);

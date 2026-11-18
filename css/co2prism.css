@@ -637,6 +637,33 @@
   display: flex; align-items: flex-start; gap: calc(8 * var(--co2prism-unit));
   overflow-x: auto; overflow-y: hidden; pointer-events: auto;
 }
+.co2prism-conditional-zone {
+  --row-start: calc(82 * var(--co2prism-unit));
+  --row-gap: calc(8 * var(--co2prism-unit));
+  position: absolute;
+  left: calc(948 * var(--co2prism-unit));
+  bottom: calc(100% - var(--row-start) + var(--row-gap));
+  z-index: 2;
+  width: calc(var(--conditional-width, 172) * var(--co2prism-unit));
+  max-height: max(0px, calc(var(--conditional-art-top, 0px) + var(--row-start) - var(--row-gap) - 4px));
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--row-gap);
+  overflow: hidden auto;
+  scrollbar-width: thin;
+  pointer-events: none;
+}
+.co2prism-conditional-row {
+  flex: none;
+  width: max-content;
+  max-width: 100%;
+  min-height: calc(172 * var(--co2prism-unit));
+}
+.co2prism-conditional-halo {
+  outline: max(1px, calc(3 * var(--co2prism-unit))) solid #ffdc53;
+  outline-offset: calc(-3 * var(--co2prism-unit));
+}
 .co2prism-budget-band {
   --cut: calc(43 * var(--co2prism-unit));
   --tip: calc(20 * var(--co2prism-unit));
