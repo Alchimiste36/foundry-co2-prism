@@ -79,7 +79,13 @@ class PrismBar {
     this.movementResults = new WeakMap();
     this.movementNotifications = new MovementNotifications();
     this.movementContextVersion = 0;
-    this.movementZones = new MovementZones();
+    this.movementZones = new MovementZones({ getPalette: () => {
+      if (this.element?.nodeType !== 1) return undefined;
+      const style = getComputedStyle(this.element);
+      const move = Number.parseInt(style.getPropertyValue("--prism-move").trim().slice(1), 16);
+      const origin = Number.parseInt(style.getPropertyValue("--prism-origin").trim().slice(1), 16);
+      return Number.isFinite(move) && Number.isFinite(origin) ? { move, origin } : undefined;
+    } });
     this.changingHands = new WeakSet();
   }
 
