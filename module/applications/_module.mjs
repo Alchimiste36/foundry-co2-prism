@@ -12,12 +12,20 @@ const COMBAT_SLOT_SIZE = 172;
 const COMBAT_SLOT_GAP = 8;
 const MAX_SHORTCUT_ACTIONS = 4;
 const SHORTCUT_PREVIEW_DELAY = 350;
-const BUDGET_ORIGIN = 308 + 43 + 20;
-const MOVEMENT_ORIGIN = 246;
-const MOVEMENT_BOTTOM = 28;
-const BASE_BOTTOM = 569;
+const NUCLEUS_RADIUS = 261;
+const NUCLEUS_RIGHT = 938;
+const DIAGONAL_LEFT = 100;
+const BASE_BOTTOM = 2 * NUCLEUS_RADIUS;
+const SKILLS_BOTTOM = 670;
+const BUDGET_DROP = 30;
+const BUDGET_START = NUCLEUS_RADIUS + BUDGET_DROP;
+const BUDGET_INSET = 43;
+const BUDGET_STEP = 68;
+const BUDGET_EDGE_GAP = 8;
+const BUDGET_ORIGIN = BUDGET_START + BUDGET_INSET + BUDGET_STEP + BUDGET_EDGE_GAP;
 const EQUIPMENT_COLUMNS = 6;
 const CAPACITY_COLUMNS = 5;
+const GAUGE_VALUE_WIDTH = 108;
 const PANELS = ["combat", "competences", "equipements", "voies"];
 const EXCLUSIVE_PANELS = { equipements: "voies", voies: "equipements" };
 // Depuis le portrait vers l'extérieur du volet.
@@ -111,6 +119,14 @@ class PrismBar {
     this.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key =>
       [key, this.element.querySelector(`[data-co2prism-combat-value="${key}"]`)]));
     this.combatEffects = this.element.querySelector(".co2prism-effects");
+    this.combatEffects.addEventListener("wheel", event => {
+      if (event.ctrlKey || event.shiftKey || event.deltaX || !event.deltaY) return;
+      const band = this.combatEffects;
+      const before = band.scrollLeft;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? band.clientWidth : 1;
+      band.scrollLeft += event.deltaY * unit;
+      if (band.scrollLeft !== before) event.preventDefault();
+    }, { passive: false });
     this.combatSlots = this.element.querySelector(".co2prism-combat-slots");
     this.combatRows = [...this.combatSlots.querySelectorAll(".co2prism-combat-row")];
     this.conditionalZone = this.combatSlots.querySelector(".co2prism-conditional-zone");
@@ -336,6 +352,7 @@ class PrismBar {
     if (this.slotDrag && (this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const summaries = [];
+    let gaugeFontSize = 32;
     for (const [key, nodes] of Object.entries(this.gauges)) {
       const resource = this.getResource(actor, key);
       const current = Number.isFinite(resource?.value) ? resource.value : null;
@@ -346,13 +363,12 @@ class PrismBar {
         ? Math.max(0, Math.min(100, current / maximum * 100)) : 0;
       if (nodes.text.textContent !== text) nodes.text.textContent = text;
       nodes.fill.style.setProperty("--fill", `${fill}%`);
-      // Réduire seulement les longues valeurs pour les garder dans leur zone.
-      const width = 92;
-      nodes.text.style.setProperty("--text-size", Math.min(36, width / (text.length * 0.58)));
+      gaugeFontSize = Math.min(gaugeFontSize, (GAUGE_VALUE_WIDTH - 4) / (text.length * 0.62));
       const label = `${game.i18n.localize(`CO2PRISM.Gauges.${key}`)} : ${text}`;
       nodes.fill.dataset.tooltipText = label;
       summaries.push(label);
     }
+    for (const { text } of Object.values(this.gauges)) text.style.setProperty("--text-size", gaugeFontSize);
     this.name.textContent = actor?.name || unavailable;
     this.name.dataset.tooltipText = actor?.name || game.i18n.localize("CO2PRISM.NoActor");
     const portrait = actor?.img || "icons/svg/mystery-man.svg";
@@ -363,6 +379,8 @@ class PrismBar {
     this.configuration = this.readConfiguration(actor);
     this.updatePresets();
     const skillsChanged = this.updateSkills();
+    const diagonal = [this.equipmentPanel, this.pathsPanel].find(panel => panel && !panel.hidden);
+    const previousBandRise = diagonal?.style.getPropertyValue("--band-rise");
     // Fermer d'abord le volet qui partage la même zone.
     if (this.configuration.panels.voies) {
       this.updateEquipment();
@@ -373,7 +391,9 @@ class PrismBar {
     }
     const combatChanged = this.updateCombat();
     const movementChanged = this.updateMovementPanel();
-    if (skillsChanged || combatChanged || movementChanged) this.layout({ preserveAnchor: true });
+    const nextDiagonal = [this.equipmentPanel, this.pathsPanel].find(panel => panel && !panel.hidden);
+    if (skillsChanged || combatChanged || movementChanged || diagonal !== nextDiagonal
+      || previousBandRise !== nextDiagonal?.style.getPropertyValue("--band-rise")) this.layout({ preserveAnchor: true });
   }
 
   readPathGroups(actor) {
@@ -466,6 +486,7 @@ class PrismBar {
   updatePaths() {
     if (!this.pathsPanel) return;
     const open = Boolean(this.actor && this.configuration.panels.voies);
+    const wasHidden = this.pathsPanel.hidden;
     this.pathsPanel.hidden = !open;
     this.pathsToggle.disabled = !this.canConfigure();
     this.pathsToggle.setAttribute("aria-expanded", String(open));
@@ -487,7 +508,10 @@ class PrismBar {
       path && itemSignature(path), capacities.map(capacity => [...itemSignature(capacity), capacity.system.learned]),
       this.configuration.pathCollapsed.has(path?.id ?? "off-paths")
     ]));
-    if (signature === this.pathsSignature) return;
+    if (signature === this.pathsSignature) {
+      if (wasHidden) this.updateDiagonalSurface(this.pathsPanel);
+      return;
+    }
     this.pathsSignature = signature;
     dismissTooltip();
     let compactColumn = 0;
@@ -500,7 +524,6 @@ class PrismBar {
       group.dataset.pathKey = key;
       group.dataset.collapsed = String(collapsed);
       group.style.setProperty("--rows", rows);
-      group.style.setProperty("--panel-columns", collapsed ? 0 : Math.min(capacities.length, CAPACITY_COLUMNS));
       if (collapsed) {
         group.style.setProperty("--compact-column", compactColumn);
         compactColumn = (compactColumn + 1) % CAPACITY_COLUMNS;
@@ -544,6 +567,7 @@ class PrismBar {
       });
       return group;
     }));
+    this.updateDiagonalSurface(this.pathsPanel);
   }
 
   connectEquipment() {
@@ -746,6 +770,7 @@ class PrismBar {
     if (!this.equipmentPanel) return;
     this.closeEquipmentMenu();
     const open = Boolean(this.actor && this.configuration.panels.equipements);
+    const wasHidden = this.equipmentPanel.hidden;
     const canConfigure = this.canConfigure();
     this.equipmentPanel.hidden = !open;
     this.equipmentToggle.disabled = !canConfigure;
@@ -760,6 +785,7 @@ class PrismBar {
     const seen = new Set(this.actor.containedItemUuids);
     const locked = game.settings.get(MODULE, "locked");
     const { hiddenEquipment } = this.configuration;
+    const geometry = [];
     let compactColumn = 0;
     for (const entry of this.equipmentGroups) {
       const { key, subtypes, group, button, items } = entry;
@@ -782,8 +808,8 @@ class PrismBar {
         return expanded && (!locked || !hiddenEquipment.has(item.id));
       });
       const rows = Math.max(1, Math.ceil(displayed.length / EQUIPMENT_COLUMNS));
+      geometry.push(expanded ? displayed.length : -1);
       group.style.setProperty("--rows", rows);
-      group.style.setProperty("--panel-columns", Math.min(displayed.length, EQUIPMENT_COLUMNS));
       const descriptions = displayed.map(item => this.itemTooltipDescription(item));
       const signature = JSON.stringify(displayed.map((item, index) =>
         [item.uuid, item.name, item.img, hiddenEquipment.has(item.id), descriptions[index], item.isOwner]));
@@ -809,6 +835,35 @@ class PrismBar {
         return tile;
       }));
     }
+    const layoutKey = geometry.join(",");
+    if (wasHidden || layoutKey !== this.equipmentLayoutKey) {
+      this.equipmentLayoutKey = layoutKey;
+      this.updateDiagonalSurface(this.equipmentPanel);
+    }
+  }
+
+  updateDiagonalSurface(panel) {
+    const scale = parseFloat(this.element.style.getPropertyValue("--co2prism-unit"));
+    if (!scale) return;
+    const art = this.art.getBoundingClientRect();
+    const chamfer = parseFloat(getComputedStyle(panel).getPropertyValue("--band-chamfer"));
+    const rightCut = art.left + (NUCLEUS_RADIUS - chamfer) * scale;
+    // Seul le contour supérieur varie. Le bord inférieur reste ancré à G et H.
+    let rise = 2 * DIAGONAL_LEFT + 12;
+    for (const node of panel.querySelectorAll("button, .co2prism-path-off, .co2prism-path-label")) {
+      const rect = node.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      const center = rect.left + rect.width / 2 - art.left + rect.top + rect.height / 2 - art.top;
+      const radius = node.classList.contains("co2prism-path-label")
+        ? parseFloat(getComputedStyle(node).lineHeight) / Math.SQRT2
+        : node.matches(".co2prism-equipment-tile, .co2prism-path-tile") ? rect.width / 2
+        : (rect.width + rect.height) / 2;
+      // Après cisaillement, la coupe à 45° avance de deux unités dans la projection.
+      const topCut = 2 * Math.max(0, rect.right - rightCut);
+      rise = Math.max(rise, NUCLEUS_RADIUS + 12 - (center - radius - topCut) / scale);
+    }
+    panel.style.setProperty("--band-rise", Math.ceil(rise));
+    return Math.ceil(rise) - chamfer;
   }
 
   movementToken() {
@@ -1127,6 +1182,7 @@ class PrismBar {
       }
       const list = Array.isArray(bonuses) ? bonuses : null;
       count.textContent = `(${list ? list.length : unavailable})`;
+      count.style.setProperty("--co2prism-skill-count-size", Math.min(18, 60 / (count.textContent.length * 0.6)));
       const label = game.i18n.localize(`CO2PRISM.Abilities.${key}`);
       const lines = list?.map(bonus => {
         const number = Number.isFinite(bonus?.value) ? `${bonus.value >= 0 ? "+" : ""}${bonus.value}` : unavailable;
@@ -1227,14 +1283,6 @@ class PrismBar {
       this.combatToggle.setAttribute("aria-expanded", String(open));
     }
     this.updateEffects();
-    if (!open) {
-      this.clearShortcutPreview();
-      this.closePresetActionMenu();
-      this.conditionRender = null;
-      this.conditionalActionGroups = [];
-      this.renderConditionalRows([]);
-      return changed;
-    }
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const economy = new ActionEconomy(this.actor).getSnapshot();
     const movements = economyEnabled() ? economy.movementsRemaining : 1;
@@ -1247,8 +1295,16 @@ class PrismBar {
         return String(roundMovementCells(number, game.settings?.get(MODULE, "movementRounding")));
       };
       node.textContent = format(isMovement && value !== null ? value * movements : value);
-      node.style.setProperty("--co2prism-combat-size", Math.min(isMovement ? 42 : key === "def" ? 72 : 48,
-        (isMovement ? 62 : 115) / (node.textContent.length * 0.58)));
+      node.style.setProperty("--co2prism-combat-size", Math.min(isMovement ? 36 : key === "def" ? 52 : 25,
+        (isMovement ? 54 : key === "def" ? 88 : 44) / (node.textContent.length * 0.62)));
+    }
+    if (!open) {
+      this.clearShortcutPreview();
+      this.closePresetActionMenu();
+      this.conditionRender = null;
+      this.conditionalActionGroups = [];
+      this.renderConditionalRows([]);
+      return changed;
     }
     this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
     const budgetChanged = this.renderEconomy(economy);
@@ -1259,6 +1315,8 @@ class PrismBar {
   updateEffects() {
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const effects = this.readCombatEffects();
+    const scroll = this.effectsActor === this.actor ? this.combatEffects.scrollLeft : 0;
+    this.effectsActor = this.actor;
     const elements = effects.map(effect => {
       const element = document.createElement("span");
       element.className = "co2prism-effect";
@@ -1274,6 +1332,7 @@ class PrismBar {
       return element;
     });
     this.combatEffects.replaceChildren(...elements);
+    this.combatEffects.scrollLeft = scroll;
   }
 
   async changeEconomy(operation, type) {
@@ -2056,6 +2115,7 @@ class PrismBar {
     const uses = this.shortcutUses(action, item);
     if (uses) {
       const badge = add("span", "co2prism-slot-uses", `${uses.value} `);
+      badge.dataset.co2prismUses = uses.type;
       badge.dataset.tooltipText = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
       const icon = document.createElement("i");
       icon.className = `fa-solid fa-${uses.icon}`; badge.append(icon);
@@ -2926,34 +2986,51 @@ class PrismBar {
     const open = Boolean(this.actor && this.configuration?.panels.competences);
     const combat = Boolean(this.actor && this.configuration?.panels.combat);
     let top = 0;
-    const left = open ? 198 : 0;
-    const bottom = open ? 603 : BASE_BOTTOM;
+    const diagonal = [this.equipmentPanel, this.pathsPanel].find(panel => panel && !panel.hidden);
+    const left = open ? NUCLEUS_RADIUS : diagonal ? DIAGONAL_LEFT : 0;
+    const bottom = open ? SKILLS_BOTTOM : BASE_BOTTOM;
     const minimumRight = COMBAT_ROW_ORIGIN + COMBAT_SLOT_SIZE;
     const movementOpen = this.movementPanel?.hidden === false;
     const reserve = movementOpen ? Math.min(180, (window.innerHeight - 8) * 0.4) : 0;
     const width = Math.max(1, Math.min(WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M,
-      (window.innerWidth - 8) * 724 / ((combat ? minimumRight : 724) + left),
+      (window.innerWidth - 8) * 724 / ((combat ? minimumRight : NUCLEUS_RIGHT) + left),
       (window.innerHeight - 8 - reserve) * 724 / bottom));
     // Les réserves haute et basse suivent l'ancrage du dessin d'origine.
     const scale = width / 724;
-    let right = combat ? Math.min(this.combatExtent ?? minimumRight, (window.innerWidth - 8) / scale - left) : 724;
+    let right = combat ? Math.min(this.combatExtent ?? minimumRight, (window.innerWidth - 8) / scale - left) : NUCLEUS_RIGHT;
     this.element.style.setProperty("--co2prism-unit", `${scale}px`);
+    this.element.style.setProperty("--prism-r", NUCLEUS_RADIUS);
+    this.element.style.setProperty("--prism-core-right", NUCLEUS_RIGHT);
+    this.element.style.setProperty("--prism-diagonal-left", DIAGONAL_LEFT);
+    this.element.style.setProperty("--prism-skills-bottom", SKILLS_BOTTOM);
+    this.element.style.setProperty("--prism-budget-drop", BUDGET_DROP);
+    this.element.style.setProperty("--prism-budget-inset", BUDGET_INSET);
+    this.element.style.setProperty("--prism-budget-step", BUDGET_STEP);
+    this.element.style.setProperty("--co2prism-base-width", `${width}px`);
+    this.element.style.setProperty("--co2prism-base-height", `${2 * NUCLEUS_RADIUS * scale}px`);
+    if (diagonal && diagonal.children.length) {
+      const rise = this.updateDiagonalSurface(diagonal);
+      if ((rise + bottom) * scale <= window.innerHeight - 8) top = Math.max(top, rise);
+    }
     if (movementOpen) {
       this.movementPanel.style.removeProperty("width");
       this.movementPanel.style.removeProperty("max-height");
-      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (MOVEMENT_ORIGIN + left) * scale)}px`;
+      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (BUDGET_START + left) * scale)}px`;
       const panel = this.movementPanel.getBoundingClientRect();
-      right = Math.max(right, MOVEMENT_ORIGIN + panel.width / scale);
-      top = Math.max(top, panel.height / scale - MOVEMENT_BOTTOM);
+      right = Math.max(right, BUDGET_START + panel.width / scale);
+      top = Math.max(top, panel.height / scale);
     }
     this.panelOffset = { x: width * left / 724, y: width * top / 724 };
     for (const [index, row] of (this.combatRows ?? []).entries()) {
       row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? COMBAT_SLOT_SIZE, Math.max(0, right - COMBAT_ROW_ORIGIN)));
     }
     this.conditionalZone?.style.setProperty("--conditional-width", Math.max(0, right - COMBAT_ROW_ORIGIN));
-    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 228, Math.max(1, right - BUDGET_ORIGIN)));
-    this.element.style.setProperty("--co2prism-base-width", `${width}px`);
-    this.element.style.setProperty("--co2prism-base-height", `${width * 515 / 724}px`);
+    if (this.budgetScroll) {
+      const budgetViewport = Math.min(this.budgetWidth ?? 228, Math.max(1, right - BUDGET_ORIGIN));
+      this.budgetScroll.style.setProperty("--w", budgetViewport);
+      this.combatPanel.style.setProperty("--prism-budget-edge", economyEnabled()
+        ? BUDGET_START + BUDGET_INSET + budgetViewport + BUDGET_EDGE_GAP - NUCLEUS_RADIUS : 0);
+    }
     this.element.style.setProperty("--co2prism-offset-x", `${this.panelOffset.x}px`);
     this.element.style.setProperty("--co2prism-offset-y", `${this.panelOffset.y}px`);
     this.element.style.width = `${width * right / 724 + this.panelOffset.x}px`;
@@ -2978,7 +3055,9 @@ class PrismBar {
 
   place(x, y, clamp = true) {
     const bounds = this.element.getBoundingClientRect();
-    this.element.style.left = `${clamp ? Math.max(0, Math.min(x, window.innerWidth - bounds.width)) : x}px`;
+    const left = clamp ? Math.max(0, Math.min(x, window.innerWidth - bounds.width)) : x;
+    this.element.style.left = `${left}px`;
+    this.combatEffects?.style.setProperty("--prism-effects-right", `${window.innerWidth - left - (this.panelOffset?.x ?? 0) - 8}px`);
     const top = clamp ? Math.max(0, Math.min(y, window.innerHeight - bounds.height)) : y;
     this.element.style.top = `${top}px`;
     this.conditionalZone?.style.setProperty("--conditional-art-top", `${top + (this.panelOffset?.y ?? 0)}px`);

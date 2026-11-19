@@ -690,12 +690,12 @@ test("redimensionnement, bornage et restauration dans une petite fenêtre", () =
   bar.position = settings.position;
   bar.layout();
   assert.equal(writes.length, 1);
-  context.window.innerWidth = 1000;
+  context.window.innerWidth = 1300;
   context.window.innerHeight = 800;
   bar.layout();
   const enlarged = bar.element.getBoundingClientRect();
-  assert.equal(enlarged.width, 780);
-  assert.ok(enlarged.left + enlarged.width <= 1000);
+  assert.ok(Math.abs(enlarged.width - 780 * 938 / 724) < 0.01);
+  assert.ok(enlarged.left + enlarged.width <= 1300);
   assert.ok(enlarged.top + enlarged.height <= 800);
 });
 
@@ -1087,7 +1087,7 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(a.flags.co2prism.panels.equipements, true);
   assert.deepEqual(base(), before);
   assert.ok(reads.length >= 7);
-  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1318 / 724) < 0.01);
+  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1381 / 724) < 0.01);
   await bar.setPanelState("equipements", false);
   assert.equal(bar.skillsPanel.hidden, false);
   await bar.setPanelState("equipements", true);
