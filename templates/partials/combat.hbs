@@ -1,0 +1,47 @@
+<section id="co2prism-combat" class="co2prism-combat" hidden aria-label="{{localize 'CO2PRISM.Combat.Title'}}">
+  <div class="co2prism-combat-top">
+    <div class="co2prism-budget-band">
+      <div class="co2prism-budget-scroll" tabindex="0" role="region" aria-label="{{localize 'CO2PRISM.Combat.ActionBudget'}}">
+        <div class="co2prism-time-bar"></div>
+      </div>
+      <button type="button" disabled class="co2prism-budget-reset" data-tooltip-text="{{localize 'CO2PRISM.Combat.ResetBudget'}}" aria-label="{{localize 'CO2PRISM.Combat.ResetBudget'}}"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button>
+    </div>
+    <div class="co2prism-combat-controls">
+      <div class="co2prism-time-commands" role="group" aria-label="{{localize 'CO2PRISM.Combat.ActionBudget'}}">
+        <span class="co2prism-time-command"><button type="button" disabled class="co2prism-time co2prism-time-attack" data-co2prism-time="a"><span>A</span></button></span>
+        <span class="co2prism-time-command"><button type="button" disabled class="co2prism-time co2prism-time-limited" data-co2prism-time="l"><span>L</span></button></span>
+        <span class="co2prism-time-command"><button type="button" disabled class="co2prism-time co2prism-time-mixed" data-co2prism-time="am"><span>AM</span></button></span>
+        <span class="co2prism-time-command"><button type="button" disabled class="co2prism-time co2prism-time-move" data-co2prism-time="m"><span>M</span></button></span>
+      </div>
+      <div class="co2prism-combat-hand" data-co2prism-hand-container="left"></div>
+      <div class="co2prism-presets">
+        <button type="button" disabled class="co2prism-number" data-co2prism-preset="1" aria-disabled="true">1</button>
+        <button type="button" disabled class="co2prism-number" data-co2prism-preset="2" aria-disabled="true">2</button>
+        <button type="button" disabled class="co2prism-number" data-co2prism-preset="3" aria-disabled="true">3</button>
+      </div>
+      <div class="co2prism-combat-hand" data-co2prism-hand-container="right"></div>
+    </div>
+  </div>
+  <div class="co2prism-combat-stats">
+    <div class="co2prism-combat-stat co2prism-defense">
+      <span class="co2prism-combat-number" data-co2prism-combat-value="def" data-tooltip-text="{{localize 'CO2PRISM.Combat.Defense'}}">{{localize 'CO2PRISM.Unavailable'}}</span>
+      <span class="co2prism-defense-reduction" data-tooltip-text="{{localize 'CO2PRISM.Combat.Reduction'}}">
+        <i class="fa-solid fa-universal-access" aria-hidden="true"></i>
+        <span class="co2prism-combat-number co2prism-dr" data-co2prism-combat-value="dr">{{localize 'CO2PRISM.Unavailable'}}</span>
+      </span>
+      <div class="co2prism-defense-states">
+        <span class="co2prism-icon co2prism-defense-control co2prism-defense-partial" aria-disabled="true" data-tooltip-text="{{localize 'CO2PRISM.Combat.PartialDefense'}}"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+        <span class="co2prism-icon co2prism-defense-control co2prism-defense-full" aria-disabled="true" data-tooltip-text="{{localize 'CO2PRISM.Combat.FullDefense'}}"><i class="fa-solid fa-shield" aria-hidden="true"></i></span>
+      </div>
+    </div>
+    <div class="co2prism-combat-stat co2prism-movement" data-tooltip-text="{{localize 'CO2PRISM.Combat.RemainingMovement'}}">
+      <span class="co2prism-icon co2prism-stats-steps" aria-hidden="true"><i class="fa-solid fa-shoe-prints"></i></span>
+      <span class="co2prism-movement-label">{{localize 'CO2PRISM.Combat.Meters'}} / {{localize 'CO2PRISM.Combat.Cells'}}</span>
+      <span class="co2prism-movement-total">
+        <span class="co2prism-combat-number" data-co2prism-combat-value="meters">{{localize 'CO2PRISM.Unavailable'}}</span>
+        <span aria-hidden="true">/</span>
+        <span class="co2prism-combat-number" data-co2prism-combat-value="cells">{{localize 'CO2PRISM.Unavailable'}}</span>
+      </span>
+    </div>
+  </div>
+</section>

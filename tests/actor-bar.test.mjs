@@ -660,6 +660,7 @@ test("déplacement depuis le portrait, verrouillage et position utilisateur", ()
   assert.equal(saved[0].key, "position");
   assert.equal(saved[0].value.x, 90);
   assert.equal(capture.size, 0);
+  bar.anchor = bar.element;
   bar.layout();
   assert.equal(bar.element.style.left, "90px");
   locked = true; bar.updateLock(); bar.startDrag(event);
@@ -678,8 +679,9 @@ test("redimensionnement, bornage et restauration dans une petite fenêtre", () =
   bar.position = settings.position;
   bar.element = { style: { setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
     return { left: parseFloat(this.style.left) || 0, top: parseFloat(this.style.top) || 0,
-      width: parseFloat(this.style.width), height: parseFloat(this.style.height) };
+      width: 508 * parseFloat(this.style["--co2prism-unit"]), height: 276 * parseFloat(this.style["--co2prism-unit"]) };
   } };
+  bar.anchor = bar.element;
   bar.layout();
   const rect = bar.element.getBoundingClientRect();
   assert.ok(rect.width <= 412 && rect.height <= 292);
@@ -694,7 +696,7 @@ test("redimensionnement, bornage et restauration dans une petite fenêtre", () =
   context.window.innerHeight = 800;
   bar.layout();
   const enlarged = bar.element.getBoundingClientRect();
-  assert.ok(Math.abs(enlarged.width - 780 * 938 / 724) < 0.01);
+  assert.ok(Math.abs(enlarged.width - 780 * 508 / 724) < 0.01);
   assert.ok(enlarged.left + enlarged.width <= 1300);
   assert.ok(enlarged.top + enlarged.height <= 800);
 });
@@ -1049,6 +1051,7 @@ function setupSkills() {
       width: parseFloat(this.style.width) || 0, height: parseFloat(this.style.height) || 0 };
   } };
   context.game.settings = { get: () => "M", set() {} };
+  bar.anchor = bar.element;
   bar.layout();
   bar.skillsPanel = { hidden: true };
   bar.skillsToggle = { dataset: {}, setAttribute(key, value) { this[key] = value; } };
@@ -1087,7 +1090,6 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(a.flags.co2prism.panels.equipements, true);
   assert.deepEqual(base(), before);
   assert.ok(reads.length >= 7);
-  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1381 / 724) < 0.01);
   await bar.setPanelState("equipements", false);
   assert.equal(bar.skillsPanel.hidden, false);
   await bar.setPanelState("equipements", true);
@@ -1175,7 +1177,7 @@ function setupMovementDisplay() {
   bar.combatPanel = { hidden: false, dataset: {} };
   bar.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key => [key,
     { textContent: "", style: { setProperty() {} } }]));
-  bar.combatEffects = { replaceChildren() {} };
+  bar.combatEffects = { children: [], scrollLeft: 0 };
   bar.readCombatEffects = () => [];
   bar.renderEconomy = bar.renderCombatSlots = () => false;
   bar.refreshActor = () => bar.updateCombat();

@@ -11,7 +11,8 @@
       "Title": "Voies et Capacités",
       "Open": "Ouvrir le volet Voies et Capacités",
       "Close": "Fermer le volet Voies et Capacités",
-      "OffPaths": "Hors-voies"
+      "OffPaths": "Hors-voies",
+      "Empty": "Aucune capacité."
     },
     "Equipment": {
       "ToggleAllHint": "Clic droit pour replier ou déplier toutes les catégories",
@@ -29,6 +30,7 @@
       "Close": "Fermer le volet Équipements",
       "Expand": "Déplier {category}",
       "Collapse": "Replier {category}",
+      "Empty": "Aucun objet.",
       "Groups": {
         "misc": "Divers",
         "containers": "Contenants",
@@ -183,6 +185,7 @@
       "Close": "Fermer le panneau Mouvement.",
       "CellsAvailable": "{cells} cases disponibles",
       "CellsAvailableOne": "{cells} case disponible",
+      "CellsProgress": "Cases parcourues : {used}. Capacité : {capacity}.",
       "NoMovement": "Aucun mouvement",
       "Normal": "Mouvement normal et valide",
       "ExcessOne": "Dépassement de {excess} case !",

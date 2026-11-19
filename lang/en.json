@@ -11,7 +11,8 @@
       "Title": "Paths and Capacities",
       "Open": "Open the Paths and Capacities panel",
       "Close": "Close the Paths and Capacities panel",
-      "OffPaths": "Off-path"
+      "OffPaths": "Off-path",
+      "Empty": "No capacities."
     },
     "Equipment": {
       "ToggleAllHint": "Right-click to collapse or expand all categories",
@@ -29,6 +30,7 @@
       "Close": "Close the equipment panel",
       "Expand": "Expand {category}",
       "Collapse": "Collapse {category}",
+      "Empty": "No items.",
       "Groups": {
         "misc": "Miscellaneous",
         "containers": "Containers",
@@ -183,6 +185,7 @@
       "Close": "Close the Movement panel.",
       "CellsAvailable": "{cells} squares available",
       "CellsAvailableOne": "{cells} square available",
+      "CellsProgress": "Squares travelled: {used}. Capacity: {capacity}.",
       "NoMovement": "No movement",
       "Normal": "Normal and valid movement",
       "ExcessOne": "Movement exceeded by {excess} square!",

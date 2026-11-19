@@ -1,0 +1,24 @@
+<section class="co2prism-core">
+  <div class="co2prism-portrait-zone">
+    <img class="co2prism-portrait" src="icons/svg/mystery-man.svg" alt="" draggable="false">
+    <div class="co2prism-corner co2prism-corner-tl">
+      <button type="button" disabled class="co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-equipment-toggle" aria-controls="co2prism-equipment" aria-expanded="false" aria-label="{{localize 'CO2PRISM.Equipment.Open'}}"><i class="fa-solid fa-suitcase" aria-hidden="true"></i></button>
+      <button type="button" disabled class="co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-paths-toggle" aria-controls="co2prism-paths" aria-expanded="false" aria-label="{{localize 'CO2PRISM.Paths.Open'}}"><i class="fa-solid fa-award" aria-hidden="true"></i></button>
+    </div>
+    <div class="co2prism-corner co2prism-corner-tr"><button type="button" disabled class="co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-movement-toggle" aria-label="{{localize 'CO2PRISM.Combat.Movement'}}" aria-controls="co2prism-movement-panel" aria-expanded="false" aria-pressed="false" data-tooltip-text="{{localize 'CO2PRISM.Movement.Start'}}"><i class="fa-solid fa-shoe-prints" aria-hidden="true"></i></button></div>
+    <div class="co2prism-corner co2prism-corner-bl"><button type="button" disabled class="co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-skills-toggle" aria-controls="co2prism-skills" aria-expanded="false"><i class="fa-solid fa-user" aria-hidden="true"></i></button></div>
+    <div class="co2prism-corner co2prism-corner-br"><button type="button" disabled class="co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-combat-toggle" aria-label="{{localize 'CO2PRISM.Combat.Title'}}" aria-controls="co2prism-combat" aria-expanded="false"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i></button></div>
+  </div>
+  <div class="co2prism-identity"><span class="co2prism-name" ></span><button class="co2prism-icon co2prism-icon-muted co2prism-icon-large co2prism-lock" type="button"><i class="fa-solid fa-gear" aria-hidden="true"></i></button></div>
+  <div class="co2prism-resources">
+    <div class="co2prism-resource"><div class="co2prism-gauge co2prism-gauge-orange" data-co2prism-gauge="recovery"></div><span class="co2prism-value" data-co2prism-value="recovery">{{localize 'CO2PRISM.Unavailable'}}</span><span class="co2prism-icon " aria-hidden="true"><i class="fa-solid fa-heart-pulse" aria-hidden="true"></i></span></div>
+    <div class="co2prism-resource"><div class="co2prism-gauge co2prism-gauge-resource" data-co2prism-gauge="fortune"></div><span class="co2prism-value" data-co2prism-value="fortune">{{localize 'CO2PRISM.Unavailable'}}</span><button type="button" disabled class="co2prism-icon  co2prism-action" data-co2prism-action="fortune"><i class="fa-solid fa-clover" aria-hidden="true"></i></button></div>
+    <div class="co2prism-resource"><div class="co2prism-gauge co2prism-gauge-purple" data-co2prism-gauge="mana"></div><button type="button" disabled class="co2prism-value co2prism-action" data-co2prism-value="mana" data-co2prism-action="mana">{{localize 'CO2PRISM.Unavailable'}}</button><span class="co2prism-icon " aria-hidden="true"><i class="fa-solid fa-bolt" aria-hidden="true"></i></span></div>
+    <div class="co2prism-resource">
+      <div class="co2prism-gauge co2prism-gauge-health" data-co2prism-gauge="hp"></div>
+      <div class="co2prism-rest-actions"><button type="button" disabled class="co2prism-icon co2prism-rest co2prism-action" data-co2prism-action="fastRest"><i class="fa-solid fa-mug-saucer" aria-hidden="true"></i></button><button type="button" disabled class="co2prism-icon co2prism-rest co2prism-action" data-co2prism-action="fullRest"><i class="fa-solid fa-bed" aria-hidden="true"></i></button></div>
+      <button type="button" disabled class="co2prism-value co2prism-action" data-co2prism-value="hp" data-co2prism-action="hp">{{localize 'CO2PRISM.Unavailable'}}</button>
+      <span class="co2prism-icon " aria-hidden="true"><i class="fa-solid fa-heart" aria-hidden="true"></i></span>
+    </div>
+  </div>
+</section>

@@ -5,27 +5,13 @@ import { MovementNotifications } from "../movement/movement-notifications.mjs";
 import { MovementZones } from "../movement/movement-zones.mjs";
 
 const MODULE = "co2prism";
+const TEMPLATE_ROOT = `modules/${MODULE}/templates`;
+const PARTIALS = { core: "core", inventory: "inventory", movement: "movement", skills: "skills",
+  effects: "effects", combat: "combat", combatActions: "combat-actions" };
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
-const COMBAT_ROW_ORIGIN = 948;
-const COMBAT_SLOT_SIZE = 172;
-const COMBAT_SLOT_GAP = 8;
 const MAX_SHORTCUT_ACTIONS = 4;
 const SHORTCUT_PREVIEW_DELAY = 350;
-const NUCLEUS_RADIUS = 261;
-const NUCLEUS_RIGHT = 938;
-const DIAGONAL_LEFT = 100;
-const BASE_BOTTOM = 2 * NUCLEUS_RADIUS;
-const SKILLS_BOTTOM = 670;
-const BUDGET_DROP = 30;
-const BUDGET_START = NUCLEUS_RADIUS + BUDGET_DROP;
-const BUDGET_INSET = 43;
-const BUDGET_STEP = 68;
-const BUDGET_EDGE_GAP = 8;
-const BUDGET_ORIGIN = BUDGET_START + BUDGET_INSET + BUDGET_STEP + BUDGET_EDGE_GAP;
-const EQUIPMENT_COLUMNS = 6;
-const CAPACITY_COLUMNS = 5;
-const GAUGE_VALUE_WIDTH = 108;
 const PANELS = ["combat", "competences", "equipements", "voies"];
 const EXCLUSIVE_PANELS = { equipements: "voies", voies: "equipements" };
 // Depuis le portrait vers l'extérieur du volet.
@@ -99,12 +85,15 @@ class PrismBar {
 
   async render() {
     if (document.getElementById("co2prism-bar")) return;
-    const markup = await foundry.applications.handlebars.renderTemplate(
-      "modules/co2prism/templates/bar.hbs", {}
-    );
+    const { renderTemplate } = foundry.applications.handlebars;
+    // Seuls les fragments statiques rendus par Handlebars sont insérés dans bar.hbs.
+    const sections = await Promise.all(Object.entries(PARTIALS).map(async ([key, name]) =>
+      [key, await renderTemplate(`${TEMPLATE_ROOT}/partials/${name}.hbs`, {})]));
+    const markup = await renderTemplate(`${TEMPLATE_ROOT}/bar.hbs`, Object.fromEntries(sections));
     document.body.insertAdjacentHTML("beforeend", markup);
     this.element = document.getElementById("co2prism-bar");
     this.handle = this.element.querySelector(".co2prism-portrait");
+    this.anchor = this.element.querySelector(".co2prism-portrait-zone");
     this.lock = this.element.querySelector(".co2prism-lock");
     this.art = this.element.querySelector(".co2prism-art");
     this.portrait = this.element.querySelector(".co2prism-portrait");
@@ -119,6 +108,13 @@ class PrismBar {
     this.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key =>
       [key, this.element.querySelector(`[data-co2prism-combat-value="${key}"]`)]));
     this.combatEffects = this.element.querySelector(".co2prism-effects");
+    this.combatEffects.addEventListener("focusin", event => {
+      const effect = event.target.closest(".co2prism-effect");
+      if (effect) game.tooltip?.activate?.(effect);
+    });
+    this.combatEffects.addEventListener("focusout", event => {
+      if (game.tooltip?.element === event.target) game.tooltip.deactivate();
+    });
     this.combatEffects.addEventListener("wheel", event => {
       if (event.ctrlKey || event.shiftKey || event.deltaX || !event.deltaY) return;
       const band = this.combatEffects;
@@ -132,12 +128,14 @@ class PrismBar {
     this.conditionalZone = this.combatSlots.querySelector(".co2prism-conditional-zone");
     this.shortcutPreview = this.element.querySelector(".co2prism-shortcut-preview");
     this.presetActionMenu = this.element.querySelector(".co2prism-preset-action-menu");
-    for (const row of this.combatRows) row.addEventListener("scroll", () => this.clearShortcutPreview());
-    this.combatHands = Object.fromEntries([...this.combatSlots.querySelectorAll("[data-co2prism-hand-container]")]
+    this.combatSlots.addEventListener("scroll", () => {
+      this.clearShortcutPreview();
+      this.closePresetActionMenu();
+    }, { capture: true });
+    this.combatHands = Object.fromEntries([...this.combatPanel.querySelectorAll("[data-co2prism-hand-container]")]
       .map(node => [node.dataset.co2prismHandContainer, node]));
     this.budgetScroll = this.element.querySelector(".co2prism-budget-scroll");
     this.timeCommands = this.element.querySelector(".co2prism-time-commands");
-    this.budgetContent = this.element.querySelector(".co2prism-budget-content");
     this.budgetBar = this.element.querySelector(".co2prism-time-bar");
     this.budgetCommands = [...this.element.querySelectorAll("[data-co2prism-time]")];
     this.budgetReset = this.element.querySelector(".co2prism-budget-reset");
@@ -156,7 +154,12 @@ class PrismBar {
     });
     this.movementZonesObserver = new MutationObserver(() => {
       if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
-      if (!this.element.isConnected) { this.movementZones.clear(); this.movementZonesObserver.disconnect(); }
+      if (!this.element.isConnected) {
+        this.movementZones.clear();
+        this.movementZonesObserver.disconnect();
+        this.presentationObserver?.disconnect();
+        if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
+      }
     });
     this.movementZonesObserver.observe(document.body, { childList: true });
     this.movementZonesObserver.observe(this.element, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
@@ -251,7 +254,10 @@ class PrismBar {
       event.stopPropagation();
       if (!this.portraitFirstClickMoved && !this.portraitMoved) void this.performAction("sheet");
     });
-    window.addEventListener("resize", () => this.layout());
+    this.onWindowResize = () => this.layout();
+    window.addEventListener("resize", this.onWindowResize);
+    this.presentationObserver = new ResizeObserver(() => this.layout({ preserveAnchor: true }));
+    this.presentationObserver.observe(this.art);
     this.updateLock();
     this.layout();
     this.connectActor();
@@ -352,7 +358,6 @@ class PrismBar {
     if (this.slotDrag && (this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const summaries = [];
-    let gaugeFontSize = 32;
     for (const [key, nodes] of Object.entries(this.gauges)) {
       const resource = this.getResource(actor, key);
       const current = Number.isFinite(resource?.value) ? resource.value : null;
@@ -363,12 +368,10 @@ class PrismBar {
         ? Math.max(0, Math.min(100, current / maximum * 100)) : 0;
       if (nodes.text.textContent !== text) nodes.text.textContent = text;
       nodes.fill.style.setProperty("--fill", `${fill}%`);
-      gaugeFontSize = Math.min(gaugeFontSize, (GAUGE_VALUE_WIDTH - 4) / (text.length * 0.62));
       const label = `${game.i18n.localize(`CO2PRISM.Gauges.${key}`)} : ${text}`;
       nodes.fill.dataset.tooltipText = label;
       summaries.push(label);
     }
-    for (const { text } of Object.values(this.gauges)) text.style.setProperty("--text-size", gaugeFontSize);
     this.name.textContent = actor?.name || unavailable;
     this.name.dataset.tooltipText = actor?.name || game.i18n.localize("CO2PRISM.NoActor");
     const portrait = actor?.img || "icons/svg/mystery-man.svg";
@@ -378,9 +381,9 @@ class PrismBar {
     this.updateActions();
     this.configuration = this.readConfiguration(actor);
     this.updatePresets();
-    const skillsChanged = this.updateSkills();
-    const diagonal = [this.equipmentPanel, this.pathsPanel].find(panel => panel && !panel.hidden);
-    const previousBandRise = diagonal?.style.getPropertyValue("--band-rise");
+    const panels = [this.skillsPanel, this.combatPanel, this.movementPanel, this.equipmentPanel, this.pathsPanel];
+    const visibility = panels.map(panel => panel?.hidden);
+    this.updateSkills();
     // Fermer d'abord le volet qui partage la même zone.
     if (this.configuration.panels.voies) {
       this.updateEquipment();
@@ -390,10 +393,10 @@ class PrismBar {
       this.updateEquipment();
     }
     const combatChanged = this.updateCombat();
-    const movementChanged = this.updateMovementPanel();
-    const nextDiagonal = [this.equipmentPanel, this.pathsPanel].find(panel => panel && !panel.hidden);
-    if (skillsChanged || combatChanged || movementChanged || diagonal !== nextDiagonal
-      || previousBandRise !== nextDiagonal?.style.getPropertyValue("--band-rise")) this.layout({ preserveAnchor: true });
+    this.updateMovementPanel();
+    if (this.anchor && (combatChanged || panels.some((panel, index) => panel?.hidden !== visibility[index]))) {
+      this.layout({ preserveAnchor: true });
+    }
   }
 
   readPathGroups(actor) {
@@ -449,14 +452,21 @@ class PrismBar {
       void this.togglePathGroups();
     });
     this.pathsPanel.addEventListener("click", event => {
+      if (event.button !== 0 || this.pathsPanel.hidden) return;
+      const disclosure = event.target.closest(".co2prism-path-disclosure");
+      if (disclosure) {
+        event.stopPropagation();
+        void this.togglePathGroups(disclosure.closest(".co2prism-path-group").dataset.pathKey);
+        return;
+      }
       const tile = event.target.closest(".co2prism-path-tile[data-item-id]");
-      if (!tile || event.button !== 0 || this.pathsPanel.hidden) return;
+      if (!tile) return;
       event.stopPropagation();
       const item = this.actor?.items.get(tile.dataset.itemId);
       if (item?.uuid === tile.dataset.itemUuid && ["path", "capacity"].includes(item.type)) void this.openItemSheet(item);
     });
     this.pathsPanel.addEventListener("contextmenu", event => {
-      const header = event.target.closest(".co2prism-path-header");
+      const header = event.target.closest(".co2prism-path-heading");
       if (!header || this.pathsPanel.hidden) return;
       event.preventDefault();
       event.stopPropagation();
@@ -486,7 +496,6 @@ class PrismBar {
   updatePaths() {
     if (!this.pathsPanel) return;
     const open = Boolean(this.actor && this.configuration.panels.voies);
-    const wasHidden = this.pathsPanel.hidden;
     this.pathsPanel.hidden = !open;
     this.pathsToggle.disabled = !this.canConfigure();
     this.pathsToggle.setAttribute("aria-expanded", String(open));
@@ -503,43 +512,37 @@ class PrismBar {
     }
 
     const groups = this.readPathGroups(this.actor);
+    const canConfigure = this.canConfigure();
     const itemSignature = item => [item.uuid, item.name, item.img, this.itemTooltipDescription(item), item.isOwner];
-    const signature = JSON.stringify(groups.map(({ path, capacities }) => [
+    const signature = JSON.stringify([canConfigure, groups.map(({ path, capacities }) => [
       path && itemSignature(path), capacities.map(capacity => [...itemSignature(capacity), capacity.system.learned]),
       this.configuration.pathCollapsed.has(path?.id ?? "off-paths")
-    ]));
-    if (signature === this.pathsSignature) {
-      if (wasHidden) this.updateDiagonalSurface(this.pathsPanel);
-      return;
-    }
+    ])]);
+    if (signature === this.pathsSignature) return;
     this.pathsSignature = signature;
     dismissTooltip();
-    let compactColumn = 0;
-    this.pathsPanel.replaceChildren(...groups.map(({ path, capacities }) => {
+    const scroll = this.pathsPanel.scrollTop;
+    const active = this.pathsPanel.contains(document.activeElement) ? document.activeElement : null;
+    const disclosureKey = active?.classList.contains("co2prism-path-disclosure")
+      ? active.closest(".co2prism-path-group").dataset.pathKey : null;
+    let nextFocus;
+    this.pathsPanel.replaceChildren(...groups.map(({ path, capacities }, index) => {
       const key = path?.id ?? "off-paths";
       const collapsed = this.configuration.pathCollapsed.has(key);
-      const rows = collapsed ? 1 : Math.max(1, Math.ceil(capacities.length / CAPACITY_COLUMNS));
       const group = document.createElement("section");
       group.className = "co2prism-path-group";
       group.dataset.pathKey = key;
       group.dataset.collapsed = String(collapsed);
-      group.style.setProperty("--rows", rows);
-      if (collapsed) {
-        group.style.setProperty("--compact-column", compactColumn);
-        compactColumn = (compactColumn + 1) % CAPACITY_COLUMNS;
-      } else compactColumn = 0;
       const title = document.createElement("span");
       title.className = "co2prism-path-label";
       title.textContent = path?.name ?? game.i18n.localize("CO2PRISM.Paths.OffPaths");
       group.setAttribute("aria-label", title.textContent);
-      const tile = (item, column, row) => {
+      const tile = item => {
         const node = document.createElement("button");
         node.type = "button";
         node.className = "co2prism-path-tile";
         node.dataset.itemId = item.id;
         node.dataset.itemUuid = item.uuid;
-        node.style.setProperty("--column", column);
-        node.style.setProperty("--row", row);
         const image = document.createElement("img");
         image.src = item.img || "icons/svg/item-bag.svg";
         image.alt = item.name;
@@ -548,10 +551,9 @@ class PrismBar {
         void this.prepareItemTooltip(node, item, this.itemTooltipDescription(item));
         return node;
       };
-      const header = path ? tile(path, 0, rows - 1) : document.createElement("span");
+      const header = path ? tile(path) : document.createElement("span");
       header.classList.add("co2prism-path-header");
       if (!path) {
-        header.style.setProperty("--row", rows - 1);
         header.classList.add("co2prism-path-off");
         header.dataset.tooltipText = title.textContent;
         const icon = document.createElement("i");
@@ -559,21 +561,44 @@ class PrismBar {
         icon.setAttribute("aria-hidden", "true");
         header.append(icon);
       }
-      group.append(title, header);
-      if (!collapsed) capacities.forEach((capacity, index) => {
-        const node = tile(capacity, index % CAPACITY_COLUMNS + 1, rows - 1 - Math.floor(index / CAPACITY_COLUMNS));
+      const heading = document.createElement("header");
+      heading.className = "co2prism-path-heading";
+      const disclosure = document.createElement("button");
+      disclosure.type = "button";
+      disclosure.className = "co2prism-path-disclosure";
+      disclosure.disabled = !canConfigure;
+      disclosure.setAttribute("aria-expanded", String(!collapsed));
+      const items = document.createElement("div");
+      items.className = "co2prism-path-items";
+      items.id = `co2prism-path-items-${index}`;
+      items.hidden = collapsed;
+      disclosure.setAttribute("aria-controls", items.id);
+      disclosure.append(title);
+      if (key === disclosureKey) nextFocus = disclosure;
+      heading.append(header, disclosure);
+      group.append(heading, items);
+      if (!collapsed) capacities.forEach(capacity => {
+        const node = tile(capacity);
         node.dataset.learned = String(capacity.system.learned === true);
-        group.append(node);
+        items.append(node);
       });
+      if (!collapsed && !capacities.length) {
+        const empty = document.createElement("span");
+        empty.className = "co2prism-inventory-empty";
+        empty.textContent = game.i18n.localize("CO2PRISM.Paths.Empty");
+        items.append(empty);
+      }
       return group;
     }));
-    this.updateDiagonalSurface(this.pathsPanel);
+    this.pathsPanel.scrollTop = scroll;
+    nextFocus?.focus({ preventScroll: true });
   }
 
   connectEquipment() {
     this.equipmentPanel = this.element.querySelector(".co2prism-equipment");
     this.equipmentToggle = this.element.querySelector(".co2prism-equipment-toggle");
     this.equipmentMenu = this.element.querySelector(".co2prism-equipment-menu");
+    this.equipmentPanel.addEventListener("scroll", () => this.closeEquipmentMenu());
     this.equipmentToggle.addEventListener("click", event => {
       event.stopPropagation();
       void this.writeConfiguration("panels.equipements", value => !value);
@@ -610,7 +635,7 @@ class PrismBar {
       });
     });
     this.equipmentGroups = EQUIPMENT_GROUPS.map(([key, glyph, subtypes]) => {
-      const group = document.createElement("div");
+      const group = document.createElement("section");
       group.className = "co2prism-equipment-group";
       const button = document.createElement("button");
       button.type = "button";
@@ -618,7 +643,8 @@ class PrismBar {
       const icon = document.createElement("i");
       icon.className = `fa-solid ${glyph}`;
       icon.setAttribute("aria-hidden", "true");
-      button.append(icon);
+      const title = document.createElement("span");
+      button.append(icon, title);
       const items = document.createElement("div");
       items.className = "co2prism-equipment-items";
       items.id = `co2prism-equipment-${key}`;
@@ -630,7 +656,7 @@ class PrismBar {
       });
       group.append(button, items);
       this.equipmentPanel.append(group);
-      return { key, subtypes, group, button, items };
+      return { key, subtypes, group, button, title, items };
     });
   }
 
@@ -770,7 +796,6 @@ class PrismBar {
     if (!this.equipmentPanel) return;
     this.closeEquipmentMenu();
     const open = Boolean(this.actor && this.configuration.panels.equipements);
-    const wasHidden = this.equipmentPanel.hidden;
     const canConfigure = this.canConfigure();
     this.equipmentPanel.hidden = !open;
     this.equipmentToggle.disabled = !canConfigure;
@@ -785,14 +810,11 @@ class PrismBar {
     const seen = new Set(this.actor.containedItemUuids);
     const locked = game.settings.get(MODULE, "locked");
     const { hiddenEquipment } = this.configuration;
-    const geometry = [];
-    let compactColumn = 0;
     for (const entry of this.equipmentGroups) {
-      const { key, subtypes, group, button, items } = entry;
+      const { key, subtypes, button, title, items } = entry;
       const expanded = !this.configuration.equipmentCollapsed[key];
-      group.style.setProperty("--compact-column", expanded ? 0 : compactColumn);
-      compactColumn = expanded ? 0 : compactColumn + 1;
       const label = game.i18n.localize(`CO2PRISM.Equipment.Groups.${key}`);
+      title.textContent = label;
       button.disabled = !canConfigure;
       button.setAttribute("aria-expanded", String(expanded));
       button.setAttribute("aria-label", label);
@@ -807,14 +829,18 @@ class PrismBar {
         seen.add(item.uuid);
         return expanded && (!locked || !hiddenEquipment.has(item.id));
       });
-      const rows = Math.max(1, Math.ceil(displayed.length / EQUIPMENT_COLUMNS));
-      geometry.push(expanded ? displayed.length : -1);
-      group.style.setProperty("--rows", rows);
       const descriptions = displayed.map(item => this.itemTooltipDescription(item));
       const signature = JSON.stringify(displayed.map((item, index) =>
         [item.uuid, item.name, item.img, hiddenEquipment.has(item.id), descriptions[index], item.isOwner]));
       if (signature === entry.signature) continue;
       entry.signature = signature;
+      if (!displayed.length) {
+        const empty = document.createElement("span");
+        empty.className = "co2prism-inventory-empty";
+        empty.textContent = game.i18n.localize("CO2PRISM.Equipment.Empty");
+        items.replaceChildren(empty);
+        continue;
+      }
       items.replaceChildren(...displayed.map((item, index) => {
         const tile = document.createElement("button");
         tile.type = "button";
@@ -824,8 +850,6 @@ class PrismBar {
           tile.classList.add("co2prism-equipment-masked");
           tile.setAttribute("aria-label", game.i18n.format("CO2PRISM.Equipment.HiddenItem", { item: item.name }));
         }
-        tile.style.setProperty("--column", index % EQUIPMENT_COLUMNS + 1);
-        tile.style.setProperty("--row", Math.floor(index / EQUIPMENT_COLUMNS));
         const image = document.createElement("img");
         image.src = item.img || "icons/svg/item-bag.svg";
         image.alt = item.name;
@@ -835,35 +859,6 @@ class PrismBar {
         return tile;
       }));
     }
-    const layoutKey = geometry.join(",");
-    if (wasHidden || layoutKey !== this.equipmentLayoutKey) {
-      this.equipmentLayoutKey = layoutKey;
-      this.updateDiagonalSurface(this.equipmentPanel);
-    }
-  }
-
-  updateDiagonalSurface(panel) {
-    const scale = parseFloat(this.element.style.getPropertyValue("--co2prism-unit"));
-    if (!scale) return;
-    const art = this.art.getBoundingClientRect();
-    const chamfer = parseFloat(getComputedStyle(panel).getPropertyValue("--band-chamfer"));
-    const rightCut = art.left + (NUCLEUS_RADIUS - chamfer) * scale;
-    // Seul le contour supérieur varie. Le bord inférieur reste ancré à G et H.
-    let rise = 2 * DIAGONAL_LEFT + 12;
-    for (const node of panel.querySelectorAll("button, .co2prism-path-off, .co2prism-path-label")) {
-      const rect = node.getBoundingClientRect();
-      if (!rect.width || !rect.height) continue;
-      const center = rect.left + rect.width / 2 - art.left + rect.top + rect.height / 2 - art.top;
-      const radius = node.classList.contains("co2prism-path-label")
-        ? parseFloat(getComputedStyle(node).lineHeight) / Math.SQRT2
-        : node.matches(".co2prism-equipment-tile, .co2prism-path-tile") ? rect.width / 2
-        : (rect.width + rect.height) / 2;
-      // Après cisaillement, la coupe à 45° avance de deux unités dans la projection.
-      const topCut = 2 * Math.max(0, rect.right - rightCut);
-      rise = Math.max(rise, NUCLEUS_RADIUS + 12 - (center - radius - topCut) / scale);
-    }
-    panel.style.setProperty("--band-rise", Math.ceil(rise));
-    return Math.ceil(rise) - chamfer;
   }
 
   movementToken() {
@@ -1113,12 +1108,18 @@ class PrismBar {
     query("error").hidden = !error;
     const errorKey = { "movement-in-progress": "Busy", "invalid-measurement": "InvalidValidation", "context-changed": "ContextChanged", "validation-failed": "ValidationFailed", "closure-pending": "ClosurePending" }[error] ?? "ReturnFailed";
     query("error").textContent = error ? format(errorKey, { consumed: this.movementResults.get(token)?.consumedCount ?? 0 }) : "";
+    const blocks = query("blocks");
     const nodes = [];
+    blocks.tabIndex = valid && state.cellsPerAction > 0 ? 0 : -1;
+    blocks.setAttribute("aria-label", valid
+      ? format("CellsProgress", { used: state.cellsUsed, capacity: state.cellsPerAction })
+      : localize("SpeedUnavailable"));
     // Les valeurs extrêmes restent représentées par des groupes étiquetés, sans millions de nœuds.
     if (valid) {
       const size = state.cellsPerAction;
       const stride = Math.max(1, Math.ceil(size / 60));
       const block = document.createElement("div"); block.className = "co2prism-movement-block";
+      block.setAttribute("aria-hidden", String(size > 0));
       block.dataset.cells = String(size);
       if (size === 0) block.textContent = localize("ZeroBlock");
       for (let index = 0; index < size; index += stride) {
@@ -1132,7 +1133,7 @@ class PrismBar {
       }
       nodes.push(block);
     }
-    query("blocks").replaceChildren(...nodes);
+    blocks.replaceChildren(...nodes);
     return true;
   }
 
@@ -1153,6 +1154,8 @@ class PrismBar {
     this.clearShortcutPreview();
     this.closePresetActionMenu();
     this.closeEquipmentMenu();
+    this.presentationObserver?.disconnect();
+    if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
     this.movementDestroyed = true;
     this.movementZones.clear(); this.movementZonesObserver?.disconnect();
   }
@@ -1236,7 +1239,7 @@ class PrismBar {
           if (durationTitle === "CO.ui.duration") durationTitle = "";
         }
       } catch { /* Durée native indisponible. */ }
-      entries.push({ name: effect.name, img: effect.img, description, duration, durationTitle });
+      entries.push({ key: effect.id && `effect:${effect.id}`, name: effect.name, img: effect.img, description, duration, durationTitle });
       for (const id of effectStatuses) statuses.add(id);
     }
     for (const effect of actor.system?.currentEffects ?? []) {
@@ -1251,7 +1254,7 @@ class PrismBar {
       const status = globalThis.CONFIG?.statusEffects?.find(entry => entry.id === id);
       let description;
       try { description = status?.description; } catch { /* Configuration tierce inaccessible. */ }
-      entries.push({ name: status ? game.i18n.localize(status.name) : id, img: status?.img, description });
+      entries.push({ key: `status:${id}`, name: status ? game.i18n.localize(status.name) : id, img: status?.img, description });
     }
     return entries.map(effect => {
       const name = typeof effect.name === "string" ? effect.name : game.i18n.localize("CO2PRISM.Unavailable");
@@ -1269,7 +1272,8 @@ class PrismBar {
         const title = effect.durationTitle ?? game.i18n.localize("DURATION.Label");
         tooltip += `<br>${title ? `${foundry.utils.escapeHTML(title)} : ` : ""}${foundry.utils.escapeHTML(effect.duration)}`;
       }
-      return { name, img: effect.img, tooltip };
+      const img = typeof effect.img === "string" ? effect.img : undefined;
+      return { key: effect.key ?? JSON.stringify([name, img]), name, img, tooltip };
     });
   }
 
@@ -1278,6 +1282,7 @@ class PrismBar {
     const open = Boolean(this.actor && this.configuration.panels.combat);
     const changed = this.combatPanel.hidden === open;
     this.combatPanel.hidden = !open;
+    if (this.combatSlots) this.combatSlots.hidden = !open;
     if (this.combatToggle) {
       this.combatToggle.disabled = !this.canConfigure();
       this.combatToggle.setAttribute("aria-expanded", String(open));
@@ -1307,32 +1312,60 @@ class PrismBar {
       return changed;
     }
     this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
-    const budgetChanged = this.renderEconomy(economy);
+    this.renderEconomy(economy);
     const resized = this.changingHands.has(this.actor) ? false : this.renderCombatSlots();
-    return changed || resized || budgetChanged;
+    return changed || resized;
   }
 
   updateEffects() {
-    const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
-    const effects = this.readCombatEffects();
-    const scroll = this.effectsActor === this.actor ? this.combatEffects.scrollLeft : 0;
+    const band = this.combatEffects;
+    if (!band) return;
+    const sameActor = this.effectsActor === this.actor;
+    const scroll = sameActor ? band.scrollLeft : 0;
     this.effectsActor = this.actor;
-    const elements = effects.map(effect => {
-      const element = document.createElement("span");
-      element.className = "co2prism-effect";
-      const name = typeof effect.name === "string" ? effect.name : unavailable;
-      // Le gestionnaire natif nettoie ce HTML avant de l'afficher.
-      element.dataset.tooltipHtml = effect.tooltip;
-      element.setAttribute("aria-label", name);
-      if (typeof effect.img === "string" && effect.img) {
-        const img = document.createElement("img");
-        img.src = effect.img; img.alt = name; img.draggable = false;
-        element.append(img);
-      } else element.textContent = name;
-      return element;
-    });
-    this.combatEffects.replaceChildren(...elements);
-    this.combatEffects.scrollLeft = scroll;
+    const existing = [...band.children];
+    const focused = existing.find(node => node === document.activeElement);
+    const reusable = new Map();
+    if (sameActor) for (const node of existing) {
+      const key = node.dataset.effectKey;
+      if (!reusable.has(key)) reusable.set(key, []);
+      reusable.get(key).push(node);
+    }
+    const effects = this.readCombatEffects();
+    const retained = new Set();
+    for (const [index, { key, name, img, tooltip }] of effects.entries()) {
+      const node = reusable.get(key)?.shift() ?? document.createElement("span");
+      retained.add(node);
+      if (!node.parentElement) {
+        node.className = "co2prism-effect";
+        node.tabIndex = 0;
+        node.dataset.effectKey = key;
+      }
+      if (node.getAttribute("aria-label") !== name) node.setAttribute("aria-label", name);
+      if (img) {
+        const image = node.firstElementChild ?? document.createElement("img");
+        if (image.getAttribute("src") !== img) image.src = img;
+        if (image.alt !== name) image.alt = name;
+        if (!image.parentElement) {
+          image.draggable = false;
+          node.replaceChildren(image);
+        }
+      } else if (node.firstElementChild || node.textContent !== name) node.textContent = name;
+      if (node.dataset.tooltipHtml !== tooltip) {
+        node.dataset.tooltipHtml = tooltip;
+        if (game.tooltip?.element === node) game.tooltip.activate(node);
+      }
+      if (node !== band.children[index]) band.insertBefore(node, band.children[index] ?? null);
+    }
+    for (const node of existing) if (!retained.has(node)) {
+      if (game.tooltip?.element === node) game.tooltip.deactivate();
+      node.remove();
+    }
+    if (focused && document.activeElement !== focused) {
+      const target = retained.has(focused) ? focused : band.children[Math.min(existing.indexOf(focused), effects.length - 1)];
+      (target ?? this.lock)?.focus({ preventScroll: true });
+    }
+    if (band.scrollLeft !== scroll) band.scrollLeft = scroll;
   }
 
   async changeEconomy(operation, type) {
@@ -1368,17 +1401,18 @@ class PrismBar {
   }
 
   renderEconomy(state) {
-    if (!this.budgetBar) return false;
-    const scroll = this.budgetBar.closest?.(".co2prism-budget-scroll");
+    if (!this.budgetBar) return;
     const hidden = !economyEnabled();
-    const visibilityChanged = scroll && scroll.hidden !== hidden;
-    if (scroll) scroll.hidden = hidden;
+    this.budgetScroll.hidden = hidden;
     if (this.timeCommands) this.timeCommands.hidden = hidden;
     this.updateEconomyCommands(state);
-    if (hidden) return Boolean(visibilityChanged);
+    if (hidden) return;
+    const signature = JSON.stringify([state.normalAlternatives, state.bonus]);
+    if (signature === this.budgetSignature) return;
+    this.budgetSignature = signature;
     const labels = { l: "L", a: "A", am: "AM", m: "M" };
     const colors = { l: "limited", a: "attack", am: "mixed", m: "move" };
-    const nodes = [], widths = [];
+    const nodes = [];
     const add = (type, bonus = false, count = 1) => {
       const node = document.createElement("span");
       node.className = `co2prism-time-indicator co2prism-time-${colors[type]}${bonus ? " co2prism-time-bonus" : ""}`;
@@ -1386,14 +1420,12 @@ class PrismBar {
       node.dataset.tooltipText = `${game.i18n.localize(bonus ? "CO2PRISM.Combat.BonusTime" : "CO2PRISM.Combat.NormalTime")} : ${labels[type]}${count > 1 ? ` ×${count}` : ""}`;
       node.dataset.co2prismBudgetType = type;
       if (bonus) node.dataset.co2prismBonus = String(count);
-      const width = count > 1 ? Math.max(88, node.textContent.length * 13) : 40;
-      node.style.setProperty("--budget-icon-width", width);
-      nodes.push(node); widths.push(width);
+      nodes.push(node);
     };
     state.normalAlternatives.forEach((branch, index) => {
       if (index) {
         const separator = document.createElement("span"); separator.className = "co2prism-time-separator";
-        separator.textContent = game.i18n.localize("CO2PRISM.Combat.TimeOr"); nodes.push(separator); widths.push(36);
+        separator.textContent = game.i18n.localize("CO2PRISM.Combat.TimeOr"); nodes.push(separator);
       }
       branch.forEach(type => add(type));
     });
@@ -1405,17 +1437,9 @@ class PrismBar {
     }
     if (!nodes.length) {
       const empty = document.createElement("span"); empty.textContent = game.i18n.localize("CO2PRISM.Unavailable");
-      nodes.push(empty); widths.push(40);
+      nodes.push(empty);
     }
-    const barWidth = widths.reduce((sum, width) => sum + width, 16) + (nodes.length - 1) * 8;
     this.budgetBar.replaceChildren(...nodes);
-    this.budgetBar.style.setProperty("--w", barWidth);
-    this.budgetReset.style.setProperty("--x", barWidth + 4);
-    const width = barWidth + 44;
-    const changed = width !== this.budgetWidth;
-    this.budgetWidth = width;
-    this.budgetContent.style.setProperty("--budget-width", width);
-    return changed || Boolean(visibilityChanged);
   }
 
   slotRows(actor = this.actor) {
@@ -1731,6 +1755,7 @@ class PrismBar {
       }
       return false;
     }
+    let resized = false;
     const rows = allRows.map(row => row.filter(slot => !game.settings.get(MODULE, "locked")
       || slot.hand || this.shortcutReferences(slot.reference).some(reference => this.resolveShortcut(this.actor, reference))));
     for (const [index, row] of rows.entries()) {
@@ -1905,19 +1930,10 @@ class PrismBar {
         this.combatHands[slot.hand].replaceChildren(node);
         return [];
       });
+      resized ||= this.combatRows[index].childElementCount !== nodes.length;
       this.combatRows[index].replaceChildren(...nodes);
       this.combatRows[index].scrollLeft = scroll;
     }
-    const widths = rows.map(row => {
-      const count = row.filter(slot => !slot.hand).length;
-      return count * COMBAT_SLOT_SIZE + Math.max(0, count - 1) * COMBAT_SLOT_GAP;
-    });
-    const extent = Math.max(COMBAT_ROW_ORIGIN + Math.max(0, ...widths),
-      economyEnabled() ? BUDGET_ORIGIN + (this.budgetWidth ?? 228) : 0);
-    // Une ligne peut grandir sans changer l'extrémité globale du volet.
-    const resized = extent !== this.combatExtent || widths.some((width, index) => width !== this.combatRowWidths?.[index]);
-    this.combatExtent = extent;
-    this.combatRowWidths = widths;
     return resized;
   }
 
@@ -1935,7 +1951,7 @@ class PrismBar {
       } catch { return null; }
     };
     return JSON.stringify([editable, disabled, game.settings.get(MODULE, "locked"), this.configuration.activePreset,
-      this.configuration.presetActionRules, economyEnabled(), state, this.budgetWidth,
+      this.configuration.presetActionRules, economyEnabled(), state,
       rows.map(row => row.map(slot => [
         slot, this.shortcutReferences(slot.reference).map(visual), visual(slot.mirror),
         slot.reference?.kind === "equipment" ? (() => {
@@ -2110,7 +2126,7 @@ class PrismBar {
     if (typeof icon === "string" && icon) add("i", "co2prism-slot-type fa-solid "
       + icon.split(/\s+/).filter(cls => /^fa-[a-z0-9-]+$/.test(cls) && cls !== "fa-solid").join(" "));
     const actionTime = read("actionTypeFinal");
-    const time = { l: "L", a: "A", m: "M", f: "G" }[actionTime];
+    const time = { l: "L", a: "A", am: "AM", m: "M", f: "G" }[actionTime];
     if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
     const uses = this.shortcutUses(action, item);
     if (uses) {
@@ -2977,75 +2993,27 @@ class PrismBar {
 
   layout({ preserveAnchor = false } = {}) {
     if (!this.element) return;
-    this.clearShortcutPreview();
-    this.closePresetActionMenu();
-    this.endDrag();
     const previous = this.element.getBoundingClientRect();
-    const anchor = { x: previous.left + (this.panelOffset?.x ?? 0), y: previous.top + (this.panelOffset?.y ?? 0) };
-    // Le même dessin conserve ses proportions, même dans une petite fenêtre.
-    const open = Boolean(this.actor && this.configuration?.panels.competences);
-    const combat = Boolean(this.actor && this.configuration?.panels.combat);
-    let top = 0;
-    const diagonal = [this.equipmentPanel, this.pathsPanel].find(panel => panel && !panel.hidden);
-    const left = open ? NUCLEUS_RADIUS : diagonal ? DIAGONAL_LEFT : 0;
-    const bottom = open ? SKILLS_BOTTOM : BASE_BOTTOM;
-    const minimumRight = COMBAT_ROW_ORIGIN + COMBAT_SLOT_SIZE;
-    const movementOpen = this.movementPanel?.hidden === false;
-    const reserve = movementOpen ? Math.min(180, (window.innerHeight - 8) * 0.4) : 0;
-    const width = Math.max(1, Math.min(WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M,
-      (window.innerWidth - 8) * 724 / ((combat ? minimumRight : NUCLEUS_RIGHT) + left),
-      (window.innerHeight - 8 - reserve) * 724 / bottom));
-    // Les réserves haute et basse suivent l'ancrage du dessin d'origine.
-    const scale = width / 724;
-    let right = combat ? Math.min(this.combatExtent ?? minimumRight, (window.innerWidth - 8) / scale - left) : NUCLEUS_RIGHT;
-    this.element.style.setProperty("--co2prism-unit", `${scale}px`);
-    this.element.style.setProperty("--prism-r", NUCLEUS_RADIUS);
-    this.element.style.setProperty("--prism-core-right", NUCLEUS_RIGHT);
-    this.element.style.setProperty("--prism-diagonal-left", DIAGONAL_LEFT);
-    this.element.style.setProperty("--prism-skills-bottom", SKILLS_BOTTOM);
-    this.element.style.setProperty("--prism-budget-drop", BUDGET_DROP);
-    this.element.style.setProperty("--prism-budget-inset", BUDGET_INSET);
-    this.element.style.setProperty("--prism-budget-step", BUDGET_STEP);
-    this.element.style.setProperty("--co2prism-base-width", `${width}px`);
-    this.element.style.setProperty("--co2prism-base-height", `${2 * NUCLEUS_RADIUS * scale}px`);
-    if (diagonal && diagonal.children.length) {
-      const rise = this.updateDiagonalSurface(diagonal);
-      if ((rise + bottom) * scale <= window.innerHeight - 8) top = Math.max(top, rise);
-    }
-    if (movementOpen) {
-      this.movementPanel.style.removeProperty("width");
-      this.movementPanel.style.removeProperty("max-height");
-      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (BUDGET_START + left) * scale)}px`;
-      const panel = this.movementPanel.getBoundingClientRect();
-      right = Math.max(right, BUDGET_START + panel.width / scale);
-      top = Math.max(top, panel.height / scale);
-    }
-    this.panelOffset = { x: width * left / 724, y: width * top / 724 };
-    for (const [index, row] of (this.combatRows ?? []).entries()) {
-      row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? COMBAT_SLOT_SIZE, Math.max(0, right - COMBAT_ROW_ORIGIN)));
-    }
-    this.conditionalZone?.style.setProperty("--conditional-width", Math.max(0, right - COMBAT_ROW_ORIGIN));
-    if (this.budgetScroll) {
-      const budgetViewport = Math.min(this.budgetWidth ?? 228, Math.max(1, right - BUDGET_ORIGIN));
-      this.budgetScroll.style.setProperty("--w", budgetViewport);
-      this.combatPanel.style.setProperty("--prism-budget-edge", economyEnabled()
-        ? BUDGET_START + BUDGET_INSET + budgetViewport + BUDGET_EDGE_GAP - NUCLEUS_RADIUS : 0);
-    }
-    this.element.style.setProperty("--co2prism-offset-x", `${this.panelOffset.x}px`);
-    this.element.style.setProperty("--co2prism-offset-y", `${this.panelOffset.y}px`);
-    this.element.style.width = `${width * right / 724 + this.panelOffset.x}px`;
-    this.element.style.height = `${width * bottom / 724 + this.panelOffset.y}px`;
+    const offset = this.panelOffset ?? { x: 0, y: 0 };
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
-    const x = preserveAnchor ? anchor.x : valid ? saved.x : 40;
-    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * bottom / 724 - 40;
-    // Le maintien du portrait ne peut pas laisser le volet déplié hors écran.
-    this.place(x - this.panelOffset.x, y - this.panelOffset.y);
-    for (const row of this.combatRows ?? []) {
-      if (row.scrollWidth <= row.clientWidth) row.scrollLeft = 0;
+    const nominal = (WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M) / 724;
+    const unit = Math.max(0.01, Math.min(nominal, (window.innerWidth - 8) / 1020, (window.innerHeight - 8) / 530));
+    const scaleChanged = unit !== this.presentationScale;
+    if (scaleChanged) {
+      this.presentationScale = unit;
+      this.element.style.setProperty("--co2prism-unit", unit + "px");
     }
-    // Mémoriser aussi le retour à l'écran après un changement de taille.
-    const placed = this.element.getBoundingClientRect();
+    const bounds = scaleChanged ? this.element.getBoundingClientRect() : previous;
+    const portrait = this.anchor.getBoundingClientRect();
+    this.panelOffset = { x: portrait.left - bounds.left, y: portrait.top - bounds.top };
+    const extent = [bounds.width, bounds.height, this.panelOffset.x, this.panelOffset.y, window.innerWidth, window.innerHeight];
+    if (preserveAnchor && !scaleChanged && this.presentationExtent?.every((value, index) => Math.abs(value - extent[index]) < .01)) return;
+    this.presentationExtent = extent;
+    const x = preserveAnchor ? previous.left + offset.x : valid ? saved.x : 40 + this.panelOffset.x;
+    const y = preserveAnchor ? previous.top + offset.y : valid ? saved.y
+      : window.innerHeight - bounds.height - 40 + this.panelOffset.y;
+    const placed = this.place(x - this.panelOffset.x, y - this.panelOffset.y, true, bounds);
     if ((valid || preserveAnchor) && (Math.abs(placed.left + this.panelOffset.x - x) > 0.5
       || Math.abs(placed.top + this.panelOffset.y - y) > 0.5)) {
       this.position = { x: placed.left + this.panelOffset.x, y: placed.top + this.panelOffset.y };
@@ -3053,14 +3021,20 @@ class PrismBar {
     }
   }
 
-  place(x, y, clamp = true) {
-    const bounds = this.element.getBoundingClientRect();
+  place(x, y, clamp = true, bounds = this.element.getBoundingClientRect()) {
     const left = clamp ? Math.max(0, Math.min(x, window.innerWidth - bounds.width)) : x;
     this.element.style.left = `${left}px`;
     this.combatEffects?.style.setProperty("--prism-effects-right", `${window.innerWidth - left - (this.panelOffset?.x ?? 0) - 8}px`);
     const top = clamp ? Math.max(0, Math.min(y, window.innerHeight - bounds.height)) : y;
     this.element.style.top = `${top}px`;
-    this.conditionalZone?.style.setProperty("--conditional-art-top", `${top + (this.panelOffset?.y ?? 0)}px`);
+    if (this.conditionalZone) {
+      const above = top + (this.panelOffset?.y ?? 0);
+      const below = window.innerHeight - top - bounds.height;
+      const useBelow = above < bounds.height / 2 && below > above;
+      this.conditionalZone.dataset.placement = useBelow ? "below" : "above";
+      this.conditionalZone.style.setProperty("--conditional-room", `${useBelow ? below : above}px`);
+    }
+    return { left, top };
   }
 
   startDrag(event) {
