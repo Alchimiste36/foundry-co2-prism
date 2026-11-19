@@ -4,12 +4,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
+const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]);
+
 // Simuler les documents préparés, sans dépendre d'un monde Foundry lancé.
 function setup() {
   const hooks = new Map();
   const context = vm.createContext({
     structuredClone,
-    foundry: { applications: { api: { DialogV2: { wait: async () => "validate" } } } },
+    foundry: { utils: { escapeHTML, cleanHTML: value => value }, applications: { api: { DialogV2: { wait: async () => "validate" } } } },
     Hooks: { once(name, fn) { hooks.set(name, fn); }, on(name, fn) { hooks.set(name, fn); }, off(name, fn) { if (hooks.get(name) === fn) hooks.delete(name); } },
     game: { combats: { active: { started: true } }, user: {}, i18n: { localize: key => key === "CO2PRISM.Unavailable" ? "—" : key } },
     canvas: { ready: true, tokens: { controlled: [] } }
@@ -710,7 +712,7 @@ function setupActions() {
   a.update = async update => calls.push({ update });
   context.game.system = { CONST: { restActions: [] } };
   context.ui = { notifications: { warn: message => warnings.push(message), error: message => errors.push(message) } };
-  context.foundry = { utils: { escapeHTML: text => text }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
+  context.foundry = { utils: { escapeHTML }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
   bar.actions = ["sheet", "fortune", "hp", "mana", "fastRest", "fullRest"].map(action => ({
     dataset: { co2prismAction: action }, setAttribute(key, value) { this[key] = value; }
   }));
@@ -854,9 +856,9 @@ function setupConfiguration() {
   const env = setup();
   const { bar, context, actor, token, hooks } = env;
   const writes = [], errors = [];
-  context.foundry = { utils: { deepClone: structuredClone }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
+  context.foundry = { utils: { deepClone: structuredClone, escapeHTML, cleanHTML: value => value }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
   context.game.settings ??= { get: () => false };
-  context.ui = { notifications: { error: message => errors.push(message) } };
+  context.ui = { notifications: { error: message => errors.push(message), warn: message => errors.push(message) } };
   context.console = { error() {} };
   bar.presetButtons = [1, 2, 3].map(number => ({ dataset: { co2prismPreset: String(number) },
     setAttribute(key, value) { this[key] = value; } }));
@@ -899,13 +901,13 @@ test("configuration : défauts en lecture, trois presets isolés et flags mal fo
   const { bar, configuredActor, select, writes } = setupConfiguration();
   const a = configuredActor("a"); select(a);
   assert.equal(bar.configuration.activePreset, 1);
-  assert.deepEqual(Object.keys(bar.configuration.presets), ["1", "2", "3"]);
+  assert.deepEqual(Object.keys(bar.configuration.handPresets), ["1", "2", "3"]);
   assert.ok(Object.values(bar.configuration.panels).every(value => value === false));
-  assert.notEqual(bar.configuration.presets[1].slots, bar.configuration.presets[2].slots);
-  bar.configuration.presets[1].slots.example = "temporary";
-  assert.equal(bar.configuration.presets[2].slots.example, undefined);
+  assert.notEqual(bar.configuration.handPresets[1], bar.configuration.handPresets[2]);
+  bar.configuration.handPresets[1].example = "temporary";
+  assert.equal(bar.configuration.handPresets[2].example, undefined);
   bar.refreshActor();
-  assert.equal(bar.configuration.presets[1].slots.example, undefined);
+  assert.equal(bar.configuration.handPresets[1].example, undefined);
   await bar.setActivePreset(1);
   await bar.setPanelState("combat", false);
   assert.equal(writes.length, 0);
@@ -913,7 +915,7 @@ test("configuration : défauts en lecture, trois presets isolés et flags mal fo
     const b = configuredActor("malformed", { co2prism: malformed }); select(b);
     assert.equal(bar.configuration.activePreset, 1);
     assert.equal(bar.configuration.panels.combat, false);
-    assert.deepEqual(Object.keys(bar.configuration.presets[1].slots), []);
+    assert.deepEqual(Object.keys(bar.configuration.handPresets[1]), []);
   }
   assert.equal(writes.length, 0);
 });
@@ -921,8 +923,7 @@ test("configuration : défauts en lecture, trois presets isolés et flags mal fo
 test("presets A/B : persistance et restauration, sans écraser slots ou champs inconnus", async () => {
   const { bar, context, configuredActor, select, writes } = setupConfiguration();
   const a = configuredActor("a", { other: { saved: true }, co2prism: {
-    extra: { saved: true }, presets: { 1: { slots: { x: { uuid: "existing" } }, extra: 7 },
-      2: { slots: { y: "untouched" } }, 3: { slots: {} }, future: { saved: true } }
+    extra: { saved: true }, shortcuts: { x: { uuid: "existing" } }, hands: { presets: { future: { saved: true } } }
   } });
   const before = structuredClone(a.flags);
   const b = configuredActor("b");
@@ -932,18 +933,18 @@ test("presets A/B : persistance et restauration, sans écraser slots ou champs i
   assert.equal(bar.configuration.activePreset, 2);
   assert.equal(bar.presetButtons[1]["aria-pressed"], "true");
   assert.equal(bar.presetButtons[0]["aria-pressed"], "false");
-  assert.deepEqual(a.flags.co2prism.presets, before.co2prism.presets);
+  assert.deepEqual(a.flags.co2prism.hands.presets, before.co2prism.hands.presets);
   assert.deepEqual(a.flags.other, before.other);
   assert.deepEqual(a.flags.co2prism.extra, before.co2prism.extra);
-  bar.configuration.presets[1].slots.x.uuid = "local-only";
-  assert.equal(a.flags.co2prism.presets[1].slots.x.uuid, "existing");
+  bar.configuration.shortcuts.x.uuid = "local-only";
+  assert.equal(a.flags.co2prism.shortcuts.x.uuid, "existing");
   select(b); assert.equal(bar.configuration.activePreset, 3);
   const reloaded = setup();
   reloaded.context.canvas.tokens.controlled = context.canvas.tokens.controlled;
   reloaded.bar.refreshActor();
   assert.equal(reloaded.bar.configuration.activePreset, 3);
   assert.equal(writes.length, 2);
-  assert.ok(writes.every(write => write.scope === "co2prism" && write.key === "activePreset"));
+  assert.ok(writes.every(write => write.scope === "co2prism" && write.key === "hands.active"));
 });
 
 test("volets indépendants, mises à jour distantes et aucune sauvegarde en boucle", async () => {
@@ -951,19 +952,19 @@ test("volets indépendants, mises à jour distantes et aucune sauvegarde en bouc
   const a = configuredActor("a", { co2prism: { panels: { future: true } } }); select(a);
   await Promise.all([bar.setPanelState("combat", true), bar.setPanelState("competences", true),
     bar.setPanelState("equipements", true)]);
-  assert.ok(Object.values(bar.configuration.panels).every(value => value === true));
+  assert.deepEqual({ ...bar.configuration.panels }, { combat: true, competences: true, equipements: true, voies: false });
   await bar.setPanelState("combat", false);
   assert.equal(bar.configuration.panels.competences, true);
   assert.equal(bar.configuration.panels.equipements, true);
   assert.equal(a.flags.co2prism.panels.future, true);
   assert.deepEqual(writes.map(write => write.key), ["panels.combat", "panels.competences", "panels.equipements", "panels.combat"]);
   const count = writes.length;
-  a.flags.co2prism.activePreset = 3;
+  a.flags.co2prism.hands = { active: 3 };
   a.flags.co2prism.panels.competences = false;
   hooks.get("updateActor")(a, { flags: { co2prism: a.flags.co2prism } });
   assert.equal(bar.configuration.activePreset, 3);
   assert.equal(bar.configuration.panels.competences, false);
-  a.flags.co2prism.activePreset = 2;
+  a.flags.co2prism.hands.active = 2;
   hooks.get("updateActor")(a, { "flags.co2prism.activePreset": 2 });
   assert.equal(bar.configuration.activePreset, 2);
   assert.equal(writes.length, count);
@@ -982,24 +983,24 @@ test("écritures rapides : ordre par acteur, permissions revérifiées et erreur
   select(b); await bar.setActivePreset(3);
   assert.equal(bar.configuration.activePreset, 3);
   release(); await Promise.all([p2, p3, p1]);
-  assert.equal(a.flags.co2prism.activePreset, 1);
-  assert.equal(b.flags.co2prism.activePreset, 3);
-  assert.deepEqual(writes.filter(write => write.actor === a).map(write => write.value), [2, 3, 1]);
+  assert.equal(a.flags.co2prism.hands.active, 2);
+  assert.equal(b.flags.co2prism.hands.active, 3);
+  assert.deepEqual(writes.filter(write => write.actor === a).map(write => write.value), [2]);
   select(a);
   const denied = bar.setActivePreset(2);
   a.testUserPermission = (_user, level) => level === "OBSERVER";
   assert.equal(await denied, false);
   a.testUserPermission = () => true;
   a.setFlag = async () => { throw Error("Persistence unavailable"); };
-  assert.equal(await bar.setActivePreset(2), false);
+  assert.equal(await bar.setActivePreset(1), false);
   assert.equal(errors.length, 1);
   a.setFlag = save;
-  assert.equal(await bar.setActivePreset(2), true);
+  assert.equal(await bar.setActivePreset(1), true);
 });
 
 test("configuration : droits Owner/MJ, sélection neutre et entrées refusées", async () => {
   const { bar, context, configuredActor, select, writes, hooks } = setupConfiguration();
-  const a = configuredActor("a", { co2prism: { activePreset: 2 } });
+  const a = configuredActor("a", { co2prism: { hands: { active: 2 } } });
   a.testUserPermission = (_user, level) => level === "OBSERVER";
   select(a);
   assert.ok(bar.presetButtons.every(button => button.disabled));
@@ -1023,17 +1024,17 @@ test("configuration : droits Owner/MJ, sélection neutre et entrées refusées",
 
 test("tokens liés et synthétiques : écrire sur token.actor, jamais sur baseActor", async () => {
   const { bar, context, configuredActor, select, token, hooks, writes } = setupConfiguration();
-  const base = configuredActor("base", { co2prism: { activePreset: 2 } });
+  const base = configuredActor("base", { co2prism: { hands: { active: 2 } } });
   select(base); await bar.setActivePreset(3);
-  const synthetic = configuredActor("synthetic", { co2prism: { activePreset: 3 } });
+  const synthetic = configuredActor("synthetic", { co2prism: { hands: { active: 3 } } });
   synthetic.uuid = "Scene.s.Token.t.Actor.base";
   const unlinked = token(synthetic); unlinked.document.baseActor = base;
   context.canvas.tokens.controlled = [unlinked]; hooks.get("controlToken")();
   await bar.setActivePreset(1);
   assert.equal(writes.at(-1).actor, synthetic);
-  assert.equal(base.flags.co2prism.activePreset, 3);
-  assert.equal(synthetic.flags.co2prism.activePreset, 1);
-  hooks.get("updateToken")(unlinked.document, { "delta.flags.co2prism.activePreset": 1 });
+  assert.equal(base.flags.co2prism.hands.active, 3);
+  assert.equal(synthetic.flags.co2prism.hands.active, 1);
+  hooks.get("updateToken")(unlinked.document, { "delta.flags.co2prism.hands.active": 1 });
   assert.equal(bar.configuration.activePreset, 1);
   hooks.get("canvasTearDown")();
   assert.ok(bar.presetButtons.every(button => button.disabled));
@@ -1086,7 +1087,11 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(a.flags.co2prism.panels.equipements, true);
   assert.deepEqual(base(), before);
   assert.ok(reads.length >= 7);
-  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1512 / 724) < 0.01);
+  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1318 / 724) < 0.01);
+  await bar.setPanelState("equipements", false);
+  assert.equal(bar.skillsPanel.hidden, false);
+  await bar.setPanelState("equipements", true);
+  assert.equal(bar.skillsPanel.hidden, false);
   await bar.setPanelState("competences", false);
   assert.deepEqual(base(), before);
   const count = reads.length;
@@ -1194,7 +1199,7 @@ test("14 affichage : arrondis entiers après conversion, mètres inchangés", ()
   }
 });
 
-test("14 budget : arrondir les totaux restants/maximum, bonus puis consommation", async () => {
+test("14 budget : arrondir les totaux disponibles en metres et cases, bonus puis consommation", async () => {
   const { settings, display, a, context } = setupMovementDisplay();
   let state;
   a.getFlag = () => state;
@@ -1202,14 +1207,14 @@ test("14 budget : arrondir les totaux restants/maximum, bonus puis consommation"
   const economy = new context.ActionEconomy(a);
   settings.economyMode = "always";
   await economy.grant("m"); await economy.spend("m");
-  for (const [mode, expected] of [["nearest", "7 / 10"], ["up", "7 / 10"], ["down", "6 / 10"]]) {
+  for (const [mode, expected] of [["nearest", "7"], ["up", "7"], ["down", "6"]]) {
     settings.movementRounding = mode;
-    assert.deepEqual(display(), ["20 / 30", expected]);
+    assert.deepEqual(display(), ["20", expected]);
   }
   await economy.spend("m");
-  assert.deepEqual(display(), ["10 / 30", "3 / 10"]);
+  assert.deepEqual(display(), ["10", "3"]);
   await economy.reset(); settings.movementRounding = "nearest";
-  assert.deepEqual(display(), ["20 / 20", "7 / 7"]);
+  assert.deepEqual(display(), ["20", "7"]);
 });
 
 test("14 conversions pieds, repli et précision flottante", () => {
@@ -1253,7 +1258,7 @@ test("14 réglage monde : rafraîchissement immédiat local/distant sans écritu
     assert.equal(bar.combatValues.cells.textContent, "3");
   }
   settings.economyMode = "combat";
-  assert.deepEqual(display(), ["20 / 20", "6 / 6"]);
+  assert.deepEqual(display(), ["20", "6"]);
   context.game.combats.active.started = false;
   assert.deepEqual(display(), ["10", "3"]);
 });
@@ -1296,37 +1301,20 @@ test("Combat : mouvement réel, conversion mètres/cases et données DEF/RD pré
   assert.equal(read().cells, null);
 });
 
-test("Combat : presets ouvrent/replient sans modifier slots ni les autres volets", async () => {
+test("Les presets de mains sont ind?pendants du volet Combat et des raccourcis", async () => {
   const { bar, configuredActor, select, writes } = setupConfiguration();
   const a = configuredActor("a", { co2prism: { panels: { competences: true, equipements: true },
-    presets: { 1: { slots: { untouched: { unknownReference: "kept" } } } }, extra: "kept" } });
-  const originalSlots = structuredClone(a.flags.co2prism.presets);
+    shortcuts: { untouched: { source: "Item.source", indice: 0, row: 2, order: 0 } } } });
   select(a);
-  await bar.selectCombatPreset(1);
-  assert.equal(bar.configuration.panels.combat, true);
-  assert.equal(bar.presetButtons[0]["aria-expanded"], "true");
-  await bar.selectCombatPreset(1);
-  assert.equal(bar.configuration.panels.combat, false);
-  await bar.selectCombatPreset(2);
-  assert.equal(bar.configuration.activePreset, 2);
-  assert.equal(bar.configuration.panels.combat, true);
-  await bar.selectCombatPreset(3);
-  assert.equal(bar.configuration.activePreset, 3);
-  assert.equal(bar.configuration.panels.combat, true);
-  assert.equal(bar.configuration.panels.competences, true);
-  assert.equal(bar.configuration.panels.equipements, true);
-  assert.deepEqual(a.flags.co2prism.presets, originalSlots);
-  assert.equal(a.flags.co2prism.extra, "kept");
-  const b = configuredActor("b"); select(b); await bar.selectCombatPreset(2);
-  select(a); assert.equal(bar.configuration.activePreset, 3);
-  assert.equal(bar.configuration.panels.combat, true);
-  a.testUserPermission = (_user, level) => level === "OBSERVER";
-  const length = writes.length;
-  assert.equal(await bar.selectCombatPreset(1), false);
-  assert.equal(writes.length, length);
-  a.testUserPermission = () => true;
-  await Promise.all([bar.selectCombatPreset(3), bar.selectCombatPreset(3)]);
-  assert.equal(bar.configuration.panels.combat, true);
+  for (const number of [2, 3, 1]) {
+    assert.equal(await bar.setActivePreset(number), true);
+    assert.equal(bar.configuration.activePreset, number);
+    assert.equal(bar.configuration.panels.combat, false);
+    assert.equal(bar.configuration.panels.competences, true);
+    assert.equal(bar.configuration.panels.equipements, true);
+  }
+  assert.ok(writes.every(write => write.key === "hands.active"));
+  assert.equal(bar.configuration.shortcuts.untouched.row, 2);
 });
 
 test("Combat : effets natifs, effets CO2 et statuts sans doublons ni effet fictif", () => {
@@ -1348,6 +1336,120 @@ test("Combat : effets natifs, effets CO2 et statuts sans doublons ni effet ficti
   assert.equal(bar.readCombatEffects(null).length, 0);
 });
 
+test("Infobulles : getter CO2 complet lu une fois, source et tooltip défectueux isolés", () => {
+  const { bar, actor } = setup(), a = actor("co2-tooltip");
+  const html = "Durée : 3 rounds<br />Restant : 2<br />Dégâts : 1d6 feu<br />Statuts : Étourdi<br />Défense : -2<br />par Bâton de Mage";
+  let calls = 0;
+  a.system.currentEffects = [
+    { name: "Flamme", sourceParts: { item: { img: "flame.svg" } }, get tooltip() { calls++; return html; } },
+    { name: "Source perdue", get sourceParts() { throw Error("deleted"); }, get tooltip() { throw Error("deleted"); } },
+    { name: "Soin", tooltip: "Soins : 1d4<br />", sourceParts: {} }
+  ];
+  const effects = bar.readCombatEffects(a);
+  assert.equal(calls, 1);
+  assert.equal(effects[0].tooltip, "<strong>Flamme</strong><br>" + html);
+  assert.equal(effects[0].img, "flame.svg");
+  assert.equal(effects[1].tooltip, "<strong>Source perdue</strong>");
+  assert.equal(effects[1].img, undefined);
+  assert.equal(effects[2].tooltip, "<strong>Soin</strong><br>Soins : 1d4<br />");
+});
+
+test("Infobulles : statuts configurés, traductions FR/EN et statut inconnu", () => {
+  for (const language of ["fr", "en"]) {
+    const { bar, context, actor } = setup(), a = actor("status-tooltips");
+    const dictionary = language === "fr"
+      ? { "status.stunned": "Étourdi", "status.stunned.description": "Ne peut pas agir." }
+      : { "status.stunned": "Stunned", "status.stunned.description": "Cannot act." };
+    context.game.i18n = { has: key => key in dictionary, localize: key => dictionary[key] ?? key };
+    context.CONFIG = { statusEffects: [
+      { id: "stunned", name: "status.stunned", description: "status.stunned.description", img: "stun.svg" },
+      { id: "paralyzed", name: "Paralysé", description: "<p>Immobile.</p>" },
+      { id: "unconscious", name: "Inconscient", description: "Sans réaction." },
+      { id: "module-status", name: "Module", description: "Bonus < 3 & repos" },
+      { id: "broken", name: "Cassé", get description() { throw Error("module"); } }
+    ] };
+    a.statuses = new Set(["stunned", "paralyzed", "unconscious", "module-status", "broken", "unknown"]);
+    const effects = bar.readCombatEffects(a);
+    assert.equal(effects[0].tooltip, "<strong>" + dictionary["status.stunned"] + "</strong><br>" + dictionary["status.stunned.description"]);
+    assert.ok(effects[1].tooltip.includes("<p>Immobile.</p>"));
+    assert.ok(effects[2].tooltip.includes("Sans réaction."));
+    assert.ok(effects[3].tooltip.includes("Bonus &lt; 3 &amp; repos"));
+    assert.equal(effects[4].tooltip, "<strong>Cassé</strong>");
+    assert.equal(effects[5].tooltip, "<strong>unknown</strong>");
+  }
+});
+
+test("Infobulles : ActiveEffect natif, durée préparée et repli sans durée inventée", () => {
+  const { bar, context, actor } = setup(), a = actor("active-tooltips");
+  context.game.i18n.localize = key => key === "DURATION.Label" ? "Durée" : key;
+  a.appliedEffects = [
+    { name: "Protection", description: "<p>Protection</p><p>+2 DEF</p>", duration: { label: "2 rounds", remaining: 2 } },
+    { name: "Protection", description: "Autre effet distinct.", duration: { seconds: 42 } },
+    { name: "<Mage & Ami>", get description() { throw Error("missing"); }, get duration() { throw Error("missing"); } }
+  ];
+  const effects = bar.readCombatEffects(a);
+  assert.equal(effects.length, 3);
+  assert.equal(effects[0].tooltip, "<p>Protection</p><p>+2 DEF</p><br>Durée : 2 rounds");
+  assert.equal(effects[1].tooltip, "<strong>Protection</strong><br>Autre effet distinct.");
+  assert.equal(effects[2].tooltip, "<strong>&lt;Mage &amp; Ami&gt;</strong>");
+});
+
+test("Statuts : durée absente ou indéfinie omise, durée réelle traduite en FR/EN", () => {
+  for (const language of ["fr", "en"]) {
+    const { bar, context, actor } = setup(), a = actor("status-duration");
+    const none = language === "fr" ? "Aucun" : "None", title = language === "fr" ? "Durée" : "Duration";
+    context.game.i18n.localize = key => ({ "COMMON.None": none, "EFFECT.DURATION.Label": title })[key] ?? key;
+    context.CONFIG = { statusEffects: [{ id: "stunned", name: "Stunned", description: "Description native." }] };
+    a.statuses = new Set(["stunned"]);
+    for (const duration of [undefined, {}, { label: none }, { label: none, value: Infinity, remaining: Infinity },
+      { label: "placeholder", value: null }, { label: "placeholder", remaining: Infinity }]) {
+      a.appliedEffects = [{ name: "Stunned", description: "Description native.", statuses: new Set(["stunned"]), duration }];
+      const effects = bar.readCombatEffects(a);
+      assert.equal(effects.length, 1);
+      assert.equal(effects[0].tooltip, "<strong>Stunned</strong><br>Description native.");
+    }
+    a.appliedEffects[0].duration = { label: "2 rounds", value: 3, remaining: 2 };
+    assert.equal(bar.readCombatEffects(a)[0].tooltip,
+      "<strong>Stunned</strong><br>Description native.<br>" + title + " : 2 rounds");
+    context.game.i18n.localize = key => key === "COMMON.None" ? none : key;
+    assert.ok(!bar.readCombatEffects(a)[0].tooltip.includes("DURATION.Label"));
+  }
+});
+
+test("Statuts : correction isolée, effets natifs ordinaires et HTML CO2 inchangés", () => {
+  const { bar, context, actor } = setup(), a = actor("mixed-duration");
+  context.game.i18n.localize = key => key === "COMMON.None" ? "Aucun" : key;
+  const co2 = "Durée : 3 rounds<br />Restant : 2<br />Soins : 1d6<br />";
+  a.system.currentEffects = [{ name: "Soin CO2", tooltip: co2 }];
+  a.appliedEffects = [
+    { name: "Effet natif", description: "Distinct.", duration: { label: "Aucun", value: Infinity } },
+    { name: "Paralysé", description: "Immobile.", statuses: new Set(["paralyzed"]), duration: { label: "Aucun", value: Infinity } }
+  ];
+  a.statuses = new Set(["paralyzed", "unconscious"]);
+  context.CONFIG = { statusEffects: [{ id: "unconscious", name: "Inconscient", description: "Sans réaction." }] };
+  const effects = bar.readCombatEffects(a);
+  assert.equal(effects.length, 4);
+  assert.equal(effects[0].tooltip, "<strong>Effet natif</strong><br>Distinct.<br>DURATION.Label : Aucun");
+  assert.equal(effects[1].tooltip, "<strong>Paralysé</strong><br>Immobile.");
+  assert.equal(effects[2].tooltip, "<strong>Soin CO2</strong><br>" + co2);
+  assert.equal(effects[3].tooltip, "<strong>Inconscient</strong><br>Sans réaction.");
+});
+
+test("Infobulles : échec du nettoyage conserve le nom et les autres effets", () => {
+  const { bar, context, actor } = setup(), a = actor("sanitize-failure");
+  context.foundry.utils.cleanHTML = () => { throw Error("unavailable"); };
+  a.appliedEffects = [{ name: "Effet sûr", description: "<p>Texte</p>" }, { name: "Autre" }];
+  assert.deepEqual(Array.from(bar.readCombatEffects(a), effect => effect.tooltip),
+    ["<strong>Effet sûr</strong>", "<strong>Autre</strong>"]);
+});
+
+function makeHandWeapon(item, twoHand = false) {
+  item.type = "equipment";
+  Object.assign(item.system, { isWeapon: true, useHands: true, equipped: false,
+    properties: { equipable: true }, usage: { oneHand: !twoHand, twoHand } });
+  return item;
+}
+
 function setupShortcuts() {
   const env = setupConfiguration();
   const { bar, context, configuredActor, select } = env;
@@ -1359,19 +1461,134 @@ function setupShortcuts() {
     const actor = configuredActor(id, { co2prism: { panels: { combat: true } } });
     const item = { id: "item", uuid: `${actor.uuid}.Item.item`, type: "capacity", name: "Capacity", parent: actor,
       system: { description: "Description" }, testUserPermission: () => true };
+    actor.toggleEquipmentEquipped = async itemId => { const model = actor.items.get(itemId).system; model.equipped = !model.equipped; };
     item.actions = [{ source: item.uuid, indice: 0, actionName: "Native action", actionImg: "native.webp",
       iconFA: "fas fa-sword", actionTypeFinal: "a", hasCharges: true, charges: 3, manaCost: 2 }];
     actor.items = new Map([[item.id, item]]);
     Object.defineProperty(actor, "actions", { configurable: true, get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
     return { actor, item };
   };
-  const { actor: a, item } = create("shortcuts"); select(a);
+  const { actor: a, item } = create("shortcuts"); makeHandWeapon(item, true); select(a);
   const payload = () => ({ type: "co.action", source: item.uuid, indice: 0, name: "Ignored copy", img: "ignored.webp" });
   const event = (data = payload()) => ({ dataTransfer: { types: ["text/plain"], getData: () => JSON.stringify(data) },
     preventDefault() {}, stopPropagation() {} });
   const node = { classList: { add() {}, remove() {} } };
   return { ...env, a, item, create, warnings, payload, event, node };
 }
+
+test("presets de mains : équipement, restauration, raccourcis communs et modifications externes", async () => {
+  const { bar, a, item, warnings } = setupShortcuts();
+  const add = (id, twoHand = false) => {
+    const equipment = makeHandWeapon({ id, type: "equipment", parent: a, system: {},
+      actions: [{ source: `${a.uuid}.Item.${id}`, indice: 0 }] }, twoHand);
+    a.items.set(id, equipment);
+    return equipment;
+  };
+  const sword = add("sword"), shield = add("shield");
+  Object.assign(shield.system, { isWeapon: false, isShield: true });
+  const reference = item => ({ itemId: item.id, indice: 0, source: item.actions[0].source });
+  const calls = [];
+  let refused;
+  a.toggleEquipmentEquipped = async (id, bypass) => {
+    assert.equal(bypass, false);
+    calls.push(id);
+    if (id === refused) return;
+    const model = a.items.get(id).system;
+    model.equipped = !model.equipped;
+  };
+  await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), reference(item));
+  await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), reference(sword));
+  const shortcuts = JSON.stringify(a.flags.co2prism.shortcuts);
+  for (const [index, weapon] of [sword, shield].entries()) {
+    assert.equal(await bar.saveShortcut(a, 1, bar.slotRows()[0][index], reference(weapon)), true);
+  }
+  a.flags.co2prism.hands.presets[2] = { "left-hand": reference(item), "right-hand": reference(item) };
+  a.flags.co2prism.hands.presets[3] = { "left-hand": reference(sword) };
+  assert.deepEqual(calls.splice(0), ["sword", "shield"]);
+  refused = item.id;
+  assert.equal(await bar.setActivePreset(2), false);
+  assert.equal(bar.configuration.activePreset, 1);
+  assert.ok(sword.system.equipped && shield.system.equipped && !item.system.equipped);
+  assert.deepEqual(calls.splice(0), ["sword", "shield", item.id, "shield", "sword"]);
+  refused = undefined;
+  assert.equal(await bar.setActivePreset(3), true);
+  assert.deepEqual(calls.splice(0), ["shield"]);
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(calls.splice(0), ["sword", item.id]);
+  assert.ok(item.system.equipped && !sword.system.equipped);
+  assert.equal(await bar.saveShortcut(a, 2, bar.slotRows()[0][1], reference(shield)), false);
+  item.system.equipped = false;
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(calls.splice(0), []);
+  assert.equal(item.system.equipped, false);
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(calls, []);
+  item.system.equipped = true;
+  a.items.delete(shield.id);
+  assert.equal(await bar.setActivePreset(1), false);
+  assert.equal(bar.configuration.activePreset, 2);
+  assert.ok(item.system.equipped && warnings.length >= 3);
+  a.flags.co2prism.hands.presets[3] = {};
+  assert.equal(await bar.setActivePreset(3), true);
+  assert.equal(item.system.equipped, false);
+  assert.equal(JSON.stringify(a.flags.co2prism.shortcuts), shortcuts);
+});
+
+test("presets de mains : MAJ délègue la politique des mains libres à CO2", async t => {
+  let source;
+  try {
+    source = readFileSync(new URL("../../../systems/co2/module/documents/actor.mjs", import.meta.url), "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    t.skip("Source du système CO2 installé indisponible");
+    return;
+  }
+  const { bar, a, item, context } = setupShortcuts();
+  const method = signature => {
+    const start = source.indexOf(signature);
+    assert.ok(start >= 0);
+    return source.slice(start, source.indexOf("\n  }", start) + 4);
+  };
+  context.SYSTEM = { EQUIPMENT_SUBTYPES: Object.fromEntries(["weapon", "shield", "misc"].map(id => [id, { id }])) };
+  const native = vm.runInContext(`({
+    ${method("async toggleEquipmentEquipped(itemId, bypassChecks)")},
+    ${method("canEquipItem(item, bypassChecks) {")},
+    ${method("_hasEnoughFreeHands(item, bypassChecks) {")}
+  })`, context);
+  const calls = [];
+  Object.assign(a, native, {
+    toggleEquipmentEquipped(id, bypass) {
+      calls.push([id, bypass]);
+      return native.toggleEquipmentEquipped.call(this, id, bypass);
+    },
+    async _toggleItemFieldAndActions(item, field, value) { item.system[field] = value; }
+  });
+  a.items.filter = predicate => [...a.items.values()].filter(predicate);
+  const outside = makeHandWeapon({ id: "outside", type: "equipment", parent: a, system: {}, actions: [] });
+  outside.system.equipped = true;
+  outside.system.subtype = item.system.subtype = "weapon";
+  a.items.set(outside.id, outside);
+  a.flags.co2prism.hands = { presets: { 2: { "right-hand": { kind: "equipment", itemId: item.id } } } };
+  let mode, locked = false;
+  context.game.settings.get = (scope, key) => scope === "co2" ? mode : key === "locked" && locked;
+  for (const setting of ["none", "all", "gm"]) for (const gm of [false, true]) for (const shift of [false, true]) {
+    mode = setting; context.game.user.isGM = gm; locked = shift;
+    const expected = setting === "none" || (shift && (setting === "all" || gm));
+    assert.equal(await bar.setActivePreset(2, shift), expected);
+    assert.equal(item.system.equipped, expected);
+    assert.equal(bar.configuration.activePreset, expected ? 2 : 1);
+    assert.equal(outside.system.equipped, true);
+    assert.deepEqual(calls.splice(0), [[item.id, shift]]);
+    if (expected) {
+      assert.equal(await bar.setActivePreset(1), true);
+      assert.deepEqual(calls.splice(0), [[item.id, false]]);
+    }
+  }
+  a.flags.co2prism.hands.presets[2]["left-hand"] = { kind: "equipment", itemId: outside.id };
+  assert.equal(await bar.setActivePreset(2, true), false);
+  assert.deepEqual(calls, []);
+  assert.equal(outside.system.equipped, true);
+});
 
 test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante", async () => {
   const { bar, a, payload } = setupShortcuts();
@@ -1391,14 +1608,271 @@ test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante",
   assert.equal(bar.slotRows()[0][1].hand, "right");
 });
 
+test("groupes de raccourcis : capacité, persistance, déplacement et nettoyage individuel", async () => {
+  const { bar, a, item, event, node, create, select, context, writes, warnings } = setupShortcuts();
+  item.actions = Array.from({ length: 5 }, (_, indice) => ({ source: item.uuid, indice }));
+  item.system.actions = item.actions;
+  const payload = indice => ({ type: "co.action", source: item.uuid, indice });
+  let locked = false;
+  context.game.settings.get = () => locked;
+  const getSlot = () => bar.slotRows().flat().find(slot => slot.key === key);
+  const capture = actionIndex => ({ actor: a, token: bar.token, key, reference: getSlot().reference, actionIndex });
+  const indices = () => Array.from(bar.shortcutReferences(getSlot().reference), reference => reference.indice);
+  assert.equal(await bar.dropSlot(event(payload(0)), bar.slotRows()[0].at(-1), node), true);
+  const key = bar.slotRows()[0][2].key;
+  assert.deepEqual(indices(), [0]);
+  for (const index of [1, 2, 3]) assert.equal(await bar.dropSlot(event(payload(index)), getSlot(), node), true);
+  assert.deepEqual(indices(), [0, 1, 2, 3]);
+  assert.deepEqual(Object.keys(getSlot().reference).sort(), ["actions", "order", "row"]);
+  const saved = JSON.parse(JSON.stringify(a.flags));
+  const reloaded = setupShortcuts();
+  const restored = reloaded.configuredActor("restored", saved); reloaded.select(restored);
+  assert.deepEqual(Array.from(reloaded.bar.slotRows()[0][2].reference.actions, entry => entry.indice), [0, 1, 2, 3]);
+  const count = writes.length;
+  assert.equal(await bar.dropSlot(event(payload(4)), getSlot(), node), false);
+  assert.equal(warnings.at(-1), "CO2PRISM.Combat.ShortcutGroupFull");
+  assert.equal(await bar.manageShortcut(capture()), false);
+  assert.equal(writes.length, count);
+  assert.equal(await bar.manageShortcut(capture(), bar.slotRows()[1].at(-1)), true);
+  assert.equal(getSlot().row, 2);
+  assert.deepEqual(indices(), [0, 1, 2, 3]);
+  assert.equal(await bar.manageShortcut(capture(0), { ...bar.slotRows()[0].at(-1), actionIndex: 1 }), false);
+  assert.equal(await bar.manageShortcut(capture(0), { ...getSlot(), actionIndex: 2 }), true);
+  assert.deepEqual(indices(), [1, 2, 0, 3]);
+  const stale = capture(0);
+  select(create("other").actor);
+  assert.equal(await bar.manageShortcut(stale, { row: 2, key, actionIndex: 1 }), false);
+  select(a);
+  locked = true;
+  assert.equal(await bar.dropSlot(event(payload(4)), getSlot(), node), false);
+  locked = false;
+  a.testUserPermission = (_, level) => level === "OBSERVER";
+  assert.equal(await bar.dropSlot(event(payload(4)), getSlot(), node), false);
+  a.testUserPermission = () => true;
+  assert.equal(await bar.manageShortcut(capture(3)), true);
+  assert.deepEqual(indices(), [1, 2, 0]);
+  const beforeDuplicate = writes.length;
+  assert.equal(await bar.dropSlot(event(payload(1)), getSlot(), node), false);
+  assert.equal(warnings.at(-1), "CO2PRISM.Combat.ShortcutGroupDuplicate");
+  assert.equal(writes.length, beforeDuplicate);
+  item.actions.length = 2;
+  bar.pruneShortcuts(bar.slotRows());
+  await bar.configWrites.get(a);
+  assert.deepEqual(indices(), [1, 0]);
+  assert.equal(await bar.manageShortcut(capture(0)), true);
+  assert.deepEqual(indices(), [0]);
+  assert.equal(getSlot().reference.actions, undefined);
+  assert.equal(bar.resolveShortcut(a, getSlot().reference).action, item.actions[0]);
+  assert.equal(await bar.manageShortcut(capture()), true);
+  assert.equal(getSlot(), undefined);
+});
+
+test("actions temporaires : les deux propriétés CO2 sont nécessaires indépendamment de l'état actif", () => {
+  const { bar } = setup();
+  for (const activable of [true, false, undefined]) {
+    for (const temporary of [true, false, undefined]) {
+      for (const enabled of [true, false]) {
+        const action = { properties: { activable, temporary, enabled } };
+        const eligible = activable === true && temporary === true;
+        assert.equal(bar.shortcutCanToggle(action), eligible);
+        assert.equal(bar.shortcutActive(action), eligible && enabled);
+      }
+    }
+  }
+  assert.equal(bar.shortcutCanToggle(null), false);
+});
+
+test("règles de preset : défauts, isolation, identité CO2 et invalidation prudente", async () => {
+  const { bar, a, item, create, select, writes } = setupShortcuts();
+  const installAction = (support, label) => {
+    const action = { source: support.uuid, indice: 0, label,
+      properties: { activable: true, temporary: true, enabled: false },
+      toObject() { return { source: this.source, indice: this.indice, label: this.label, properties: { ...this.properties } }; } };
+    support.actions = [action];
+    return action;
+  };
+  const action = installAction(item, "Posture");
+  const reference = { itemId: item.id, indice: 0, source: item.uuid };
+  const rule = (preset, actor = a, ref = reference) => bar.getPresetActionRule(actor, ref, preset);
+  const save = (preset, value) => bar.setPresetActionRule(a, reference, preset, value);
+  const original = JSON.stringify(a.flags);
+  assert.deepEqual([1, 2, 3].map(preset => rule(preset)), ["unchanged", "unchanged", "unchanged"]);
+  assert.equal(JSON.stringify(a.flags), original);
+  assert.equal(await save(1, "activate"), true);
+  assert.equal(await save(2, "deactivate"), true);
+  assert.equal(await save(3, "unchanged"), false);
+  assert.equal(await save(3, "invalid"), false);
+  assert.deepEqual([1, 2, 3].map(preset => rule(preset)), ["activate", "deactivate", "unchanged"]);
+  const entry = a.flags.co2prism.presetActionRules["item:0"];
+  assert.deepEqual(Object.keys(entry).sort(), ["1", "2", "fingerprint"]);
+  entry[3] = "invalid";
+  assert.equal(rule(3), "unchanged");
+  action.properties.enabled = true;
+  assert.equal(rule(1, a, { ...reference, source: "Scene.s.Token.t.Actor.a.Item.item" }), "activate");
+  await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), reference);
+  const slot = bar.slotRows()[0].at(-2);
+  await bar.manageShortcut({ actor: a, token: bar.token, ...slot }, bar.slotRows()[1].at(-1));
+  assert.equal(rule(1, a, bar.slotRows()[1][0].reference), "activate");
+  item.actions.push({ ...action, indice: 1, label: "Deuxième posture" });
+  assert.equal(await bar.saveShortcut(a, 1, bar.slotRows()[1][0], { ...reference, indice: 1 }), true);
+  const [first, second] = bar.slotRows()[1][0].reference.actions;
+  assert.equal(rule(1, a, first), "activate");
+  assert.equal(rule(1, a, second), "unchanged");
+  assert.equal(setupShortcuts().bar.getPresetActionRule(a, first, 2), "deactivate");
+  const { actor: other, item: otherItem } = create("other-rules");
+  installAction(otherItem, "Posture"); select(other);
+  assert.equal(rule(1, other, { ...reference, source: otherItem.uuid }), "unchanged");
+  select(a);
+  action.properties.temporary = false;
+  assert.equal(rule(1), "unchanged");
+  assert.equal(await save(1, "deactivate"), false);
+  action.properties.temporary = true;
+  a.items.delete(item.id);
+  const writesBeforeMissing = writes.length;
+  assert.equal(rule(1), "unchanged");
+  assert.equal(writes.length, writesBeforeMissing);
+  a.items.set(item.id, item);
+  const replacement = installAction(item, "Autre posture");
+  assert.deepEqual([1, 2, 3].map(preset => rule(preset)), ["unchanged", "unchanged", "unchanged"]);
+  a.testUserPermission = (_, permission) => permission !== "OWNER";
+  assert.equal(await save(1, "activate"), false);
+  a.testUserPermission = () => true;
+  a.unsetFlag = async (scope, path) => delete a.flags[scope].presetActionRules[path.split(".")[1]];
+  assert.equal(await save(2, "activate"), true);
+  assert.equal(rule(1), "unchanged");
+  assert.equal(rule(2), "activate");
+  assert.equal(await save(2, "unchanged"), true);
+  assert.equal(a.flags.co2prism.presetActionRules["item:0"], undefined);
+  a.activateAction = () => assert.fail("Le preset déjà actif ne doit pas exécuter d'action");
+  await save(1, "activate");
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.equal(replacement.properties.enabled, false);
+});
+
+test("automatisation : preset entrant validé, transitions natives séquentielles et no-op strict", async () => {
+  const { bar, a, item, create, select, context, hooks, writes } = setupShortcuts();
+  let locked = false, blockEquipment = true, blockedCondition = true;
+  context.game.settings.get = (_scope, key) => key === "locked" ? locked : key === "economyMode" ? "always" : undefined;
+  const action = (indice, enabled, time = "f") => ({
+    indice, source: item.uuid, type: "heal", actionTypeFinal: time,
+    properties: { activable: true, temporary: true, enabled },
+    toObject() { return { source: this.source, indice: this.indice, type: this.type, properties: { ...this.properties } }; }
+  });
+  item.actions = [action(0, false, "m"), action(1, true), action(2, true), action(3, false), action(4, false), action(5, false)];
+  item.system.actions = item.actions;
+  item.actions[3].isVisible = async () => !blockedCondition;
+  const reference = indice => ({ itemId: item.id, source: item.uuid, indice });
+  a.flags.co2prism.hands = { presets: { 2: { "left-hand": { kind: "equipment", itemId: item.id } } } };
+  for (const [indice, preset, rule] of [[0, 2, "activate"], [0, 1, "deactivate"], [1, 2, "deactivate"],
+    [3, 2, "activate"], [4, 2, "activate"], [5, 2, "activate"]]) {
+    assert.equal(await bar.setPresetActionRule(a, reference(indice), preset, rule), true);
+  }
+  item.actions[5].properties.temporary = false;
+  const { actor: other } = create("observer");
+  const operations = [];
+  a.toggleEquipmentEquipped = async (id, shift) => {
+    operations.push(["equip", id, shift]);
+    if (!blockEquipment) item.system.equipped = !item.system.equipped;
+  };
+  a.activateAction = async ({ source, indice, state, type }) => {
+    operations.push(["action", indice, state]);
+    assert.equal(source, item.uuid);
+    assert.equal(type, undefined);
+    assert.equal(item.system.equipped, a.flags.co2prism.hands.active === 2);
+    const guards = [];
+    const details = { item, indice, state, type, guard: promise => guards.push(promise) };
+    hooks.get("co2.preActivateAction")?.(a, details);
+    if ((await Promise.all(guards)).includes(false) || indice === 4) return false;
+    item.actions[indice].properties.enabled = state;
+    hooks.get("co2.postActivateAction")?.(a, { ...details, success: true });
+    hooks.get("updateItem")(item);
+    return true;
+  };
+  assert.equal(await bar.setActivePreset(2), false);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false]]);
+  assert.equal(bar.configuration.activePreset, 1);
+  blockEquipment = false;
+  await bar.setPanelState("combat", false);
+  locked = true;
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false], ["action", 0, true], ["action", 1, false], ["action", 4, true]]);
+  assert.deepEqual(item.actions.map(entry => entry.properties.enabled), [true, false, true, false, false, false]);
+  assert.equal(context.game.settings.get("co2prism", "locked"), true);
+  assert.equal(a.flags.co2prism.actionEconomy.normal.m, false);
+  item.actions[0].properties.enabled = false;
+  item.system.equipped = false;
+  const beforeSamePreset = writes.length;
+  assert.equal(await bar.setActivePreset(2), true);
+  bar.refreshActor();
+  select(other); select(a);
+  assert.deepEqual(operations, []);
+  assert.equal(writes.length, beforeSamePreset);
+  item.system.equipped = true;
+  item.actions[0].properties.enabled = true;
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false], ["action", 0, false]]);
+  item.actions[0].properties.enabled = true;
+  blockedCondition = false;
+  item.actions.pop();
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(operations.splice(0), [["equip", item.id, false], ["action", 3, true], ["action", 4, true]]);
+  assert.equal(item.actions[3].properties.enabled, true);
+});
+
+test("actions conditionnelles : index CO2, visibilité native, ordre et origines multiples", async () => {
+  const { bar, a, item, create, writes } = setupShortcuts();
+  const linked = object => ({ predicate: "isLinkedActionActivated", object });
+  const checks = [];
+  const add = (indice, conditions = [], visible = true) => ({
+    indice, source: item.uuid, conditions, properties: { enabled: false },
+    async isVisible(source, actor) {
+      assert.equal(source, item);
+      assert.equal(actor, a);
+      checks.push(indice);
+      return visible && conditions.every(condition => condition.predicate !== "isLinkedActionActivated"
+        || source.system.actions[condition.object]?.properties.enabled);
+    }
+  });
+  item.actions = item.system.actions = [add(0), add(1, [linked("0")]), add(2, [{ predicate: "isEquipped" }, linked("0")]),
+    add(3, [linked("0")]), add(4), add(5, [linked(4)]), add(6, [linked("99")])];
+  const ref = indice => ({ source: item.uuid, itemId: item.id, indice });
+  const rows = [[{ key: "group", row: 1, reference: { actions: [ref(4), ref(0)] } },
+    { key: "manual", row: 1, reference: ref(2) }], [{ key: "repeat", row: 2, reference: ref(0) }]];
+  const collect = actor => bar.collectConditionalActions(actor, rows, { visibility: new Map() });
+  const bySource = (groups, index) => groups.find(group => group.source.indice === index);
+  const indices = refs => Array.from(refs, ref => ref.indice);
+  const inactive = await collect(a);
+  assert.deepEqual(indices(bySource(inactive, 0).dependencies), [1, 2, 3]);
+  assert.deepEqual(indices(bySource(inactive, 0).available), []);
+  assert.deepEqual(checks, []);
+  item.actions[0].properties.enabled = item.actions[4].properties.enabled = true;
+  const active = await collect(a);
+  assert.equal(active.length, 2);
+  assert.deepEqual(indices(bySource(active, 0).available), [1, 2, 3]);
+  assert.deepEqual(indices(bySource(active, 4).available), [5]);
+  assert.deepEqual(Array.from(bySource(active, 0).origins, origin => [origin.key, origin.row, origin.actionIndex]),
+    [["group", 1, 1], ["repeat", 2, undefined]]);
+  item.actions[2] = add(2, [{ predicate: "isEquipped" }, linked("0")], false);
+  item.actions[3].conditions.push(linked("4"));
+  item.actions[4].properties.enabled = false;
+  const restricted = bySource(await collect(a), 0);
+  assert.deepEqual(indices(restricted.dependencies), [1, 2, 3]);
+  assert.deepEqual(indices(restricted.available), [1]);
+  a.items.delete(item.id);
+  assert.equal((await collect(a)).length, 0);
+  const other = create("other-context").actor;
+  assert.equal((await collect(other)).length, 0);
+  assert.equal(writes.length, 0);
+});
+
 test("raccourcis : références natives seules, restauration, isolation et disparition", async () => {
   const { bar, context, a, item, payload, create, select, writes } = setupShortcuts();
   const original = structuredClone(a.system);
   const ref = bar.shortcutFromDrop(a, payload());
   await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
-  const slots = a.flags.co2prism.presets[1].slots;
+  const slots = a.flags.co2prism.shortcuts;
   const stored = Object.values(slots)[0];
-  assert.deepEqual(Object.keys(stored).sort(), ["source", "indice", "itemId", "row", "order", "hand"].sort());
+  assert.deepEqual(Object.keys(stored).sort(), ["source", "indice", "itemId", "row", "order"].sort());
   assert.equal(stored.itemId, item.id);
   assert.equal(bar.resolveShortcut(a, stored).action, item.actions[0]);
   item.actions[0].manaCost = 7;
@@ -1406,10 +1880,10 @@ test("raccourcis : références natives seules, restauration, isolation et dispa
   a.items.delete(item.id);
   assert.equal(bar.resolveShortcut(a, stored), null);
   assert.equal(bar.slotRows()[0].length, 4);
-  assert.deepEqual(a.flags.co2prism.presets[1].slots, slots);
+  assert.deepEqual(a.flags.co2prism.shortcuts, slots);
   a.items.set(item.id, item);
   await bar.setActivePreset(2);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [4, 1]);
   const { actor: b } = create("other"); select(b);
   assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
   select(a); await bar.setActivePreset(1);
@@ -1419,7 +1893,7 @@ test("raccourcis : références natives seules, restauration, isolation et dispa
   reloaded.bar.refreshActor();
   assert.equal(reloaded.bar.slotRows()[0].length, 4);
   assert.deepEqual(a.system, original);
-  assert.ok(writes[0].key.startsWith("presets.1.slots."));
+  assert.ok(writes[0].key.startsWith("shortcuts."));
 });
 
 test("raccourcis : payloads refusés sans écriture ni croissance, droits et contexte de drag", async () => {
@@ -1444,9 +1918,9 @@ test("raccourcis : payloads refusés sans écriture ni croissance, droits et con
   const next = event(); bar.hoverSlot(next, slot, node);
   await bar.setActivePreset(2);
   const count = writes.length;
-  assert.equal(await bar.dropSlot(next, slot, node), false);
-  assert.equal(writes.length, count);
-  assert.ok(warnings.length >= 8);
+  assert.equal(await bar.dropSlot(next, slot, node), true);
+  assert.equal(writes.length, count + 1);
+  assert.ok(warnings.length >= 7);
 });
 
 test("raccourcis : attaque de rencontre, action portée par acteur et acteur synthétique", async () => {
@@ -1481,9 +1955,65 @@ async function setupExecution() {
     [name, async (...args) => { calls.push([name, ...args]); }])) } };
   const click = modifiers => ({ button: 0, detail: 1, preventDefault() {}, stopPropagation() {}, ...modifiers });
   const target = (key = "left-hand") => ({ actor: a, token: bar.token, preset: 1, key,
-    reference: bar.readConfiguration(a).presets[1].slots[key] });
+    reference: bar.readConfiguration(a).slots[key] });
   return { ...env, action, calls, click, target };
 }
+
+test("attaques de rencontre : source commune, persistance et exécution par Item propriétaire", async () => {
+  const { bar, a, item, action, calls, click, target, writes } = await setupExecution();
+  a.type = "encounter"; item.type = "attack";
+  action.source = "Item.sourceCommune";
+  action.resolvers = [{ attack: "+14", damage: "1d6+6" }];
+  const secondAction = { ...action, resolvers: [{ attack: "+14", damage: "1d4 + 3" }] };
+  const second = { ...item, id: "serpent", uuid: `${a.uuid}.Item.serpent`, actions: [secondAction] };
+  a.items.set(second.id, second);
+  assert.equal(bar.shortcutFromDrop(a, { type: "co.action", source: action.source, indice: 0 }), null);
+  for (const [owned, key] of [[item, "attack-1"], [second, "attack-2"]]) {
+    const ref = bar.shortcutFromDrop(a, { type: "co.attack", uuid: owned.uuid });
+    assert.equal(ref.itemId, owned.id);
+    assert.equal(ref.source, owned.uuid);
+    await bar.saveShortcut(a, 1, { row: 1, key, order: 0 }, ref);
+    const restored = JSON.parse(JSON.stringify(bar.readConfiguration(a).slots[key]));
+    assert.equal(bar.resolveShortcut(a, restored).action, owned.actions[0]);
+    const count = writes.length;
+    for (const modifiers of [{}, { altKey: true }, { shiftKey: true }]) {
+      assert.equal(await bar.executeShortcut(click(modifiers), target(key)), true);
+    }
+    assert.deepEqual(calls.splice(0), [["useAction", owned.uuid, 0, "attack"],
+      ["useAction", owned.uuid, 0, "damage"], ["openSheet", owned.uuid]]);
+    assert.equal(writes.length, count);
+    assert.equal(owned.actions[0].actionTypeFinal, "none");
+    assert.equal(owned.actions[0].source, "Item.sourceCommune");
+  }
+  secondAction.autoAttack = true;
+  await bar.executeShortcut(click(), target("attack-2"));
+  assert.deepEqual(calls.pop(), ["useAction", second.uuid, 0, "auto"]);
+  const stale = target("attack-2");
+  a.items.delete(second.id);
+  assert.equal(bar.resolveShortcut(a, stale.reference), null);
+  assert.equal(await bar.executeShortcut(click(), stale), false);
+  assert.equal(calls.length, 0);
+});
+
+test("attaques de rencontre : UUID synthétique, droits et dépôts étrangers refusés", () => {
+  const { bar, a, item, create } = setupShortcuts();
+  item.type = "attack";
+  const oldUuid = item.uuid;
+  a.uuid = "Scene.scene.Token.token.Actor.synthetic";
+  item.uuid = `${a.uuid}.Item.${item.id}`;
+  const drop = () => bar.shortcutFromDrop(a, { type: "co.attack", uuid: item.uuid });
+  assert.equal(drop().source, item.uuid);
+  assert.equal(bar.shortcutFromDrop(a, { type: "co.attack", uuid: oldUuid }), null);
+  assert.equal(bar.shortcutFromDrop(create("other").actor, { type: "co.attack", uuid: item.uuid }), null);
+  item.testUserPermission = () => false;
+  assert.equal(drop(), null);
+  item.testUserPermission = () => true;
+  a.testUserPermission = () => false;
+  assert.equal(drop(), null);
+  a.testUserPermission = () => true;
+  item.parent = create("foreign").actor;
+  assert.equal(drop(), null);
+});
 
 test("exécution CO2 : attaque/dommages/chat/feuille et priorité Shift > Ctrl > Alt", async () => {
   const { bar, item, calls, click, target, writes, a } = await setupExecution();
@@ -1545,15 +2075,15 @@ test("exécution CO2 : droits, références absentes, ancien token/preset/carré
   assert.equal(await bar.executeShortcut(click(), original), false);
   await bar.setActivePreset(1);
   assert.equal(await bar.executeShortcut(click({ currentTarget: { isConnected: false } }), original), false);
-  const stored = a.flags.co2prism.presets[1].slots["left-hand"];
-  a.flags.co2prism.presets[1].slots["left-hand"] = { ...stored, indice: 9 };
+  const stored = a.flags.co2prism.hands.presets[1]["left-hand"];
+  a.flags.co2prism.hands.presets[1]["left-hand"] = { ...stored, indice: 9 };
   assert.equal(await bar.executeShortcut(click(), original), false);
-  a.flags.co2prism.presets[1].slots["left-hand"] = stored;
+  a.flags.co2prism.hands.presets[1]["left-hand"] = stored;
   action.indice = 1;
-  a.flags.co2prism.presets[1].slots["left-hand"] = { ...stored, indice: 1 };
+  a.flags.co2prism.hands.presets[1]["left-hand"] = { ...stored, indice: 1 };
   assert.equal(await bar.executeShortcut(click(), target()), false);
   action.indice = 0;
-  a.flags.co2prism.presets[1].slots["left-hand"] = stored;
+  a.flags.co2prism.hands.presets[1]["left-hand"] = stored;
   context.game.system.api.macros.useAction = null;
   assert.equal(await bar.executeShortcut(click(), target()), false);
   assert.equal(calls.length, 0);
@@ -1565,8 +2095,8 @@ test("exécution CO2 : bon Item et indice, UUID synthétique frais, acteur sans 
     [0, 1, 2].map(indice => ({ source: `${a.uuid}.Item.second`, indice, type: "heal", actionTypeFinal: "none" })) };
   a.items.set(second.id, second);
   const reference = bar.shortcutFromDrop(a, { type: "co.action", source: second.uuid, indice: 2 });
-  await bar.saveShortcut(a, 1, bar.slotRows()[0][1], reference);
-  await bar.executeShortcut(click(), target("right-hand"));
+  await bar.saveShortcut(a, 1, { row: 1, order: 0, key: "ordinary" }, reference);
+  await bar.executeShortcut(click(), target("ordinary"));
   assert.deepEqual(calls.pop(), ["useAction", second.uuid, 2, "heal"]);
   const synthetic = token(a); synthetic.document.baseActor = { uuid: "Actor.base" };
   context.canvas.tokens.controlled = [synthetic]; hooks.get("controlToken")();
@@ -1575,12 +2105,12 @@ test("exécution CO2 : bon Item et indice, UUID synthétique frais, acteur sans 
   assert.deepEqual(calls.pop(), ["useAction", item.uuid, 0, "attack"]);
   const direct = { source: a.uuid, indice: 5, type: "heal" };
   Object.defineProperty(a, "actions", { get: () => [direct] });
-  a.flags.co2prism.presets[1].slots["left-hand"] = { source: a.uuid, indice: 5, itemId: null };
+  a.flags.co2prism.shortcuts.ordinary = { source: a.uuid, indice: 5, itemId: null };
   a.sheet = { render: options => calls.push(["actorSheet", options.force]) };
-  assert.equal(await bar.executeShortcut(click(), target()), false);
-  assert.equal(await bar.executeShortcut(click({ ctrlKey: true }), target()), false);
+  assert.equal(await bar.executeShortcut(click(), target("ordinary")), false);
+  assert.equal(await bar.executeShortcut(click({ ctrlKey: true }), target("ordinary")), false);
   assert.equal(calls.length, 0);
-  assert.equal(await bar.executeShortcut(click({ shiftKey: true }), target()), true);
+  assert.equal(await bar.executeShortcut(click({ shiftKey: true }), target("ordinary")), true);
   assert.deepEqual(calls.pop(), ["actorSheet", true]);
 });
 
@@ -1699,11 +2229,11 @@ test("gestion : insertion continue entre lignes, clés et autres presets préser
   await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), ref);
   await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
   await bar.saveShortcut(a, 2, bar.slotRows(a, 2)[0][0], ref);
-  const other = JSON.stringify(bar.readConfiguration().presets[2]);
-  const hands = JSON.stringify(bar.readConfiguration().presets[1].slots['left-hand']);
+  const other = JSON.stringify(bar.readConfiguration().handPresets[2]);
+  const hands = JSON.stringify(bar.readConfiguration().slots['left-hand']);
   const keys = row => Array.from(bar.slotRows()[row].filter(s => !s.hand && !s.terminal), s => s.key);
   const initial = keys(0), second = keys(1);
-  const capture = key => ({ actor: a, token: bar.token, preset: 1, key, reference: bar.readConfiguration().presets[1].slots[key] });
+  const capture = key => ({ actor: a, token: bar.token, preset: 1, key, reference: bar.readConfiguration().slots[key] });
   assert.equal(await bar.manageShortcut(capture(initial[2]), bar.slotRows()[0][2]), true);
   assert.deepEqual(keys(0), [initial[2], initial[0], initial[1]]);
   assert.equal(await bar.manageShortcut(capture(initial[0]), bar.slotRows()[1][0]), true);
@@ -1713,8 +2243,8 @@ test("gestion : insertion continue entre lignes, clés et autres presets préser
   assert.equal(await bar.manageShortcut(capture(initial[0]), bar.slotRows()[0].at(-1)), true);
   assert.deepEqual(keys(0), [initial[2], initial[1], initial[0]]);
   for (const row of bar.slotRows()) assert.deepEqual(Array.from(row.filter(s => !s.hand && !s.terminal), s => s.order), Array.from(row.filter(s => !s.hand && !s.terminal), (_, i) => i));
-  assert.equal(JSON.stringify(bar.readConfiguration().presets[2]), other);
-  assert.equal(JSON.stringify(bar.readConfiguration().presets[1].slots['left-hand']), hands);
+  assert.equal(JSON.stringify(bar.readConfiguration().handPresets[2]), other);
+  assert.equal(JSON.stringify(bar.readConfiguration().slots['left-hand']), hands);
   assert.equal(await bar.manageShortcut(capture('left-hand'), bar.slotRows()[1].at(-1)), false);
   assert.equal(await bar.manageShortcut(capture(initial[0]), bar.slotRows()[0][0]), false);
 });
@@ -1730,7 +2260,7 @@ test("gestion : suppression compacte, mains permanentes, verrou et contexte pér
   locked = true; assert.equal(await bar.manageShortcut(first), false);
   locked = false; a.testUserPermission = () => false; assert.equal(await bar.manageShortcut(first), false);
   a.testUserPermission = () => true;
-  await bar.setActivePreset(2); assert.equal(await bar.manageShortcut(first), false); await bar.setActivePreset(1);
+  await bar.setActivePreset(2); assert.equal(bar.validShortcutContext(first), true); await bar.setActivePreset(1);
   const b = create('other').actor; select(b); assert.equal(await bar.manageShortcut(first), false); select(a);
   assert.equal(await bar.manageShortcut(capture(bar.slotRows()[0][2])), true);
   assert.deepEqual(Array.from(bar.slotRows()[0].filter(s => !s.hand && !s.terminal), s => s.order), [0]);
@@ -1841,15 +2371,15 @@ test("nettoyage : absence certaine, compaction, mains et isolation du preset", a
   for (let i = 0; i < 3; i++) await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
   await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
   await bar.saveShortcut(a, 2, bar.slotRows(a, 2)[0][0], ref);
-  const other = JSON.stringify(bar.readConfiguration().presets[2]);
+  const other = JSON.stringify(bar.readConfiguration().handPresets[2]);
   const ordinary = bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal);
-  a.flags.co2prism.presets[1].slots[ordinary[1].key].itemId = 'deleted';
+  a.flags.co2prism.shortcuts[ordinary[1].key].itemId = 'deleted';
   bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
   assert.deepEqual(Array.from(bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal), slot => slot.order), [0, 1]);
-  assert.equal(JSON.stringify(bar.readConfiguration().presets[2]), other);
+  assert.equal(JSON.stringify(bar.readConfiguration().handPresets[2]), other);
   item.actions = []; item.system.actions = [];
   bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
-  assert.equal(Object.keys(bar.readConfiguration().presets[1].slots).length, 0);
+  assert.equal(Object.keys(bar.readConfiguration().shortcuts).length, 0);
   assert.equal(bar.slotRows()[0][0].key, 'left-hand');
   assert.equal(a.items.get(item.id), item);
 });
@@ -1857,10 +2387,15 @@ test("nettoyage : absence certaine, compaction, mains et isolation du preset", a
 test("nettoyage prudent : conditions, droits, chargement et sélection en attente", async () => {
   const { bar, a, item, payload, create, select, writes } = setupShortcuts();
   const ref = bar.shortcutFromDrop(a, payload());
-  await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
+  await bar.saveShortcut(a, 1, bar.slotRows()[0].at(-1), ref);
   item.system.actions = item.actions; item.actions[0].isVisible = async () => false;
   const count = writes.length;
   bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
+  item.actions.unshift({ indice: 1 });
+  const beforeMovedIndex = bar.configWrites.get(a);
+  bar.pruneShortcuts(bar.slotRows());
+  assert.equal(bar.configWrites.get(a), beforeMovedIndex);
+  assert.equal(writes.length, count);
   item.system.actions = undefined; item.actions = [];
   bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
   item.system.actions = []; item.testUserPermission = () => false;
@@ -1874,7 +2409,7 @@ test("nettoyage prudent : conditions, droits, chargement et sélection en attent
   const cleanup = bar.configWrites.get(a); select(create('other').actor); release(true); await pending; await cleanup;
   assert.equal(writes.length, count);
   select(a); bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
-  assert.equal(Object.keys(bar.readConfiguration().presets[1].slots).length, 0);
+  assert.equal(Object.keys(bar.readConfiguration().shortcuts).length, 0);
 });
 
 test("conditions natives : blocage utilisation/dommages, consultations et retour disponible", async () => {
@@ -1888,7 +2423,7 @@ test("conditions natives : blocage utilisation/dommages, consultations et retour
   assert.equal(await run({ ctrlKey: true }), true);
   assert.equal(await run({ shiftKey: true }), true);
   assert.equal(evaluations, 2);
-  assert.ok(bar.readConfiguration().presets[1].slots['left-hand']);
+  assert.ok(bar.readConfiguration().slots['left-hand']);
   visible = true;
   assert.equal(await run(), true);
   assert.equal(await run({ altKey: true }), true);
@@ -1902,19 +2437,19 @@ test("conditions natives : résultat tardif après changement d'acteur ou réfé
   const pending = bar.executeShortcut(click(), target()); select(create('other').actor); release(true);
   assert.equal(await pending, false); assert.equal(calls.length, 0);
   select(a);
-  const second = bar.executeShortcut(click(), target()); delete a.flags.co2prism.presets[1].slots['left-hand']; release(true);
+  const second = bar.executeShortcut(click(), target()); delete a.flags.co2prism.hands.presets[1]['left-hand']; release(true);
   assert.equal(await second, false); assert.equal(calls.length, 0);
 });
 
 test("interface économie : file moteur, verrou indépendant, presets et acteur synthétique", async () => {
   const { bar, a, context, create, select, writes } = setupShortcuts();
   context.game.settings.get = () => true;
-  const presets = JSON.stringify(bar.readConfiguration().presets);
+  const presets = JSON.stringify(bar.readConfiguration().handPresets);
   await Promise.all([bar.changeEconomy("grant", "m"), bar.changeEconomy("grant", "m"), bar.changeEconomy("spend", "m")]);
   assert.equal(a.flags.co2prism.actionEconomy.bonus.m, 1);
   assert.equal(a.flags.co2prism.actionEconomy.branch, "undecided");
-  assert.equal(JSON.stringify(bar.readConfiguration().presets), presets);
-  await bar.selectCombatPreset(2);
+  assert.equal(JSON.stringify(bar.readConfiguration().handPresets), presets);
+  await bar.setActivePreset(2);
   assert.equal(a.flags.co2prism.actionEconomy.bonus.m, 1);
   const b = create("synthetic").actor; b.baseActor = a; select(b);
   await bar.changeEconomy("spend", "l");
@@ -2007,7 +2542,7 @@ test("13 attente : bonus disponible, doubles clics et contexte revérifié", asy
   assert.equal(await run(), true);
   assert.equal(economy.getSnapshot().bonus.a, 0);
   for (const mutate of [() => { context.canvas.tokens.controlled = []; }, () => { a.testUserPermission = () => false; },
-    () => { a.flags.co2prism.presets[1].slots['left-hand'].indice = 99; }]) {
+    () => { a.flags.co2prism.hands.presets[1]['left-hand'].indice = 99; }]) {
     const selection = context.canvas.tokens.controlled, permission = a.testUserPermission;
     context.foundry.applications.api.DialogV2.confirm = async () => { mutate(); return true; };
     const count = writes.length;
@@ -2083,7 +2618,7 @@ test("12C refus avant API : budget, épuisement, conditions, droits et temps inc
   action.actionTypeFinal = "a"; action.isVisible = async () => false; assert.equal(await run(), false);
   action.isVisible = async () => true; a.testUserPermission = (_user, level) => level === "OBSERVER";
   assert.equal(await run(), false); a.testUserPermission = () => true;
-  item.system.frequency = "daily"; item.system.charges = { current: 0 };
+  item.type = "capacity"; item.system.frequency = "daily"; item.system.charges = { current: 0 };
   assert.equal(await run(), false); assert.equal(calls.length, 0);
 });
 

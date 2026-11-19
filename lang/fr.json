@@ -1,5 +1,42 @@
 {
   "CO2PRISM": {
+    "PresetAction": {
+      "Title": "Automatisation des actions",
+      "activate": "Activation auto avec cette sélection d’arme",
+      "deactivate": "Désactivation auto avec cette sélection d’arme",
+      "unchanged": "Ne pas changer l’état avec cette sélection d’arme"
+    },
+    "Paths": {
+      "ToggleAllHint": "Clic droit pour replier ou déplier toutes les voies",
+      "Title": "Voies et Capacités",
+      "Open": "Ouvrir le volet Voies et Capacités",
+      "Close": "Fermer le volet Voies et Capacités",
+      "OffPaths": "Hors-voies"
+    },
+    "Equipment": {
+      "ToggleAllHint": "Clic droit pour replier ou déplier toutes les catégories",
+      "Operations": {
+        "Title": "Opérations de l’objet",
+        "Decrease": "Quantité −1",
+        "Increase": "Quantité +1",
+        "Action": "Exécuter {action}",
+        "Equip": "Équiper",
+        "Unequip": "Déséquiper"
+      },
+      "HiddenItem": "{item} (masqué dans Prism)",
+      "Title": "Équipements",
+      "Open": "Ouvrir le volet Équipements",
+      "Close": "Fermer le volet Équipements",
+      "Expand": "Déplier {category}",
+      "Collapse": "Replier {category}",
+      "Groups": {
+        "misc": "Divers",
+        "containers": "Contenants",
+        "consumable": "Consommables",
+        "protection": "Protection",
+        "weapon": "Armes"
+      }
+    },
     "Title": "CO2 Prism",
     "Size": "Taille de la barre",
     "SizeHint": "Choisir S, M, L ou XL. La modification est appliquée immédiatement.",
@@ -19,8 +56,17 @@
       "fullRest": "Récupération complète"
     },
     "Save": "Enregistrer",
-    "Preset": "Preset",
+    "Preset": "Preset de mains",
     "Combat": {
+      "ShortcutGroup": "Groupe de {count} actions",
+      "ShortcutGroupFull": "Un groupe peut contenir quatre actions au maximum.",
+      "ShortcutGroupDuplicate": "Cette action est déjà présente dans ce groupe.",
+      "HandsInvalidItem": "Il faut un équipement équipable de cet acteur ou une action de son arme ou de son bouclier.",
+      "HandOccupied": "Main occupée par un équipement à deux mains.",
+      "HandsConflict": "Cette combinaison dépasse les mains disponibles.",
+      "HandsEquipmentFailed": "Le changement d’équipement CO2 a échoué. Les modifications effectuées ont été annulées.",
+      "HandsRestoreFailed": "La restauration de l’équipement a échoué. Vérifiez les objets équipés sur la fiche CO2.",
+      "HandUnequipped": "Cet équipement est déséquipé dans CO2.",
       "Title": "Combat",
       "Meters": "Mètres",
       "Cells": "Cases",
@@ -129,17 +175,17 @@
       "Speed": "{cells} cases pour cette action M.",
       "SpeedUnavailable": "Vitesse par action M indisponible.",
       "WithinCapacity": "Déplacement dans la capacité disponible : {used} cases parcourues. Aucune dépense effectuée.",
-      "Excess": "Dépassement du mouvement normal de {excess} cases.",
+      "Excess": "Dépassement de {excess} cases !",
       "InformativeNotice": "Mesure informative — budget inactif, aucune action M à dépenser.",
       "Unavailable": "Coût natif ou vitesse indisponible : grille valide et données natives du trajet nécessaires. Aucun repli sur les cases géométriques.",
       "ReturnFailed": "La commande a échoué. Le trajet est conservé ; vérifiez les droits et la position du token.",
       "Busy": "Déplacement en cours : attendez son arrêt avant de terminer ou de revenir au départ.",
       "Close": "Fermer le panneau Mouvement.",
-      "Actions": "{available} actions de mouvement disponibles",
-      "ActionsOne": "1 action de mouvement disponible",
+      "CellsAvailable": "{cells} cases disponibles",
+      "CellsAvailableOne": "{cells} case disponible",
       "NoMovement": "Aucun mouvement",
       "Normal": "Mouvement normal et valide",
-      "ExcessOne": "Dépassement du mouvement normal de {excess} case.",
+      "ExcessOne": "Dépassement de {excess} case !",
       "CloseTitle": "Déplacement en cours",
       "CloseQuestion": "Que voulez-vous faire ?",
       "CloseValidate": "Valider le mouvement",

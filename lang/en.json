@@ -1,5 +1,42 @@
 {
   "CO2PRISM": {
+    "PresetAction": {
+      "Title": "Action automation",
+      "activate": "Automatically activate with this weapon selection",
+      "deactivate": "Automatically deactivate with this weapon selection",
+      "unchanged": "Leave state unchanged with this weapon selection"
+    },
+    "Paths": {
+      "ToggleAllHint": "Right-click to collapse or expand all paths",
+      "Title": "Paths and Capacities",
+      "Open": "Open the Paths and Capacities panel",
+      "Close": "Close the Paths and Capacities panel",
+      "OffPaths": "Off-path"
+    },
+    "Equipment": {
+      "ToggleAllHint": "Right-click to collapse or expand all categories",
+      "Operations": {
+        "Title": "Item operations",
+        "Decrease": "Quantity −1",
+        "Increase": "Quantity +1",
+        "Action": "Run {action}",
+        "Equip": "Equip",
+        "Unequip": "Unequip"
+      },
+      "HiddenItem": "{item} (hidden in Prism)",
+      "Title": "Equipment",
+      "Open": "Open the equipment panel",
+      "Close": "Close the equipment panel",
+      "Expand": "Expand {category}",
+      "Collapse": "Collapse {category}",
+      "Groups": {
+        "misc": "Miscellaneous",
+        "containers": "Containers",
+        "consumable": "Consumables",
+        "protection": "Protection",
+        "weapon": "Weapons"
+      }
+    },
     "Title": "CO2 Prism",
     "Size": "Bar size",
     "SizeHint": "Choose S, M, L or XL. Changes apply immediately.",
@@ -19,8 +56,17 @@
       "fullRest": "Full recovery"
     },
     "Save": "Save",
-    "Preset": "Preset",
+    "Preset": "Hand preset",
     "Combat": {
+      "ShortcutGroup": "Group of {count} actions",
+      "ShortcutGroupFull": "A group can contain up to four actions.",
+      "ShortcutGroupDuplicate": "This action is already in this group.",
+      "HandsInvalidItem": "Drop this actor’s equippable Item or an action from their weapon or shield.",
+      "HandOccupied": "Hand occupied by two-handed equipment.",
+      "HandsConflict": "This combination exceeds the available hands.",
+      "HandsEquipmentFailed": "CO2 refused the equipment change.",
+      "HandsRestoreFailed": "Equipment restoration failed. Check the equipped Items on the CO2 sheet.",
+      "HandUnequipped": "This Item is unequipped in CO2.",
       "Title": "Combat",
       "Meters": "Meters",
       "Cells": "Squares",
@@ -129,17 +175,17 @@
       "Speed": "{cells} cells for this M action.",
       "SpeedUnavailable": "Speed per M action unavailable.",
       "WithinCapacity": "Within available capacity: {used} cells travelled. No actions spent.",
-      "Excess": "Normal movement exceeded by {excess} cells.",
+      "Excess": "Movement exceeded by {excess} squares!",
       "InformativeNotice": "Information only — budget inactive, no M actions to spend.",
       "Unavailable": "Native cost or speed unavailable: a valid grid and native path data are required. No fallback to geometric spaces.",
       "ReturnFailed": "The command failed. The path is preserved; check token permissions and position.",
       "Busy": "Movement in progress: wait for it to stop before finishing or returning to the start.",
       "Close": "Close the Movement panel.",
-      "Actions": "{available} movement actions available",
-      "ActionsOne": "1 movement action available",
+      "CellsAvailable": "{cells} squares available",
+      "CellsAvailableOne": "{cells} square available",
       "NoMovement": "No movement",
       "Normal": "Normal and valid movement",
-      "ExcessOne": "Normal movement exceeded by {excess} cell.",
+      "ExcessOne": "Movement exceeded by {excess} square!",
       "CloseTitle": "Movement in progress",
       "CloseQuestion": "What would you like to do?",
       "CloseValidate": "Validate movement",

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+﻿import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +17,14 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
   const directory = mkdtempSync(join(tmpdir(), "co2prism-browser-"));
   try {
     const translations = JSON.parse(read("../lang/fr.json"));
+    const nativePath = process.env.CO2PRISM_FOUNDRY_SCRIPT ?? "F:/FVTT_V14/public/scripts/foundry.mjs";
+    const native = existsSync(nativePath) ? readFileSync(nativePath, "utf8") : "";
+    const nativePart = (start, end) => native.slice(native.indexOf(start), native.indexOf(end));
+    const nativeTooltips = native ? "const deepFreeze = Object.freeze;\n"
+      + nativePart("const ALLOWED_HTML_TAGS", "const WORLD_JOIN_THEMES")
+      + nativePart("function cleanHTML(raw,", "function saveDataToFile(")
+      + nativePart("class TooltipManager {", "var _module$H")
+      + "foundry.utils.cleanHTML = cleanHTML;\n" : "";
     const markup = read("../templates/bar.hbs").replace(/\{\{localize '([^']+)'\}\}/g,
       (_match, key) => key.split(".").reduce((value, part) => value?.[part], translations) ?? key);
     // Un board natif reste derrière Prism ; aucune instance de monde n'est modifiée.
@@ -35,14 +43,20 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const measureRecordedPath = ${measureRecordedPath.toString()};
       const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Movement).map(([key, value]) => [`CO2PRISM.Movement.${key}`, value])))});
+      Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Equipment.Operations).map(([key, value]) => [`CO2PRISM.Equipment.Operations.${key}`, value])))});
       budgetTranslations['CO2PRISM.Combat.Movement'] = ${JSON.stringify(translations.CO2PRISM.Combat.Movement)};
       const game = globalThis.game = { system: { id: "co2" }, user: {},
         settings: { get: (_, key) => settings[key], set: (_, key, value) => settings[key] = value },
         i18n: { localize: key => budgetTranslations[key] ?? key,
           format: (key, data) => (budgetTranslations[key] ?? key).replace(/\\{(\\w+)\\}/g, (_, name) => data[name]) } };
       let sequence = 0;
-      const foundry = { utils: { deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
+      const foundry = { utils: { cleanHTML: value => value, escapeHTML: value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]), deepClone: value => structuredClone(value), randomID: () => "test" + (++sequence) },
         applications: { api: { DialogV2: { confirm: async () => false, wait: async () => "validate" } }, handlebars: { renderTemplate: async () => ${JSON.stringify(markup)} } } };
+      foundry.applications.ux = { TextEditor: { implementation: { async enrichHTML(description, options) {
+        if (!options.relativeTo.id) throw new Error('Missing native Item context');
+        return description;
+      } } } };
+      ${nativeTooltips}
       ${"globalThis.ActionEconomy = (() => {" + read("../module/combat/action-economy.mjs").replace("export class ActionEconomy", "class ActionEconomy") + "; return ActionEconomy; })();"}
       ${read("../module/movement/movement-tracker.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
@@ -87,19 +101,70 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           ] };
           canvas.tokens.controlled = [{ actor, document: { baseActor: actor } }];
           bar.refreshActor();
-          for (const action of ["sheet", "fortune", "fastRest", "fullRest"]) {
+          const portraitEvent = (type, options) => bar.portrait.dispatchEvent(new MouseEvent(type, { bubbles: true, ...options }));
+          const portraitDoubleClick = () => {
+            portraitEvent('click', { detail: 1 });
+            portraitEvent('click', { detail: 2 });
+            portraitEvent('dblclick', { detail: 2 });
+          };
+          const refreshTick = () => new Promise(resolve => setTimeout(resolve, 0));
+          check(!root.querySelector('[data-co2prism-action="sheet"], .fa-star'), 'Actor sheet star removed');
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            const count = calls.length;
+            portraitEvent('click', { detail: 1 });
+            check(calls.length === count, 'Single portrait click does not open the sheet');
+            portraitDoubleClick(); await refreshTick();
+            check(calls.length === count + 1 && calls.at(-1) === 'sheet', 'Portrait double click opens once in either lock mode');
+          }
+          const oldPosition = bar.position;
+          const oldBounds = root.getBoundingClientRect();
+          bar.portrait.setPointerCapture = () => {};
+          const portraitPointer = (type, x, y) => bar.portrait.dispatchEvent(new PointerEvent(type, {
+            button: 0, pointerId: 1, clientX: x, clientY: y, bubbles: true, cancelable: true
+          }));
+          portraitPointer('pointerdown', 200, 200);
+          portraitPointer('pointermove', 240, 180);
+          portraitPointer('pointerup', 240, 180);
+          check(root.getBoundingClientRect().left > oldBounds.left + 20, 'Unlocked portrait drag moves Prism');
+          portraitEvent('click', { detail: 1 });
+          portraitPointer('pointerdown', 240, 180);
+          portraitPointer('pointerup', 240, 180);
+          portraitEvent('click', { detail: 2 });
+          portraitEvent('dblclick', { detail: 2 });
+          check(calls.join() === 'sheet,sheet', 'A drag followed by a click does not open the actor sheet');
+          bar.position = oldPosition; bar.layout();
+          const originalSelection = canvas.tokens.controlled;
+          const nextActor = { ...actor, uuid: 'Actor.second', sheet: { render: () => calls.push('secondSheet') } };
+          canvas.tokens.controlled = [{ actor: nextActor, document: { baseActor: nextActor } }];
+          portraitDoubleClick(); await refreshTick();
+          check(calls.at(-1) === 'secondSheet', 'Portrait opens the currently selected actor sheet');
+          canvas.tokens.controlled = [];
+          portraitDoubleClick(); await refreshTick();
+          check(calls.join() === 'sheet,sheet,secondSheet', 'No sheet opens without a selected actor');
+          canvas.tokens.controlled = originalSelection; bar.refreshActor();
+          calls.length = 0;
+          for (const action of ["fortune", "fastRest", "fullRest"]) {
             if (bar.lastRest) bar.lastRest.at -= 1000;
             root.querySelector('[data-co2prism-action="' + action + '"]').click();
             await new Promise(resolve => setTimeout(resolve, 0));
           }
-          check(calls.join(",") === "sheet,fortune,fastRest,fullRest", "Raccordement des clics");
+          check(calls.join(",") === "fortune,fastRest,fullRest", "Raccordement des clics");
+          await bar.setPanelState('combat', true);
           root.querySelector('[data-co2prism-preset="2"]').click();
           await bar.configWrites.get(actor);
-          check(actor.flags.co2prism.activePreset === 2 && bar.configuration.activePreset === 2,
+          check(actor.flags.co2prism.hands.active === 2 && bar.configuration.activePreset === 2,
             "Preset non enregistré au clic");
-          check(actor.flags.co2prism.panels.combat === true && !bar.combatPanel.hidden, "Combat non ouvert par le preset");
-          root.querySelector('[data-co2prism-preset="2"]').click(); await bar.configWrites.get(actor);
-          check(bar.combatPanel.hidden, "Combat non replié par le preset actif");
+          check(!bar.combatPanel.hidden, 'Selector preserves combat');
+          await bar.setPanelState('combat', false);
+          check(bar.combatEffects.children.length > 0, "Effets absents avec le combat fermé");
+          bar.combatToggle.click(); await bar.configWrites.get(actor);
+          check(!bar.combatPanel.hidden && bar.combatToggle.getAttribute("aria-expanded") === "true"
+            && bar.configuration.activePreset === 2, "Le poing doit ouvrir le combat avec le preset courant");
+          check(getComputedStyle(bar.combatToggle).color === "rgb(237, 21, 32)", "Poing actif rouge");
+          bar.combatToggle.click(); await bar.configWrites.get(actor);
+          check(bar.combatPanel.hidden && bar.combatToggle.getAttribute("aria-expanded") === "false",
+            "Le poing doit refermer le combat");
           for (const [size, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
             settings.size = size; bar.position = {}; bar.layout();
             const r = root.getBoundingClientRect();
@@ -128,19 +193,23 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(style.backgroundColor === "rgba(0, 0, 0, 0)" && style.borderTopWidth === "0px" && style.opacity === "1",
                 size + " décoration de bouton inattendue");
             }
-            for (const button of bar.presetButtons) {
-              const b = button.getBoundingClientRect();
-              check(!button.disabled && button.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)),
-                size + " preset inaccessible");
-              const active = button.dataset.co2prismPreset === "2";
-              check(button.getAttribute("aria-pressed") === String(active), size + " sélection preset");
-              check(!active || getComputedStyle(button).boxShadow !== "none", size + " sélection invisible");
-              check(Math.abs(b.width - 47 * r.width / 724) < 0.1 && Math.abs(b.height - 47 * r.width / 724) < 0.1,
-                size + " géométrie preset modifiée");
-            }
+            check(bar.presetButtons.every(button => !button.getClientRects().length), "Closed preset controls");
             for (const nodes of Object.values(bar.gauges)) {
               const g = nodes.fill.getBoundingClientRect();
               check(document.elementFromPoint(g.right - 2, g.y + g.height / 2) === nodes.fill, size + " jauge inaccessible");
+            }
+            const gauges = ["recovery", "fortune", "mana", "hp"].map(key => bar.gauges[key].fill.getBoundingClientRect());
+            check(gauges.every((gauge, index) => !index || (gauge.top > gauges[index - 1].bottom
+              && Math.abs(gauge.right - gauges[0].right) < 1)), size + " ordre ou alignement des jauges V.3");
+            const backing = root.querySelector(".co2prism-gauge-back");
+            const backingBounds = backing.getBoundingClientRect(), backingStyle = getComputedStyle(backing);
+            check(backingBounds.top < gauges[0].top && backingBounds.bottom > gauges.at(-1).bottom
+              && backingStyle.backgroundColor === "rgb(0, 0, 0)" && backingStyle.pointerEvents === "none",
+              size + " fond noir continu derrière les jauges");
+            for (const button of [bar.combatToggle, bar.skillsToggle]) {
+              const b = button.getBoundingClientRect();
+              check(button.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)),
+                size + " commande du noyau inaccessible " + button.className);
             }
             bar.position = { x: innerWidth + 200, y: innerHeight + 200 }; bar.layout();
             const bounded = root.getBoundingClientRect();
@@ -162,14 +231,20 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(!bar.skillsPanel.hidden && actor.flags.co2prism.panels.competences, size + " ouverture non persistée");
             const r = root.getBoundingClientRect();
             skillsDimensions.push({ size, width: r.width, height: r.height });
-            check(Math.abs(r.width - width * 892 / 724) < 0.1 && Math.abs(r.height - width * 806 / 724) < 0.1,
+            check(Math.abs(r.width - width * 922 / 724) < 0.1 && Math.abs(r.height - width * 603 / 724) < 0.1,
               size + " dimensions volet");
             check(document.elementFromPoint(r.x + 1, r.y + 1)?.id === "board", size + " coin transparent volet");
             check(document.elementFromPoint(r.x + 1, r.bottom - 10)?.id === "board", size + " sous le volet");
+            const panel = bar.skillsPanel.getBoundingClientRect();
+            const unit = width / 724;
+            check(Math.abs(panel.left - opened.left + 286 * unit) < 0.1
+              && Math.abs(panel.top - opened.top - 251 * unit) < 0.1, size + " ancrage bas-gauche");
+            const rows = [[], [], []];
             for (const { key, button, value, count } of bar.skillNodes) {
               const b = button.getBoundingClientRect();
               check(button === document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2), size + " losange inaccessible " + key);
-              check(Math.abs(b.width - width * 160 / 724) < 0.1, size + " taille losange");
+              check(Math.abs(b.width - 128 * unit) < 0.1, size + " taille losange");
+              rows[Math.round((b.top - panel.top) / (68 * unit))].push((b.left - panel.left) / unit);
               check(b.x >= r.x - 0.1 && b.y >= r.y - 0.1 && b.right <= r.right + 0.1 && b.bottom <= r.bottom + 0.1,
                 size + " losange hors conteneur");
               for (const child of button.children) {
@@ -183,8 +258,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               button.click(); await new Promise(resolve => setTimeout(resolve, 0));
               check(calls.at(-1) === "skill:" + key, size + " mauvais jet");
             }
+            const stagger = rows.map(row => row.sort((a, b) => a - b).map(Math.round).join(",")).join("/");
+            check(stagger === "68,204/0,136,272/68,204", size + " rangées en quinconce");
+            const outer = bar.skillNodes.find(skill => skill.key === "con").button.getBoundingClientRect();
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
             check(bar.skillsPanel.hidden, size + " fermeture");
+            check(document.elementFromPoint(outer.left + outer.width / 2, outer.top + outer.height / 2)?.id === "board",
+              size + " panneau fermé encore cliquable");
             const closed = bar.portrait.getBoundingClientRect();
             check(Math.abs(closed.x - portrait.x) < 0.1 && Math.abs(closed.y - portrait.y) < 0.1,
               size + " portrait déplacé à la fermeture");
@@ -196,21 +276,65 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           for (const [size, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
             settings.size = size; bar.position = { x: 300, y: 350 }; bar.layout();
             const before = bar.portrait.getBoundingClientRect();
-            root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
+            await bar.setPanelState('combat', true); await bar.setActivePreset(1);
             const r = root.getBoundingClientRect(), after = bar.portrait.getBoundingClientRect();
             combatDimensions.push({ size, width: r.width, height: r.height });
-            check(!bar.combatPanel.hidden && actor.flags.co2prism.activePreset === 1, size + " Combat fermé");
-            check(Math.abs(r.width - width * 1381 / 724) < 0.1, size + " étendue Combat");
+            check(!bar.combatPanel.hidden && actor.flags.co2prism.hands.active === 1, size + " Combat fermé");
+            check(Math.abs(r.width - width * 1120 / 724) < 0.1, size + " étendue Combat");
             check(Math.abs(before.x - after.x) < 0.1 && Math.abs(before.y - after.y) < 0.1, size + " base déplacée par Combat");
-            check(bar.combatValues.meters.textContent === "20 / 20" && bar.combatValues.cells.textContent === "10 / 10"
+            check(bar.combatValues.meters.textContent === "20" && bar.combatValues.cells.textContent === "10"
               && bar.combatValues.def.textContent === "15" && bar.combatValues.dr.textContent === "4", "Valeurs Combat");
             const slots = [...root.querySelectorAll(".co2prism-combat-slot")];
             check(slots.length === 4, "Nombre de cases");
             check(slots[0].dataset.co2prismHand === "left" && slots[1].dataset.co2prismHand === "right", "Convention des mains");
             const firstY = slots[0].getBoundingClientRect().y, secondY = slots[3].getBoundingClientRect().y;
             check(slots.slice(0, 3).every(slot => slot.getBoundingClientRect().y === firstY)
-              && slots.slice(3).every(slot => slot.getBoundingClientRect().y === secondY) && secondY > firstY, "Disposition 5/3");
-            check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.title === "Native effect", "Effets réels");
+              && slots.slice(3).every(slot => slot.getBoundingClientRect().y === secondY) && secondY > firstY, "Alignement vertical des deux rangées");
+            check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.dataset.tooltipHtml === "<strong>Native effect</strong>", "Effets réels");
+            if (typeof TooltipManager !== "undefined" && !game.tooltip) {
+              const saved = { applied: actor.appliedEffects, custom: actor.system.currentEffects, position: bar.position };
+              actor.appliedEffects = [{ name: 'Protection <Mage>', img: "file:///F:/FVTT_V14/public/icons/svg/shield.svg",
+                description: '<p><em>Défense +2</em></p><img src="data:," onerror="window.tooltipUnsafe = true">',
+                duration: { label: '2 rounds', remaining: 2 }, statuses: new Set() }];
+              actor.system.currentEffects = [{ name: 'Flamme', sourceParts: {},
+                tooltip: 'Durée : 3 rounds<br />Restant : 2<br />Dégâts : 1d6 feu<br />Statuts : Étourdi<br />Défense : -2<br />par Bâton de Mage'
+                  + '<scr' + 'ipt>window.tooltipUnsafe = true</scr' + 'ipt>' }];
+              bar.refreshActor();
+              const icon = bar.combatEffects.firstElementChild, custom = bar.combatEffects.children[1];
+              const iconBefore = icon.getBoundingClientRect();
+              const tooltipElement = document.createElement("aside"); tooltipElement.id = "tooltip";
+              tooltipElement.setAttribute("popover", "manual"); document.body.append(tooltipElement);
+              Math.clamp = (number, min, max) => Math.min(max, Math.max(min, number));
+              const Tour = globalThis.Tour = { tourInProgress: false };
+              foundry.applications.detached = { adoptNodes: (parent, ...nodes) => parent.append(...nodes) };
+              foundry.utils.getDefiningClass = () => TooltipManager;
+              const manager = game.tooltip = new TooltipManager();
+              manager.activateListeners(document);
+              icon.dispatchEvent(new PointerEvent("pointerenter"));
+              await new Promise(resolve => setTimeout(resolve, 550));
+              check(manager.element === icon && tooltipElement.querySelector('em')?.textContent === 'Défense +2',
+                'Native tooltip hover renders rich HTML');
+              check(tooltipElement.textContent.includes('Protection <Mage>') && tooltipElement.textContent.includes('2 rounds'),
+                'Native effect name and prepared duration');
+              check(!tooltipElement.querySelector('[onerror], script') && !window.tooltipUnsafe, 'Native HTML sanitization');
+              check(!icon.hasAttribute('title') && icon.getAttribute('aria-label') === 'Protection <Mage>'
+                && icon.querySelector('img').alt === 'Protection <Mage>', 'No literal HTML title and accessible effect name');
+              manager.activate(custom);
+              check(tooltipElement.querySelectorAll('br').length >= 5 && tooltipElement.textContent.includes('par Bâton de Mage')
+                && !tooltipElement.textContent.includes('<br'), 'CO2 tooltip HTML retained');
+              for (const position of [{ x: 0, y: 0 }, { x: innerWidth, y: innerHeight }]) {
+                bar.position = position; bar.layout(); manager.activate(icon);
+                const bounds = tooltipElement.getBoundingClientRect();
+                check(bounds.left >= -1 && bounds.top >= -1 && bounds.right <= innerWidth + 1
+                  && bounds.bottom <= innerHeight + 1, 'Native effect tooltip stays inside screen');
+              }
+              bar.position = saved.position; bar.layout();
+              const iconAfter = icon.getBoundingClientRect();
+              check(Math.abs(iconBefore.width - iconAfter.width) < 1 && Math.abs(iconBefore.height - iconAfter.height) < 1,
+                'Tooltips preserve icon dimensions');
+              manager.deactivate(); tooltipElement.hidePopover();
+              actor.appliedEffects = saved.applied; actor.system.currentEffects = saved.custom; bar.refreshActor();
+            }
             const count = calls.length, original = JSON.stringify(actor.system);
             for (const node of [...slots, ...root.querySelectorAll(".co2prism-defense-control")]) {
               node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -218,8 +342,34 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             }
             check(calls.length === count && JSON.stringify(actor.system) === original, "Commande Combat exécutée");
             check([...root.querySelectorAll(".co2prism-time")].map(node => node.textContent).join(",") === "L,A,M,AM", "Ordre des temps");
-            check(bar.budgetCommands.map(node => node.parentElement.style.getPropertyValue('--x')).join(',') === '6,61,116,171', size + ' visual command order');
-            check(bar.budgetCommands.every(node => Math.abs(node.getBoundingClientRect().height - 47 * width / 724) < 1), size + ' command dimensions');
+            const triangle = bar.timeCommands.getBoundingClientRect();
+            const budget = bar.budgetScroll.getBoundingClientRect();
+            const band = bar.budgetScroll.parentElement.getBoundingClientRect();
+            const { left, right } = bar.combatHands;
+            const [leftHand, rightHand] = [left, right].map(node => node.getBoundingClientRect());
+            const presets = bar.presetButtons.map(node => node.getBoundingClientRect());
+            const [firstRow, secondRow] = bar.combatRows.map(node => node.getBoundingClientRect());
+            const stats = root.querySelector(".co2prism-combat-stats").getBoundingClientRect();
+            check(budget.bottom < triangle.top && triangle.right < leftHand.left, size + " bande et triangle des actions");
+            check(Math.abs((triangle.left - band.left) - (triangle.top - band.top)) < 0.1,
+              size + " bande et triangle parallèles au portrait");
+            check(!bar.budgetScroll.parentElement.contains(document.elementFromPoint(band.left + 1, band.bottom - 1)),
+              size + " coin découpé de la bande");
+            check(presets.every((preset, index) => preset.left > leftHand.right && preset.right < rightHand.left
+              && (!index || preset.top > presets[index - 1].bottom)), size + " sélecteur entre les mains");
+            check(firstRow.left > rightHand.right && Math.abs(firstRow.left - secondRow.left) < 1
+              && Math.abs(firstRow.top - leftHand.top) < 1, size + " raccourcis à droite des mains");
+            check(stats.left >= bar.name.getBoundingClientRect().right && Math.abs(stats.width - stats.height) < 1,
+              size + " carré DEF/Mouvement");
+            check(document.elementFromPoint(stats.left + stats.width / 2, stats.top + stats.height / 2)?.id === "board",
+              size + " séparation transparente DEF/Mouvement");
+            for (const button of [...bar.budgetCommands, ...bar.presetButtons]) {
+              const b = button.getBoundingClientRect();
+              const triangular = ["a", "m", "am"].includes(button.dataset.co2prismTime);
+              check(button.contains(document.elementFromPoint(b.x + b.width * (triangular ? 0.66 : 0.5),
+                b.y + b.height * (triangular ? 0.33 : 0.5))),
+                size + " commande Combat inaccessible " + button.textContent);
+            }
             for (const button of bar.actions) {
               const b = button.getBoundingClientRect(), hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
               check(button.contains(hit), size + " commande de base recouverte: " + button.dataset.co2prismAction + " par " + hit?.className);
@@ -233,30 +383,32 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const combined = root.getBoundingClientRect();
             check(document.elementFromPoint(combined.x + 2, combined.y + 2)?.id === "board", size + " coin transparent Combat");
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
-            root.querySelector('[data-co2prism-preset="1"]').click(); await bar.configWrites.get(actor);
+            await bar.setPanelState('combat', false);
           }
           result.combatDimensions = combatDimensions;
           // Ouverture au bord droit : déplacer Prism, sans retour arbitraire au repli.
           settings.size = "M"; bar.position = { x: innerWidth - 432, y: 400 }; bar.layout();
           const edgeBefore = bar.portrait.getBoundingClientRect();
-          await bar.selectCombatPreset(1);
+          await bar.setPanelState('combat', true);
           const edgeOpen = bar.portrait.getBoundingClientRect();
           check(root.getBoundingClientRect().right <= innerWidth + 0.1 && edgeOpen.x < edgeBefore.x, "Combat hors écran au dépliage");
-          await bar.selectCombatPreset(1);
+          await bar.setPanelState('combat', false);
           check(Math.abs(bar.portrait.getBoundingClientRect().x - edgeOpen.x) < 0.1, "Saut arbitraire au repli");
           await bar.setPanelState("competences", true);
           bar.position = { x: innerWidth - 432, y: 400 }; bar.layout();
-          await bar.selectCombatPreset(1);
+          await bar.setPanelState('combat', true);
           check(!bar.skillsPanel.hidden && !bar.combatPanel.hidden && root.getBoundingClientRect().right <= innerWidth + 0.1,
             "Combat hors écran avec Compétences");
-          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "capacity", parent: actor,
-            system: { description: "<b>Description native</b>", hasFrequency: true, frequency: "daily", charges: { current: 3 } },
+          const item = { id: "owned", uuid: "Actor.test.Item.owned", name: "Support natif", type: "equipment", parent: actor,
+            system: { description: "<b>Description native</b>", hasFrequency: true, frequency: "daily", isWeapon: true, useHands: true, equipped: false,
+              usage: { oneHand: false, twoHand: true }, properties: { equipable: true, reloadable: true }, charges: { current: 3 } },
             testUserPermission: () => true };
           const nativeAction = { source: item.uuid, indice: 0, actionName: "Action réelle",
             actionImg: "file:///F:/FVTT_V14/public/icons/svg/shield.svg", iconFA: "fas fa-sword", actionTypeFinal: "f",
             type: "melee", properties: { temporary: false, enabled: false, activable: true }, autoAttack: false, hasResolversWithDomage: true,
             hasCharges: true, charges: 3, manaCost: 2 };
           item.actions = [nativeAction]; actor.items = new Map([[item.id, item]]);
+          actor.toggleEquipmentEquipped = async id => { const model = actor.items.get(id).system; model.equipped = !model.equipped; hooks.get("updateItem")(item, {}); };
           Object.defineProperty(actor, "actions", { get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
           const shortcutCalls = [];
           actor.activateAction = async options => {
@@ -274,11 +426,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             async openSheet(...args) { shortcutCalls.push(["openSheet", ...args]); }
           } };
           const payload = { type: "co.action", source: item.uuid, indice: 0, name: "Copie ignorée", img: "ignored" };
-          const lengths = () => bar.combatRows.map(row => row.children.length).join(",");
+          const cards = index => {
+            const shortcuts = [...bar.combatRows[index].children];
+            if (index !== 0) return shortcuts;
+            const { left, right } = bar.combatHands;
+            return [left.firstElementChild, right.firstElementChild, ...shortcuts];
+          };
+          const lengths = () => bar.combatRows.map((_, index) => cards(index).length).join(",");
           const dropAt = async (row, index, data = payload) => {
             const transfer = new DataTransfer(); transfer.setData("text/plain", JSON.stringify(data));
             document.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
-            const target = bar.combatRows[row - 1].children[index];
+            const target = cards(row - 1)[index];
             target.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer }));
             if (data === payload) check(target.classList.contains("co2prism-drop-target"), "Cible valide non indiquée");
             target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
@@ -286,16 +444,64 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
           };
           check(lengths() === "3,1", "Preset vide différent de 3/1");
-          await dropAt(1, 0); await dropAt(1, 1);
+          const shield = { id: "shield", uuid: "Actor.test.Item.shield", name: "Shield", type: "equipment",
+            parent: actor, img: nativeAction.actionImg, actions: [], system: {
+              properties: { equipable: true }, equipped: false, usage: { oneHand: true, twoHand: false }
+            } };
+          actor.items.set(shield.id, shield);
+          const shieldPayload = { type: "Item", uuid: shield.uuid };
+          const removeHand = async index => {
+            cards(0)[index].querySelector(".co2prism-slot-remove").click();
+            await bar.configWrites.get(actor);
+          };
+          await dropAt(1, 2, shieldPayload);
+          check(lengths() === "3,1", "Item direct refusé dans les raccourcis");
+          for (const index of [0, 1]) {
+            await dropAt(1, index, shieldPayload);
+            const direct = cards(0)[index];
+            check(shield.system.equipped && direct.querySelector("img")?.src === shield.img
+              && !direct.querySelector(".co2prism-slot-time, .co2prism-slot-type, .co2prism-slot-uses, .co2prism-slot-cost")
+              && direct.querySelector(".co2prism-slot-remove"), "Bouclier direct sans action");
+            await removeHand(index);
+            check(!shield.system.equipped, "Retrait du bouclier direct");
+          }
+          const checkMirror = index => {
+            const mirror = cards(0)[index];
+            const illustration = mirror.querySelector("img");
+            check(mirror.classList.contains("co2prism-hand-mirror") && illustration?.src === nativeAction.actionImg
+              && Number(getComputedStyle(illustration).opacity) < 1 && mirror.children.length === 2
+              && mirror.querySelector(".co2prism-slot-hand"), "Miroir avec repère de main et sans commandes");
+          };
+          await dropAt(1, 1); checkMirror(0);
+          await dropAt(1, 0, shieldPayload);
+          check(!shield.system.equipped && !bar.configuration.handPresets[1]["left-hand"], "Dépôt refusé sur le miroir");
+          await removeHand(1);
+          await dropAt(1, 0); checkMirror(1);
+          settings.locked = true; bar.updateLock();
+          check(bar.presetButtons.map(button => button.hidden).join() === "false,true,true", "Presets vides masqués");
+          check(getComputedStyle(bar.presetButtons[0]).backgroundColor === "rgb(189, 24, 38)"
+            && getComputedStyle(bar.presetButtons[0]).boxShadow !== "none", "Halo rouge du preset actif");
+          settings.locked = false; bar.updateLock();
+          check(bar.presetButtons.every(button => !button.hidden), "Presets vides visibles en édition");
+          const selectPreset = bar.setActivePreset.bind(bar);
+          let requestedShift;
+          bar.setActivePreset = (number, shift) => {
+            requestedShift = shift;
+            return selectPreset(number, shift);
+          };
+          bar.presetButtons[0].dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+          await bar.configWrites.get(actor);
+          bar.setActivePreset = selectPreset;
+          check(requestedShift === true && item.system.equipped, "MAJ issue du clic et preset actif réappliqué");
           check(lengths() === "3,1", "Les mains font croître la ligne");
-          const occupied = bar.combatRows[0].children[0];
+          const occupied = cards(0)[0];
           check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.title.includes("Description native"), "Image ou description copiée incorrectement");
           check(occupied.querySelector(".co2prism-slot-time").textContent === "G"
             && occupied.querySelector(".co2prism-slot-uses").textContent.trim() === "3"
             && occupied.querySelector(".co2prism-slot-cost").textContent.trim() === "2", "Décorations natives");
           const executeFlags = JSON.stringify(actor.flags);
           const clickShortcut = async modifiers => {
-            bar.combatRows[0].children[0].dispatchEvent(new MouseEvent("click", {
+            cards(0)[0].dispatchEvent(new MouseEvent("click", {
               bubbles: true, cancelable: true, button: 0, detail: 1, ...modifiers
             }));
             await new Promise(resolve => setTimeout(resolve, 0));
@@ -308,16 +514,16 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             ["sendToChat", item.uuid, undefined, 0]
           ]), "Raccourcis clavier CO2 incorrects");
           check(JSON.stringify(actor.flags) === executeFlags, "Configuration modifiée par exécution");
-          check(bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent.trim() === "2"
+          check(cards(0)[0].querySelector(".co2prism-slot-uses").textContent.trim() === "2"
             && bar.gauges.mana.text.textContent === "17 / 18"
-            && bar.combatRows[0].children[0].getAttribute("aria-pressed") === "true", "Rafraîchissement après action natif absent");
+            && cards(0)[0].getAttribute("aria-pressed") === "true", "Rafraîchissement après action natif absent");
           let countCalls = shortcutCalls.length;
           nativeAction.hasResolversWithDomage = false; await clickShortcut({ altKey: true });
           check(shortcutCalls.length === countCalls, "Alt sans dommages a exécuté une action");
           nativeAction.properties.temporary = true; await clickShortcut({});
           check(shortcutCalls.at(-1)[0] === "activateAction" && shortcutCalls.at(-1)[1].state === false
             && shortcutCalls.at(-1)[1].type === undefined, "Action temporaire active non désactivée nativement");
-          check(!bar.combatRows[0].children[0].classList.contains("co2prism-action-active"), "Effet actif conservé après désactivation");
+          check(!cards(0)[0].classList.contains("co2prism-action-active"), "Effet actif conservé après désactivation");
           countCalls = shortcutCalls.length; await clickShortcut({ altKey: true });
           check(shortcutCalls.length === countCalls, "Alt temporaire a exécuté une action");
           nativeAction.properties.temporary = false; nativeAction.type = "heal"; await clickShortcut({});
@@ -334,8 +540,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           let complete;
           const nativeUseAction = game.system.api.macros.useAction;
           game.system.api.macros.useAction = (...args) => new Promise(resolve => { shortcutCalls.push(["useAction", ...args]); complete = resolve; });
-          bar.combatRows[0].children[0].click(); bar.combatRows[0].children[0].click();
-          check(shortcutCalls.length === countCalls + 1 && bar.combatRows[0].children[0].getAttribute("aria-disabled") === "true",
+          cards(0)[0].click(); cards(0)[0].click();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(shortcutCalls.length === countCalls + 1 && cards(0)[0].getAttribute("aria-disabled") === "true",
             "Clic pendant une opération en cours");
           complete(); await new Promise(resolve => setTimeout(resolve, 0));
           game.system.api.macros.useAction = nativeUseAction;
@@ -346,7 +553,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           hooks.get("updateItem")(item, { "system.actions": [] });
           const toggleFlags = JSON.stringify(actor.flags);
           await clickShortcut({});
-          check(nativeAction.properties.enabled && root.querySelectorAll(".co2prism-action-active").length === 4,
+          check(nativeAction.properties.enabled && root.querySelectorAll(".co2prism-action-active").length === 3,
             "Activation non synchronisée entre raccourcis");
           await clickShortcut({});
           check(!nativeAction.properties.enabled && !root.querySelector(".co2prism-action-active"), "Second clic sans désactivation");
@@ -370,13 +577,12 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(JSON.stringify(actor.flags) === toggleFlags, "État actif écrit dans les flags Prism");
           const toggleReference = bar.shortcutFromDrop(actor, payload);
           for (const preset of [2, 3]) {
-            await bar.saveShortcut(actor, preset, bar.slotRows(actor, preset)[0][0], toggleReference);
-            await bar.selectCombatPreset(preset);
-            check(root.querySelectorAll(".co2prism-action-active").length === 1, "État actif différent selon le preset");
+            await bar.setActivePreset(preset);
+            check(root.querySelectorAll(".co2prism-action-active").length === 2, "Raccourcis actifs communs");
           }
           nativeAction.properties.enabled = false; hooks.get("updateItem")(item, { "system.actions": [] });
           check(!root.querySelector(".co2prism-action-active"), "Changement depuis feuille non synchronisé");
-          await bar.selectCombatPreset(1);
+          await bar.setActivePreset(1);
           check(!root.querySelector(".co2prism-action-active"), "État précédent conservé au retour du preset");
           const nativeToggle = actor.activateAction;
           actor.activateAction = async () => false;
@@ -398,17 +604,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(calls.length === executeBefore && shortcutCalls.length === staleBefore, "Ancien carré exécuté");
           nativeAction.actionName = "Action modifiée"; nativeAction.charges = 0; nativeAction.hasCharges = false; item.system.charges.current = 0;
           bar.refreshActor();
-          check(bar.combatRows[0].children[0].title.includes("Action modifiée")
-            && bar.combatRows[0].children[0].querySelector(".co2prism-slot-uses").textContent.trim() === "0", "Données non actualisées");
-          const removedSlots = structuredClone(actor.flags.co2prism.presets[1].slots);
+          check(cards(0)[0].title.includes("Action modifiée")
+            && cards(0)[0].querySelector(".co2prism-slot-uses").textContent.trim() === "0", "Données non actualisées");
+          const removedSlots = structuredClone(actor.flags.co2prism.shortcuts);
           actor.items.delete(item.id); bar.refreshActor(); await bar.configWrites.get(actor);
-          check(lengths() === "3,1" && Object.keys(actor.flags.co2prism.presets[1].slots).length === 0, "Raccourcis supprimés non nettoyés");
-          actor.flags.co2prism.presets[1].slots = removedSlots;
+          check(lengths() === "3,1" && Object.keys(actor.flags.co2prism.shortcuts).length === 0, "Raccourcis supprimés non nettoyés");
+          actor.flags.co2prism.shortcuts = removedSlots;
           actor.items.set(item.id, item); bar.refreshActor();
-          await bar.selectCombatPreset(2); check(lengths() === "3,1", "Slots mélangés entre presets");
-          await bar.selectCombatPreset(1); check(lengths() === "4,2", "Ordre non restauré");
+          await bar.setActivePreset(2); check(lengths() === "4,2", "Raccourcis communs au preset 2");
+          await bar.setActivePreset(1); check(lengths() === "4,2", "Ordre non restauré");
           settings.size = "XL"; bar.layout();
-          for (let index = 0; index < 12; index++) await dropAt(1, bar.combatRows[0].children.length - 1);
+          for (let index = 0; index < 12; index++) await dropAt(1, cards(0).length - 1);
           check(lengths() === "16,2", "Limite arbitraire de cases");
           const row = bar.combatRows[0];
           row.scrollLeft = row.scrollWidth;
@@ -416,7 +622,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(row.scrollWidth > row.clientWidth && terminal.right <= viewport.right + 1 && terminal.right > viewport.left, "Fin de ligne inaccessible");
           check(root.getBoundingClientRect().right <= innerWidth + 0.1, "Racine plus large que l'écran");
           check(document.elementFromPoint(innerWidth - 2, innerHeight - 2)?.id === "board", "Overlay après croissance");
-          const savedPreset = JSON.stringify(actor.flags.co2prism.presets[1]);
+          const savedPreset = JSON.stringify(actor.flags.co2prism.hands.presets[1]);
           const fullRows = label => {
             for (const row of bar.combatRows) {
               const bounds = row.getBoundingClientRect(), last = row.lastElementChild.getBoundingClientRect();
@@ -427,8 +633,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           for (const [size, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
             for (const skills of [false, true]) {
               // Preset isolé pour tester les largeurs sans modifier les raccourcis précédents.
-              actor.flags.co2prism.presets[3] = { slots: {} };
-              actor.flags.co2prism.activePreset = 3;
+              actor.flags.co2prism.shortcuts = {};
+              actor.flags.co2prism.hands.active = 3;
               actor.flags.co2prism.panels = { combat: true, competences: skills, equipements: false };
               settings.size = size; bar.refreshActor();
               bar.position = { x: 300, y: 350 }; bar.layout();
@@ -448,7 +654,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(root.getBoundingClientRect().right <= innerWidth + 0.1, label + " hors écran");
               const origin1 = bar.combatRows[0].getBoundingClientRect().left;
               const origin2 = bar.combatRows[1].getBoundingClientRect().left;
-              check(Math.abs(origin2 - origin1 - 209 * width / 724) < 0.1, label + " décalage modifié");
+              check(Math.abs(origin2 - origin1) < 0.1, label + " décalage modifié");
               await bar.setPanelState("combat", false);
               bar.position = { x: innerWidth - width - 2, y: 350 }; bar.layout();
               await bar.setPanelState("combat", true);
@@ -456,9 +662,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(root.getBoundingClientRect().right <= innerWidth + 0.1, label + " réouverture hors écran");
             }
           }
-          check(JSON.stringify(actor.flags.co2prism.presets[1]) === savedPreset, "Autre preset modifié par les tests de largeur");
-          await bar.selectCombatPreset(2); check(lengths() === "3,1", "Dimensions fantômes après changement de preset");
-          await bar.selectCombatPreset(3); check(lengths() === "3,4", "Seconde ligne non restaurée");
+          check(JSON.stringify(actor.flags.co2prism.hands.presets[1]) === savedPreset, "Autre preset modifié par les tests de largeur");
+          await bar.setActivePreset(2); check(lengths() === "3,4", "Raccourcis communs au preset 2");
+          await bar.setActivePreset(3); check(lengths() === "3,4", "Seconde ligne non restaurée");
           fullRows("retour au preset");
           const originalToken = canvas.tokens.controlled[0];
           const other = { ...actor, uuid: "Actor.other", flags: { co2prism: { panels: { combat: true } } }, items: new Map() };
@@ -466,7 +672,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(lengths() === "3,1", "Cases de l'acteur précédent conservées"); fullRows("autre acteur");
           canvas.tokens.controlled = [originalToken]; bar.refreshActor();
           check(lengths() === "3,4", "Seconde ligne non restaurée après changement d'acteur"); fullRows("retour à l'acteur");
-          result.restoredSlots = actor.flags.co2prism.presets[3].slots;
+          result.restoredSlots = actor.flags.co2prism.shortcuts;
           await bar.setPanelState("combat", false); await bar.setPanelState("competences", false);
           if (${Boolean(process.env.CO2PRISM_SCREENSHOT)}) {
             settings.size = "L"; bar.position = { x: 300, y: 350 }; bar.layout();
@@ -479,16 +685,16 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           result.board = { width: board.width, height: board.height };
 
           // Repartir avec un preset court pour les interactions de configuration.
-          actor.flags.co2prism.activePreset = 1; actor.flags.co2prism.panels.combat = true;
-          actor.flags.co2prism.presets[1].slots = {}; settings.locked = false; bar.refreshActor();
-          for (let i = 0; i < 3; i++) await dropAt(1, bar.combatRows[0].children.length - 1);
+          actor.flags.co2prism.hands.active = 1; actor.flags.co2prism.panels.combat = true;
+          actor.flags.co2prism.shortcuts = {}; actor.flags.co2prism.hands.presets[1] = {}; item.system.equipped = false; settings.locked = false; bar.refreshActor();
+          for (let i = 0; i < 3; i++) await dropAt(1, cards(0).length - 1);
           const orderKeys = row => bar.slotRows()[row].filter(s => !s.hand && !s.terminal).map(s => s.key);
           const initialKeys = orderKeys(0);
           const move = async (sourceRow, sourceIndex, targetRow, targetIndex) => {
-            const transfer = new DataTransfer(); const sourceNode = bar.combatRows[sourceRow].children[sourceIndex];
+            const transfer = new DataTransfer(); const sourceNode = cards(sourceRow)[sourceIndex];
             sourceNode.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
             check(JSON.parse(transfer.getData('text/plain')).type === 'co2prism.shortcut', 'Internal drag payload');
-            const target = bar.combatRows[targetRow].children[targetIndex];
+            const target = cards(targetRow)[targetIndex];
             target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }));
             check(target.classList.contains('co2prism-drop-insert'), 'Insertion indicator');
             target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
@@ -502,29 +708,29 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await move(0, 2, 1, 0);
           check(orderKeys(1)[0] === initialKeys[2] && orderKeys(0).length === 2, 'Cross-row move');
           check(shortcutCalls.length === beforeMoveCalls, 'Drag executed action');
-          await dropAt(1, bar.combatRows[0].children.length - 1);
+          await dropAt(1, cards(0).length - 1);
           check(orderKeys(0).length === 3, 'External drop after internal move');
-          const deleteButton = bar.combatRows[0].children[2].querySelector('.co2prism-slot-remove');
+          const deleteButton = cards(0)[2].querySelector('.co2prism-slot-remove');
           deleteButton.click(); await bar.configWrites.get(actor);
           check(orderKeys(0).length === 2 && actor.items.get(item.id) === item, 'Delete reference only');
           await dropAt(1, 0);
-          check(!bar.combatRows[0].children[0].draggable, 'Hand draggable');
-          bar.combatRows[0].children[0].querySelector('.co2prism-slot-remove').click(); await bar.configWrites.get(actor);
-          check(!bar.slotRows()[0][0].reference && bar.combatRows[0].children.length === 5, 'Permanent hand removal');
+          check(!cards(0)[0].draggable, 'Hand draggable');
+          cards(0)[0].querySelector('.co2prism-slot-remove').click(); await bar.configWrites.get(actor);
+          check(!bar.slotRows()[0][0].reference && cards(0).length === 5, 'Permanent hand removal');
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; settings.locked = false; bar.refreshActor(); bar.layout();
             const widths = [...bar.combatRowWidths];
             check(root.querySelectorAll('.co2prism-slot-remove').length === 3, size + ' unlocked trash');
             settings.locked = true; bar.updateLock();
             check(lengths() === '4,1' && root.querySelectorAll('.co2prism-slot-remove').length === 0, size + ' locked visibility');
-            check(bar.combatRowWidths[0] === widths[0] - 209 && bar.combatRowWidths[1] === widths[1] - 209, size + ' actual width shrink');
-            check(!bar.combatRows[0].children[0].draggable, size + ' locked drag');
+            check(bar.combatRowWidths[0] === widths[0] - 180 && bar.combatRowWidths[1] === widths[1] - 180, size + ' actual width shrink');
+            check(!cards(0)[0].draggable, size + ' locked drag');
             check(bar.combatRows.every(r => r.scrollWidth <= r.clientWidth + 1), size + ' artificial scroll');
           }
           const lockedCalls = shortcutCalls.length;
           const lockedFlags = JSON.stringify(actor.flags);
           const lockedTransfer = new DataTransfer(); lockedTransfer.setData('text/plain', JSON.stringify(payload));
-          const lockedNode = bar.combatRows[0].children[2];
+          const lockedNode = cards(0)[2];
           const lockedHover = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer });
           lockedNode.dispatchEvent(lockedHover);
           check(!lockedHover.defaultPrevented && !lockedNode.classList.contains('co2prism-drop-target'), 'Locked hover accepted');
@@ -532,28 +738,33 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await Promise.resolve();
           check(JSON.stringify(actor.flags) === lockedFlags, 'Locked external drop wrote flags');
           item.system.charges.current = 2;
-          bar.combatRows[0].children[2].click(); await new Promise(resolve => setTimeout(resolve, 0));
+          cards(0)[2].click(); await new Promise(resolve => setTimeout(resolve, 0));
           check(shortcutCalls.length > lockedCalls, 'Locked execution blocked');
+          settings.locked = false; bar.updateLock();
+          const remainingHand = bar.slotRows()[0][1];
+          await bar.manageShortcut({ actor, token: bar.token, key: remainingHand.key, preset: 1, reference: remainingHand.reference });
+          settings.locked = true; bar.updateLock();
+          item.type = "capacity";
           item.system.charges.current = 0; item.system.frequency = 'daily'; nativeAction.properties.noChargesUsed = false;
           hooks.get('updateItem')(item, {});
-          const exhausted = bar.combatRows[0].children[2];
+          const exhausted = cards(0)[2];
           check(exhausted.classList.contains('co2prism-action-exhausted') && exhausted.querySelector('.fa-sun'), 'Daily zero exhausted');
           item.system.frequency = 'combat'; hooks.get('updateItem')(item, {});
-          check(bar.combatRows[0].children[2].querySelector('.fa-swords'), 'Combat icon');
+          check(cards(0)[2].querySelector('.fa-swords'), 'Combat icon');
           item.type = 'equipment'; item.system.subtype = 'consumable'; item.system.quantity = { current: 0 }; nativeAction.type = 'consumable';
           hooks.get('updateItem')(item, {});
-          check(bar.combatRows[0].children[2].querySelector('.fa-sack') && bar.combatRows[0].children[2].classList.contains('co2prism-action-exhausted'), 'Quantity zero');
+          check(cards(0)[2].querySelector('.fa-sack') && cards(0)[2].classList.contains('co2prism-action-exhausted'), 'Quantity zero');
           item.system.quantity.current = 2; hooks.get('updateItem')(item, {});
-          check(!bar.combatRows[0].children[2].classList.contains('co2prism-action-exhausted'), 'Quantity refresh');
+          check(!cards(0)[2].classList.contains('co2prism-action-exhausted'), 'Quantity refresh');
           delete item.system.quantity; hooks.get('updateItem')(item, {});
-          check(!bar.combatRows[0].children[2].querySelector('.co2prism-slot-uses'), 'Missing quantity shown');
+          check(!cards(0)[2].querySelector('.co2prism-slot-uses'), 'Missing quantity shown');
           // Une résolution de consommation en seconde position suffit, même hors sous-type consommable.
           item.system.subtype = 'misc'; item.system.properties = { reloadable: true };
           item.system.charges.current = 8; item.system.quantity = { current: 3, destroyIfEmpty: false };
           nativeAction.type = 'heal'; nativeAction.properties.temporary = false;
           nativeAction.resolvers = [{ type: 'heal' }, { type: 'consumable' }];
           hooks.get('updateItem')(item, {});
-          const consumedCard = () => bar.combatRows[0].children[2];
+          const consumedCard = () => cards(0)[2];
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.layout();
             const badge = consumedCard().querySelector('.co2prism-slot-uses');
@@ -588,13 +799,51 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(!consumedCard().classList.contains('co2prism-condition-unavailable') && consumedCard().getAttribute('aria-disabled') === 'false', 'Equipped availability not restored');
           const completions = [];
           nativeAction.isVisible = () => new Promise(resolve => completions.push(resolve));
-          bar.refreshActor(); await Promise.resolve();
+          hooks.get('updateItem')(item, {}); await Promise.resolve();
           nativeAction.isVisible = async () => true;
-          await bar.selectCombatPreset(2); await new Promise(resolve => setTimeout(resolve, 0));
+          hooks.get('updateItem')(item, {});
+          await bar.setActivePreset(2); await new Promise(resolve => setTimeout(resolve, 0));
           for (const resolve of completions) resolve(false);
           await new Promise(resolve => setTimeout(resolve, 0));
           check(!root.querySelector('.co2prism-condition-unavailable'), 'Late condition applied to new preset');
-          await bar.selectCombatPreset(1); await new Promise(resolve => setTimeout(resolve, 0));
+          await bar.setActivePreset(1); await new Promise(resolve => setTimeout(resolve, 0));
+          let visibilityChecks = 0;
+          item.type = 'capacity'; item.system.learned = true;
+          actor.canUseCapacities = true;
+          nativeAction.isVisible = async source => { visibilityChecks++; return source.system.learned; };
+          hooks.get('updateItem')(item, {});
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const beforeGraphics = visibilityChecks;
+          const lockedBeforeGraphics = settings.locked;
+          bar.refreshActor();
+          settings.locked = true; bar.updateLock();
+          settings.locked = false; bar.updateLock();
+          for (const size of ['S', 'M', 'L', 'XL']) { settings.size = size; bar.layout(); }
+          settings.locked = lockedBeforeGraphics; bar.updateLock();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(visibilityChecks === beforeGraphics, 'Graphic refreshes reuse native visibility checks');
+          const capacityBeforeRestriction = consumedCard();
+          actor.canUseCapacities = false;
+          hooks.get('updateActor')(actor, { system: {} });
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(consumedCard() === capacityBeforeRestriction && consumedCard().classList.contains('co2prism-condition-unavailable') &&
+            [...consumedCard().querySelectorAll('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-cost, .co2prism-slot-uses')]
+              .every(badge => getComputedStyle(badge).display === 'none'), 'Native armor/shield gate masks the badge without rebuilding the square');
+          const callsBeforeRestricted = shortcutCalls.length;
+          consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
+          check(shortcutCalls.length === callsBeforeRestricted, 'The native equipment restriction blocks execution');
+          actor.canUseCapacities = true;
+          item.system.learned = false;
+          hooks.get('updateItem')(item, {});
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(consumedCard().classList.contains('co2prism-condition-unavailable'), 'Native learned condition hides the existing shortcut');
+          item.system.learned = true;
+          hooks.get('updateItem')(item, {});
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(!consumedCard().classList.contains('co2prism-condition-unavailable'), 'Relearning restores the existing shortcut');
+          item.type = 'equipment';
+          delete actor.canUseCapacities;
+          nativeAction.isVisible = async () => true;
           check(JSON.stringify(actor.flags) === flagsBeforeConsumption, 'False conditions removed shortcut');
           nativeAction.type = 'heal'; nativeAction.properties.temporary = false;
           hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));
@@ -623,38 +872,48 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           item.system.quantity = { current: 1, destroyIfEmpty: true }; hooks.get('updateItem')(item, {});
           consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
           await bar.configWrites.get(actor);
-          check(!actor.items.has(item.id) && bar.combatRows[0].children.length === 2 && bar.combatRows[1].children.length === 0, 'Destroyed Item reference removed');
-          check(Object.keys(actor.flags.co2prism.presets[1].slots).length === 0, 'Destroyed references persisted');
+          check(!actor.items.has(item.id) && cards(0).length === 2 && bar.combatRows[1].children.length === 0, 'Destroyed Item reference removed');
+          check(Object.keys(actor.flags.co2prism.shortcuts).length === 0, 'Destroyed references persisted');
           game.system.api.macros.useAction = previousUse;
           // Matrice mains vides/occupées : mêmes positions, aucune écriture au verrouillage.
           actor.items.set(item.id, item); item.system.quantity.current = 3;
           const handReference = Object.values(removedSlots)[0];
           for (const preset of [1, 2, 3]) for (const size of ['S', 'M', 'L', 'XL']) {
             for (const occupiedHands of [[], ['left-hand'], ['right-hand'], ['left-hand', 'right-hand']]) {
-              actor.flags.co2prism.activePreset = preset;
+              actor.flags.co2prism.hands.active = preset;
               const slots = {
                 'ordinary-first': { ...handReference, row: 1, order: 0, hand: null },
                 'ordinary-second': { ...handReference, row: 2, order: 0, hand: null }
               };
               for (const key of occupiedHands) slots[key] = { ...handReference, row: 1, hand: key.split('-')[0] };
-              actor.flags.co2prism.presets[preset] = { slots };
+              actor.flags.co2prism.shortcuts = Object.fromEntries(Object.entries(slots).filter(([key]) => !occupiedHands.includes(key)));
+              actor.flags.co2prism.hands.presets[preset] = Object.fromEntries(occupiedHands.map(key => [key, slots[key]]));
               settings.size = size; settings.locked = false; bar.refreshActor(); bar.layout();
               const flags = JSON.stringify(actor.flags);
-              const before = [...bar.combatRows[0].children].slice(0, 3).map(node => node.getBoundingClientRect());
+              const before = cards(0).slice(0, 3).map(node => node.getBoundingClientRect());
               settings.locked = true; bar.updateLock();
               check(lengths() === '3,1', size + ' reserved hand count');
               check(root.querySelectorAll('.co2prism-hand-empty').length === 2 - occupiedHands.length, size + ' hand placeholder count');
-              [...bar.combatRows[0].children].forEach((node, index) => {
+              cards(0).forEach((node, index) => {
                 const rect = node.getBoundingClientRect();
                 check(['left', 'top', 'width', 'height'].every(key => Math.abs(rect[key] - before[index][key]) < 1), size + ' hand position changed');
                 if (index >= 2) return;
+                const hand = index === 0 ? 'left' : 'right';
+                const marker = node.querySelector('.co2prism-slot-hand.fa-hand');
+                const markerStyle = marker && getComputedStyle(marker);
+                const markerBounds = marker?.getBoundingClientRect();
+                check(markerBounds && Math.abs((markerBounds.left + markerBounds.right - rect.left - rect.right) / 2) < 1
+                  && markerBounds.top < rect.top + rect.height / 4 && markerStyle.pointerEvents === 'none'
+                  && markerStyle.color === 'rgb(120, 73, 46)' && !marker.textContent
+                  && markerStyle.transform === (hand === 'left' ? 'matrix(-1, 0, 0, 1, 0, 0)' : 'none'),
+                  size + ' repère de main centré en haut');
                 if (occupiedHands.includes(index === 0 ? 'left-hand' : 'right-hand')) {
                   check(node.classList.contains('co2prism-slot-executable') && !node.classList.contains('co2prism-hand-empty'), 'Occupied hand hidden');
                 } else {
-                  const style = getComputedStyle(node), icon = node.querySelector('.fa-solid.fa-hand');
-                  check(icon && Number(getComputedStyle(icon).opacity) < 1 && style.pointerEvents === 'none', 'Hand icon interactivity');
+                  const style = getComputedStyle(node);
+                  check(style.pointerEvents === 'none', 'Hand icon interactivity');
                   check(style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.borderLeftColor === 'rgba(0, 0, 0, 0)', 'Empty hand square visible');
-                  check(!node.draggable && !node.querySelector('.co2prism-slot-remove, .co2prism-slot-empty, .co2prism-slot-hand'), 'Empty hand controls');
+                  check(!node.draggable && !node.querySelector('.co2prism-slot-remove, .co2prism-slot-empty'), 'Empty hand controls');
                   const callCount = shortcutCalls.length;
                   node.click(); node.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: lockedTransfer }));
                   check(shortcutCalls.length === callCount, 'Empty hand action');
@@ -677,17 +936,25 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const resetBudget = async () => { bar.budgetReset.click(); await new Promise(resolve => setTimeout(resolve, 0)); };
           const halos = () => bar.budgetCommands.filter(button => button.parentElement.classList.contains('co2prism-time-available')).map(button => button.dataset.co2prismTime).join(',');
           const mixedGeometry = () => {
-            for (const node of [root.querySelector('[data-co2prism-time="am"]'), ...bar.budgetBar.querySelectorAll('.co2prism-time-mixed')]) {
-              const red = getComputedStyle(node, '::after');
-              check(red.clipPath === 'polygon(25% 0px, 75% 100%, 25% 100%, 0px 50%)' && red.backgroundColor === 'rgb(237, 21, 32)', 'AM red lower-left polygon');
-              const blue = node.matches('button') ? getComputedStyle(node, '::before') : getComputedStyle(node);
-              check(blue.backgroundColor === 'rgb(37, 170, 225)' && blue.backgroundImage === 'none', 'AM solid upper-right blue');
-              check(!node.textContent.includes('A+M') && node.textContent.includes('AM'), 'AM text');
+            const mixed = root.querySelector('[data-co2prism-time="am"]');
+            const commandStyle = getComputedStyle(mixed);
+            const hasDiagonal = style => ['135deg', 'rgb(237, 21, 32)', 'rgb(37, 170, 225)']
+              .every(color => style.backgroundImage.includes(color));
+            check(commandStyle.clipPath === 'polygon(0px 0px, 100% 0px, 100% 100%)'
+              && commandStyle.backgroundColor === 'rgb(0, 0, 0)'
+              && hasDiagonal(getComputedStyle(mixed, '::before')) && mixed.textContent === 'AM', 'AM triangular command');
+            for (const node of bar.budgetBar.querySelectorAll('.co2prism-time-indicator')) {
+              const square = getComputedStyle(node, '::before');
+              check(Math.abs(parseFloat(square.width) - parseFloat(square.height)) < 0.2
+                && getComputedStyle(node).clipPath === 'none', 'Budget square');
+              if (node.dataset.co2prismBudgetType === 'am') {
+                check(hasDiagonal(square) && node.textContent.includes('AM'), 'AM diagonal budget square');
+              }
             }
           };
           const movement = (meters, cells) => check(bar.combatValues.meters.textContent === meters && bar.combatValues.cells.textContent === cells, 'Budget movement ' + meters + ' / ' + cells);
           settings.locked = true; bar.updateLock(); canvas.scene.grid = { type: 1, distance: 2, units: 'm' };
-          await resetBudget(); movement('20 / 20', '10 / 10');
+          await resetBudget(); movement('20', '10');
           check(halos() === 'l,a,m', 'Initial availability halos'); mixedGeometry();
           const beforeMixedClick = JSON.stringify(actor.flags);
           await command('am');
@@ -704,22 +971,22 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await resetBudget();
           check(budgetTypes() === 'l,m,am' && bar.budgetBar.querySelector('.co2prism-time-separator'), 'Initial alternative');
           check([...bar.budgetBar.children].every(node => node.getBoundingClientRect().right <= bar.budgetBar.getBoundingClientRect().right + 1), 'Initial budget contents clipped');
-          await command('a'); movement('10 / 20', '5 / 10'); check(budgetTypes() === 'm', 'Normal A branch');
+          await command('a'); movement('10', '5'); check(budgetTypes() === 'm', 'Normal A branch');
           check(halos() === 'm', 'A spend halo');
-          await resetBudget(); await command('m'); movement('10 / 20', '5 / 10'); check(budgetTypes() === 'am', 'Normal M branch');
+          await resetBudget(); await command('m'); movement('10', '5'); check(budgetTypes() === 'am', 'Normal M branch');
           check(halos() === 'a,m', 'M spend polyvalent halos');
-          await command('m'); movement('0 / 20', '0 / 10');
+          await command('m'); movement('0', '0');
           const emptyBudget = JSON.stringify(actor.flags.co2prism.actionEconomy), warningCount = warnings.length;
           await command('m'); await command('m');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === emptyBudget && warnings.length === warningCount, 'Impossible spend mutated or spammed');
           check(bar.budgetCommands.every(button => !button.disabled) && bar.budgetCommands.find(button => button.dataset.co2prismTime === 'm').title.includes('Aucun temps compatible'), 'Spent command disabled');
-          await resetBudget(); await command('l'); movement('0 / 20', '0 / 10');
+          await resetBudget(); await command('l'); movement('0', '0');
           check(halos() === '', 'Limited spend halos');
           await command('a', true); check(halos() === 'a', 'A bonus restores halo');
           await command('am', true); check(halos() === 'a,m', 'AM bonus restores specialized halos');
-          await resetBudget(); await command('m', true); movement('30 / 30', '15 / 15');
-          await command('m'); movement('20 / 30', '10 / 15'); check(economy.getSnapshot().branch === 'undecided', 'Bonus M priority');
-          await resetBudget(); await command('a', true); movement('20 / 20', '10 / 10');
+          await resetBudget(); await command('m', true); movement('30', '15');
+          await command('m'); movement('20', '10'); check(economy.getSnapshot().branch === 'undecided', 'Bonus M priority');
+          await resetBudget(); await command('a', true); movement('20', '10');
           check(bar.budgetBar.querySelector('.co2prism-time-bonus.co2prism-time-attack'), 'Red bonus A missing');
           await command('a'); check(economy.getSnapshot().branch === 'undecided' && budgetTypes() === 'l,m,am', 'Bonus A priority');
           for (const type of ['a', 'm', 'am']) {
@@ -730,15 +997,15 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           }
           await resetBudget(); await command('l', true); await command('l');
           check(economy.getSnapshot().branch === 'undecided', 'Bonus L closed branch');
-          await command('m', true); await command('l'); movement('10 / 30', '5 / 15');
-          canvas.scene.grid.distance = 5; hooks.get('updateScene')(canvas.scene, { grid: {} }); movement('10 / 30', '2 / 6');
-          const scene = canvas.scene; canvas.scene = undefined; bar.refreshActor(); movement('10 / 30', 'CO2PRISM.Unavailable'); canvas.scene = scene;
-          await resetBudget(); movement('20 / 20', '4 / 4');
+          await command('m', true); await command('l'); movement('10', '5');
+          canvas.scene.grid.distance = 5; hooks.get('updateScene')(canvas.scene, { grid: {} }); movement('10', '2');
+          const scene = canvas.scene; canvas.scene = undefined; bar.refreshActor(); movement('10', 'CO2PRISM.Unavailable'); canvas.scene = scene;
+          await resetBudget(); movement('20', '4');
           const persistedBudget = JSON.stringify(actor.flags.co2prism.actionEconomy);
-          for (const preset of [1, 2, 3]) { await bar.selectCombatPreset(preset); if (bar.combatPanel.hidden) await bar.selectCombatPreset(preset); }
+          for (const preset of [1, 2, 3]) { await bar.setActivePreset(preset); if (bar.combatPanel.hidden) await bar.setActivePreset(preset); }
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === persistedBudget, 'Preset reset economy');
           const shortcutBudget = JSON.stringify(economy.getSnapshot());
-          bar.combatRows[0].children[0].click(); await new Promise(resolve => setTimeout(resolve, 0));
+          cards(0)[0].click(); await new Promise(resolve => setTimeout(resolve, 0));
           check(JSON.stringify(economy.getSnapshot()) === shortcutBudget, 'Free shortcut spent time');
           actor.testUserPermission = (_, level) => level === 'OBSERVER'; bar.refreshActor();
           check(bar.budgetCommands.every(button => button.disabled) && bar.budgetReset.disabled, 'Observer budget writable');
@@ -785,12 +1052,12 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           };
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; await resetBudget(); await command('m', true);
-            await paidClick(); movement('20 / 30', '4 / 6');
+            await paidClick(); movement('20', '4');
             check(halos() === 'l,a,m', size + ' automatic bonus spend halos');
             check(economy.getSnapshot().branch === 'undecided', size + ' timed M bonus priority');
-            await paidClick(); movement('10 / 30', '2 / 6');
+            await paidClick(); movement('10', '2');
             check(halos() === 'a,m', size + ' automatic normal M spend halos');
-            await paidClick(); movement('0 / 30', '0 / 6');
+            await paidClick(); movement('0', '0');
             check(halos() === '', size + ' automatic exhaustion halos');
             const exhausted = bar.combatRows[0].querySelector('.co2prism-slot-executable');
             check(exhausted.classList.contains('co2prism-time-insufficient') && getComputedStyle(exhausted).pointerEvents !== 'none'
@@ -799,8 +1066,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(nativeExecutions === executions, size + ' exhausted budget executed');
           }
           await resetBudget(); nativeAction.actionTypeFinal = 'a'; nativeOutcome = false;
-          await paidClick(); movement('20 / 20', '4 / 4');
-          nativeOutcome = true; await paidClick(); movement('10 / 20', '2 / 4');
+          await paidClick(); movement('20', '4');
+          nativeOutcome = true; await paidClick(); movement('10', '2');
           check(budgetTypes() === 'm', 'Paid attack budget not rendered');
           await resetBudget(); nativeAction.properties.temporary = true; nativeAction.properties.enabled = false;
           await paidClick();
@@ -813,15 +1080,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             settings.size = size; await resetBudget(); await command('am', true);
             bar.position = { x: innerWidth - 300, y: 300 }; bar.layout(); mixedGeometry();
             check(halos() === 'l,a,m', size + ' halo after reset');
-            const viewport = bar.budgetScroll.getBoundingClientRect();
             const scale = parseFloat(root.style.getPropertyValue('--co2prism-unit'));
             for (const button of bar.budgetCommands) {
               const rect = button.getBoundingClientRect(), wrapper = button.parentElement;
               check(Math.abs(wrapper.getBoundingClientRect().width - rect.width) < 1, size + ' halo wrapper geometry');
-              check(rect.top - viewport.top >= 8 * scale - 1 && viewport.bottom - rect.bottom >= 8 * scale - 1, size + ' halo clipped vertically');
               check(getComputedStyle(wrapper).pointerEvents === 'none', size + ' halo hit surface');
-              const hit = document.elementFromPoint(rect.left + scale, rect.top + scale);
-              check(!button.contains(hit), size + ' hexagon corner interactive');
+              const hit = document.elementFromPoint(rect.left + scale, rect.bottom - 3 * scale);
+              check(!button.contains(hit), size + ' transparent command corner interactive');
               check(button.dataset.co2prismTime === 'am' ? getComputedStyle(wrapper).filter === 'none' : getComputedStyle(wrapper).filter.includes('drop-shadow'), size + ' silhouette halo');
             }
             check(bar.budgetScroll.scrollWidth <= bar.budgetScroll.clientWidth + 1, size + ' halo artificial scroll');
@@ -835,7 +1100,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               game.combats = { active: { started } }; bar.refreshActor();
               const enabled = mode === 'always' || (mode === 'combat' && started);
               check(bar.budgetScroll.hidden === !enabled, 'Mode budget visibility ' + mode + started);
-              movement(enabled ? '0 / 20' : '10', enabled ? '0 / 4' : '2');
+              check(bar.timeCommands.hidden === !enabled, 'Mode budget command visibility ' + mode + started);
+              movement(enabled ? '0' : '10', enabled ? '0' : '2');
               const node = bar.combatRows[0].querySelector('.co2prism-slot-executable');
               check(node.classList.contains('co2prism-time-insufficient') === enabled, 'Mode shortcut greying');
               check(node.querySelector('.co2prism-slot-time')?.textContent === 'M', 'Informative time badge');
@@ -852,7 +1118,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             settings.size = size;
             for (const mode of ['nearest', 'up', 'down']) {
               settings.movementRounding = mode; bar.refreshActor(); bar.layout();
-              movement('20 / 30', mode === 'down' ? '6 / 10' : '7 / 10');
+              movement('20', mode === 'down' ? '6' : '7');
               const node = bar.combatValues.cells, rect = node.getBoundingClientRect();
               check(node.scrollWidth <= node.clientWidth + 1, size + ' rounded cells overflow');
               const bounds = root.getBoundingClientRect();
@@ -874,16 +1140,20 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               for (const position of [{ x: 0, y: 0 }, { x: innerWidth - 5, y: innerHeight - 5 }]) {
                 bar.position = position; bar.layout();
                 const bounds = root.getBoundingClientRect(), name = bar.name.getBoundingClientRect();
-                const portrait = bar.portrait.getBoundingClientRect(), star = root.querySelector('[data-co2prism-action="sheet"]').getBoundingClientRect();
-                const toggle = movementButton.getBoundingClientRect(), preset = bar.presetButtons[0].getBoundingClientRect();
+                const portrait = bar.portrait.getBoundingClientRect(), health = bar.gauges.hp.fill.getBoundingClientRect();
+                const toggle = movementButton.getBoundingClientRect();
                 const first = bar.combatRows[0].getBoundingClientRect(), second = bar.combatRows[1].getBoundingClientRect();
                 const effects = bar.combatEffects.getBoundingClientRect();
                 check(bounds.left >= -0.1 && bounds.top >= -0.1 && bounds.right <= innerWidth + 0.1 && bounds.bottom <= innerHeight + 0.1, size + ' 15A screen bounds');
-                check(name.top > star.bottom && name.bottom <= bounds.bottom + 0.1 && Math.abs(name.left + name.width / 2 - portrait.left - portrait.width / 2) < 1, size + ' 15A name axis');
+                check(name.top > health.bottom && Math.abs(name.right - health.right) < 5
+                  && name.bottom <= bounds.bottom + 0.1, size + ' V.3 bandeau sous les jauges');
                 check(bar.name.title === actor.name && getComputedStyle(bar.name).textOverflow === 'ellipsis', size + ' 15A long name');
-                check(toggle.bottom < preset.top && movementButton.disabled && toggle.width > 0, size + ' 15A movement command');
+                check(toggle.bottom < portrait.top && movementButton.disabled
+                  && Math.abs(toggle.left + toggle.width / 2 - portrait.left - portrait.width / 2) < 1,
+                  size + ' V.3 commande de mouvement au-dessus du portrait');
                 check(movementPanel.hidden && movementPanel.getClientRects().length === 0, size + ' 15A closed movement panel');
-                check(effects.top > second.bottom && !intersects(effects, name) && bar.combatEffects.children.length === 80, size + ' 15A effects position');
+                check(effects.top >= name.bottom - 0.1 && effects.top > second.bottom
+                  && bar.combatEffects.children.length === 80, size + ' V.3 effets sous le nom');
                 bar.combatEffects.scrollLeft = bar.combatEffects.scrollWidth;
                 const last = bar.combatEffects.lastElementChild.getBoundingClientRect();
                 check(last.right <= effects.right + 1 && last.right > effects.left, size + ' 15A effects accessible');
@@ -936,7 +1206,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           bar.refreshActor();
           const previewFlag = JSON.stringify(actor.flags.co2prism.actionEconomy), notificationCount = warnings.length;
           check(!movementButton.disabled, '15C eligible token');
-          check(movementButton.textContent === 'Mouvement', 'Archive6 inactive movement label');
+          check(movementButton.getAttribute('aria-label') === 'Mouvement', 'Archive6 inactive movement label');
           trackedMove(2); trackedMove(3);
           check(movementPanel.hidden && !bar.movementTracker.getSnapshot(tracked).success
             && JSON.stringify(actor.flags.co2prism.actionEconomy) === previewFlag, 'Untracked native moves create no session or budget write');
@@ -946,21 +1216,30 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(movementPanel.querySelectorAll('input[type="radio"]').length === 0, 'No movement mode radios');
           check(bar.movementTracker.getSnapshot(tracked).state.mode === 'exact'
             && bar.movementTracker.getSnapshot(tracked).state.start.x === trackedStart, 'Exact session starts at current position');
-          check(movementButton.textContent === 'Mouvement', 'Archive6 active validation label');
+          check(movementButton.getAttribute('aria-label') === 'Mouvement', 'Archive6 active validation label');
           check(movementPanel.querySelector('.co2prism-movement-zones-toggle').disabled
             ,
             'Zones prototype unavailable API leaves panel usable with diagnostic');
-          trackedMove(7);
+          const remainingText = () => movementPanel.querySelector('.co2prism-movement-summary').textContent;
+          const excessText = () => movementPanel.querySelector('.co2prism-movement-excess')?.textContent;
+          check(remainingText() === '5 cases disponibles', 'Cinq cases à l’ouverture');
+          trackedMove(2);
+          check(remainingText() === '3 cases disponibles' && !excessText(), 'Trois cases après un coût de deux');
+          trackedMove(3);
+          check(remainingText() === '0 case disponible' && !excessText(), 'Budget épuisé sans dépassement');
+          trackedMove(1);
+          check(remainingText() === '0 case disponible' && excessText() === 'Dépassement de 1 case !', 'Dépassement singulier');
+          trackedMove(1);
           const blocks = () => [...movementPanel.querySelectorAll('.co2prism-movement-block')];
           const grey = () => [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, node) => sum + Number(node.dataset.used), 0);
           check(blocks().length === 1 && grey() === 5 && blocks()[0].children.length === 5, 'Single block with five filled cells');
-          check(movementPanel.querySelector('.co2prism-movement-summary').textContent.includes('actions de mouvement'), 'Single M session preview');
           check(blocks()[0].getBoundingClientRect().width <= movementPanel.getBoundingClientRect().width, 'Single block fits panel');
           trackedMove(22);
           check(grey() === 5 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 5, '15C excess adds no cells');
           check(movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('24 cases'), 'Single M immediate red excess');
           await economy.grant('am'); hooks.get('updateActor')(actor, { flags: {} });
           check(blocks().length === 1 && movementPanel.querySelector('.co2prism-movement-excess')?.textContent.includes('24 cases'), 'Bonus preserves single block and capacity');
+          check(remainingText() === '0 case disponible', 'Le bonus AM ne recharge pas l’action en cours');
           await economy.spend('m'); hooks.get('updateActor')(actor, { flags: {} });
           check(blocks().length === 1 && movementPanel.querySelector('.co2prism-movement-excess'), 'External spend preserves single block and capacity');
           settings.economyMode = 'off'; bar.refreshActor();
@@ -975,13 +1254,14 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           failReturn = false; movementPanel.querySelector('.co2prism-movement-reset').click();
           await new Promise(resolve => setTimeout(resolve, 0));
           check(tracked.x === trackedStart && grey() === 0 && !movementPanel.hidden, 'Successful return keeps exact session');
-          check(movementButton.textContent === 'Mouvement', 'Archive6 label after reset');
+          check(remainingText() === '5 cases disponibles' && !excessText(), 'Le retour restaure le compteur');
+          check(movementButton.getAttribute('aria-label') === 'Mouvement', 'Archive6 label after reset');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === beforeReturn, '15C return did not mutate budget');
           const secondDocument = { ...tracked, id: 'second-token', uuid: 'Scene.s.Token.second', x: 500 };
           movementScene.tokens.set(secondDocument.id, secondDocument);
           canvas.tokens.controlled = [{ actor, document: secondDocument }]; hooks.get('controlToken')();
           check(movementPanel.hidden, '15C selection hides previous session');
-          check(movementButton.textContent === 'Mouvement', 'Archive6 label after selection');
+          check(movementButton.getAttribute('aria-label') === 'Mouvement', 'Archive6 label after selection');
           movementButton.click(); trackedMove(1, secondDocument);
           canvas.tokens.controlled = [selectedToken]; hooks.get('controlToken')();
           check(movementPanel.hidden, 'Selection abandons previous session'); movementButton.click();
@@ -990,7 +1270,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const bounds = root.getBoundingClientRect(), panel = movementPanel.getBoundingClientRect();
             const base = movementButton.getBoundingClientRect();
             check(bounds.right <= innerWidth + 1 && bounds.top >= -0.1 && bounds.bottom <= innerHeight + 1
-              && panel.top >= -0.1 && panel.bottom < base.top, size + ' 15C panel bounds');
+              && panel.top >= -0.1 && panel.bottom <= base.top + 0.1
+              && panel.bottom < bar.budgetScroll.getBoundingClientRect().top, size + ' panneau au-dessus du budget');
+            check(!movementPanel.contains(document.elementFromPoint(panel.left + 2, panel.bottom - 2)),
+              size + ' biseau transparent du panneau');
+            const block = blocks()[0], end = block.lastElementChild.getBoundingClientRect();
+            check(Math.abs(end.right - block.getBoundingClientRect().right) < 1,
+              size + ' segments jusqu’au bord de la rangée');
             const blankX = bounds.left + 2, blankY = panel.top + 2;
             check(document.elementFromPoint(blankX, blankY)?.id === 'board', size + ' 15C canvas remains accessible');
             const reset = movementPanel.querySelector('.co2prism-movement-reset'), rect = reset.getBoundingClientRect();
@@ -1054,17 +1340,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(movementButton.disabled && bar.movementReset.disabled, '15D controls locked during validation');
           await new Promise(resolve => setTimeout(resolve, 0));
           check(!movementPanel.hidden && movementButton.getAttribute('aria-pressed') === 'true' && tracked.x === destination, '15D finish retains destination');
-          check(movementButton.textContent === 'Mouvement', 'Archive6 label after finish');
+          check(movementButton.getAttribute('aria-label') === 'Mouvement', 'Archive6 label after finish');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) !== beforeFinish && economy.getSnapshot().movementsRemaining === 4
             && warnings.length === notificationCount + 1, 'Single M validation warns for excess');
-          movement('40 / 60', '20 / 30');
+          movement('40', '20');
           // Comparer les blocs et le portrait sur des vitesses non entières.
           actor.system.attributes.movement = { value: 7.2, unit: 'm' };
           settings.movementRounding = 'nearest'; await economy.reset(); bar.refreshActor();
           if (movementPanel.hidden) movementButton.click(); trackedMove(7);
           check(blocks().map(block => Number(block.dataset.cells)).join(',') === '4', 'Fractional speed gives one block of four');
           check(grey() === 4 && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 4, 'Four filled cells capped to single M');
-          movement('14.4 / 14.4', '7 / 7');
+          movement('14.4', '7');
           await bar.validateMovement(tracked);
           check(economy.getSnapshot().movementsRemaining === 1 && bar.movementResults.get(tracked).consumedCount === 1, 'Seven cells cost one M');
           await bar.toggleMovement();
@@ -1074,7 +1360,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             if (movementPanel.hidden) movementButton.click();
             const expected = (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(50 / 3);
             const total = [...movementPanel.querySelectorAll('.co2prism-movement-cell')].reduce((sum, cell) => sum + Number(cell.dataset.count), 0);
-            check(total === (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(10 / 3) && bar.combatValues.cells.textContent === expected + ' / ' + expected, 'Portrait budget and single M capacity ' + mode);
+            check(total === (mode === 'up' ? Math.ceil : mode === 'down' ? Math.floor : Math.round)(10 / 3)
+              && bar.combatValues.cells.textContent === String(expected), 'Portrait budget and single M capacity ' + mode);
             trackedMove(7);
             check(grey() === total, 'Filled cells capped to single M ' + mode);
             settings.economyMode = 'off'; bar.refreshActor(); await bar.validateMovement(tracked);
@@ -1086,7 +1373,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             && movementPanel.querySelectorAll('.co2prism-movement-cell').length === 0, 'Zero capacity has no fake squares');
           await economy.grant('m', 3); hooks.get('updateActor')(actor, { flags: {} });
           check(blocks().map(block => Number(block.dataset.cells)).join(',') === '0' && grey() === 0, 'Bonus does not change zero session capacity');
-          movement('2 / 2', '1 / 1');
+          movement('2', '1');
           await bar.validateMovement(tracked);
           check(economy.getSnapshot().movementsRemaining === 4 && bar.movementResults.get(tracked).consumedCount === 1, 'Zero capacity spends one M');
           actor.system.attributes.movement = { value: 2000000, unit: 'm' }; bar.refreshActor();
@@ -1134,6 +1421,923 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           tracked.canUserModify = () => true;
           hooks.get('deleteToken')(secondDocument);
           check(!bar.movementTracker.getSnapshot(secondDocument).success, '15C deleted token cleanup');
+          const openedItems = [];
+          const equipmentItem = (name, sort) => {
+            const document = { id: name, uuid: 'Actor.test.Item.' + name, name, sort, parent: actor, type: 'equipment',
+              canUserModify: () => true, actions: [],
+              testUserPermission: () => true, img: 'icons/svg/item-bag.svg',
+              system: { description: '<p>Details of ' + name + '</p>' },
+              sheet: { render: force => { if (force) openedItems.push(name); } } };
+            actor.items.set(name, document);
+            return document;
+          };
+          actor.unsetFlag = async function(scope, key) {
+            const [group, id] = key.split('.');
+            delete this.flags[scope][group][id];
+          };
+          const weapons = Array.from({ length: 31 }, (_, i) => equipmentItem('weapon' + i, i));
+          const stored = equipmentItem('stored', -1);
+          const bag = equipmentItem('bag', 0);
+          bag.type = 'container';
+          actor.inventory = [
+            { category: 'weapon', items: [stored, ...weapons] },
+            { category: 'armor', items: [equipmentItem('armor', 4), equipmentItem('armor2', 8)] },
+            { category: 'shield', items: [equipmentItem('shield', 2), equipmentItem('shield2', 8)] },
+            { category: 'consumable', items: [equipmentItem('potion', 1)] },
+            { category: 'misc', items: [equipmentItem('rope', 1)] }
+          ];
+          actor.containers = [bag, bag];
+          actor.containedItemUuids = new Set([stored.uuid]);
+          bag.system.description += '<img src="invalid" onerror="globalThis.co2prismInjected=true">';
+          const equipment = bar.equipmentPanel;
+          const artBeforeEquipment = bar.art.getBoundingClientRect().toJSON();
+          bar.equipmentToggle.click();
+          await bar.configWrites.get(actor);
+          check(JSON.stringify(bar.art.getBoundingClientRect().toJSON()) === JSON.stringify(artBeforeEquipment),
+            'Equipment opening preserves portrait geometry');
+          const groupFor = key => bar.equipmentGroups.find(group => group.key === key);
+          const names = group => [...group.items.querySelectorAll('img')].map(img => img.alt);
+          const weaponGroup = groupFor('weapon');
+          const order = ['weapon', 'protection', 'consumable', 'misc', 'containers'];
+          check(!equipment.hidden && equipment.querySelectorAll('.co2prism-equipment-category').length === 5, 'Equipment open with five groups');
+          check(bar.equipmentGroups.map(group => group.key).join() === order.join(), 'Equipment category order');
+          check(names(groupFor('protection')).join() === 'shield,armor,armor2,shield2', 'Equipment merged native protection order');
+          check(names(groupFor('containers')).join() === 'bag' && names(weaponGroup).length === 31, 'Equipment exclusions and deduplication');
+          await bar.setPanelState('combat', true);
+          if (movementPanel.hidden) movementButton.click();
+          await bar.setPanelState('competences', true);
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; settings.position = { x: 1, y: 1 }; bar.position = settings.position; bar.layout();
+            const bounds = equipment.getBoundingClientRect();
+            const artBounds = bar.art.getBoundingClientRect();
+            const movementBounds = movementPanel.getBoundingClientRect();
+            const tiles = [...weaponGroup.items.children].map(tile => tile.getBoundingClientRect());
+            const scale = artBounds.width / 724;
+            const edgeGap = (261 * scale - (tiles[5].left + tiles[5].right) / 2 + artBounds.left
+              - tiles[5].bottom + artBounds.top) / scale;
+            check(edgeGap > 12 && edgeGap < 17 && bounds.left >= bar.skillsPanel.getBoundingClientRect().left - 1 &&
+              bounds.bottom < bar.skillsPanel.getBoundingClientRect().top && bounds.right <= movementBounds.left + 1,
+              'Equipment follows the upper-left edge clear of skills and movement at ' + size);
+            check(tiles[5].left > tiles[4].left && tiles[5].top < tiles[4].top &&
+              Math.abs(tiles[0].left - tiles[6].left) < 1 && tiles[6].top < tiles[0].top,
+              'Equipment diagonal wraps after six at ' + size);
+            const equipmentStyle = getComputedStyle(equipment);
+            const tileStyle = getComputedStyle(weaponGroup.items.firstElementChild);
+            const imageStyle = getComputedStyle(weaponGroup.items.querySelector('img'));
+            const rotation = new DOMMatrix(tileStyle.transform);
+            check(equipmentStyle.overflowY === 'visible' && equipmentStyle.maxHeight === 'none' &&
+              tiles.length === 31 && tiles[30].height > 0, 'All equipment remains rendered without internal scrolling at ' + size);
+            check(Math.abs(rotation.b + Math.SQRT1_2) < 0.001 && imageStyle.transform === 'none' &&
+              tileStyle.borderTopColor === 'rgb(0, 0, 0)' && tiles[0].width > 67 * scale,
+              'Equipment square and image share a counterclockwise rotation with a black border at ' + size);
+            check([...equipment.querySelectorAll('.co2prism-equipment-category')].every(button =>
+              getComputedStyle(button).backgroundColor === 'rgba(0, 0, 0, 0)'), 'Transparent categories at ' + size);
+          }
+          const categoryPosition = key => groupFor(key).button.getBoundingClientRect();
+          const setCollapsed = async keys => {
+            for (const key of order) {
+              const { button, items } = groupFor(key);
+              if (items.hidden !== keys.includes(key)) {
+                button.click(); await bar.configWrites.get(actor);
+              }
+            }
+          };
+          const fullHeight = equipment.getBoundingClientRect().height;
+          const allOpen = order.map(categoryPosition);
+          check(allOpen.every((point, i) => i === 0 || point.top < allOpen[i - 1].top),
+            'Expanded categories progress from the portrait outward in order');
+          for (const collapsed of [['protection'], ['consumable'], ['protection', 'consumable'], order]) {
+            await setCollapsed(collapsed);
+            const positions = collapsed.map(categoryPosition);
+            const pitch = 40 * bar.art.getBoundingClientRect().width / 724;
+            check(equipment.getBoundingClientRect().height < fullHeight &&
+              collapsed.every(key => groupFor(key).items.hidden && groupFor(key).button.getClientRects().length === 1),
+              'Collapsed categories release their item rows: ' + collapsed.join());
+            check(positions.every((point, i) => i === 0 ||
+              (Math.abs(point.left - positions[i - 1].left - pitch) < 1 &&
+               Math.abs(positions[i - 1].top - point.top - pitch) < 1)),
+              'Consecutive collapsed icons form a compact 45-degree diagonal: ' + collapsed.join());
+          }
+          await setCollapsed([]);
+          check(Math.abs(equipment.getBoundingClientRect().height - fullHeight) < 1 && names(weaponGroup).length === 31,
+            'Reopening categories restores all item rows');
+          const categoryColors = [];
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            weaponGroup.button.click(); await bar.configWrites.get(actor);
+            check(weaponGroup.items.hidden === locked && actor.flags.co2prism.equipmentCollapsed.weapon === locked,
+              'Equipment category writes independently of position lock');
+            categoryColors.push(getComputedStyle(weaponGroup.button).color);
+          }
+          check(categoryColors[0] !== categoryColors[1], 'Equipment category colors distinguish both states');
+          const tileFor = id => equipment.querySelector('[data-item-id="' + id + '"]');
+          for (const id of ['weapon0', 'shield', 'potion', 'rope', 'bag']) {
+            const tile = tileFor(id);
+            check(tile.dataset.tooltipHtml.includes('<strong>' + id + '</strong>') &&
+              tile.dataset.tooltipHtml.includes('Details of ' + id), 'Equipment tooltip for ' + id);
+            tile.click();
+          }
+          check(openedItems.join() === 'weapon0,shield,potion,rope,bag', 'Equipment opens each native Item sheet');
+          if (game.tooltip) {
+            game.tooltip.activate(tileFor('bag'));
+            check(game.tooltip.tooltip.textContent.includes('Details of bag') &&
+              !game.tooltip.tooltip.querySelector('[onerror]'), 'Native equipment tooltip sanitizes item description');
+            game.tooltip.deactivate();
+          }
+          const contextClick = node => !node.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true }));
+          const toggleAllEquipment = async () => {
+            check(contextClick(bar.equipmentToggle), 'Suitcase consumes its own context click');
+            await bar.configWrites.get(actor);
+          };
+          const allEquipmentCollapsed = state => bar.equipmentGroups.every(({ key, button, items }) =>
+            actor.flags.co2prism.equipmentCollapsed[key] === state && items.hidden === state &&
+            button.getAttribute('aria-expanded') === String(!state));
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            await toggleAllEquipment();
+            check(!equipment.hidden && allEquipmentCollapsed(true) && !bar.equipmentMenu.matches(':popover-open'),
+              'Suitcase collapses all groups in either lock mode');
+            await toggleAllEquipment();
+            check(!equipment.hidden && allEquipmentCollapsed(false), 'Second suitcase context click expands every group');
+          }
+          await setCollapsed(['protection']);
+          bar.equipmentToggle.click(); await bar.configWrites.get(actor);
+          await toggleAllEquipment();
+          check(equipment.hidden && Object.values(actor.flags.co2prism.equipmentCollapsed).every(Boolean),
+            'Suitcase context click collapses mixed categories without opening the panel');
+          bar.equipmentToggle.click(); await bar.configWrites.get(actor);
+          check(!equipment.hidden && allEquipmentCollapsed(true), 'Suitcase left click reopens with persisted categories');
+          await toggleAllEquipment();
+          check(allEquipmentCollapsed(false), 'Suitcase restores every category after reopening');
+          const initialColumn = tileFor('weapon0').style.getPropertyValue('--column');
+          check(contextClick(tileFor('weapon0').querySelector('img')), 'Unlocked equipment handles the context click');
+          await bar.configWrites.get(actor);
+          check(actor.flags.co2prism.hiddenEquipment.weapon0 === true &&
+            getComputedStyle(tileFor('weapon0').querySelector('img')).filter === 'grayscale(1)' &&
+            tileFor('weapon0').style.getPropertyValue('--column') === initialColumn, 'Masked equipment is grey in place');
+          tileFor('weapon0').click();
+          check(openedItems.at(-1) === 'weapon0', 'Grey equipment remains consultable');
+          settings.locked = true; bar.updateLock();
+          check(!tileFor('weapon0') && tileFor('weapon1').style.getPropertyValue('--column') === initialColumn &&
+            !contextClick(tileFor('weapon1')), 'Locked equipment compacts and leaves the context click alone');
+          settings.locked = false; bar.updateLock();
+          check(tileFor('weapon0').classList.contains('co2prism-equipment-masked'), 'Unlocking restores the masked equipment');
+          actor.testUserPermission = (_, permission) => permission !== 'OWNER';
+          bar.refreshActor();
+          check(!contextClick(tileFor('weapon0')), 'Observer cannot change the hidden flag');
+          const beforeObserver = openedItems.length;
+          tileFor('weapon0').click();
+          check(openedItems.length === beforeObserver + 1 && openedItems.at(-1) === 'weapon0',
+            'Observer can still consult a visible item');
+          actor.testUserPermission = () => true;
+          const selectedForMask = canvas.tokens.controlled;
+          const sameName = { ...weapons[0], uuid: 'Actor.other.Item.weapon0', parent: other };
+          other.flags.co2prism.panels.equipements = true;
+          other.items.set(sameName.id, sameName);
+          other.inventory = [{ category: 'weapon', items: [sameName] }];
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(!tileFor(sameName.id).classList.contains('co2prism-equipment-masked'), 'Item visibility is isolated by actor');
+          canvas.tokens.controlled = selectedForMask; bar.refreshActor();
+          other.flags.co2prism.panels.equipements = false;
+          await bar.setPanelState('equipements', false);
+          await bar.setPanelState('equipements', true);
+          const reloaded = new PrismBar();
+          check(tileFor('weapon0').classList.contains('co2prism-equipment-masked') &&
+            reloaded.readConfiguration(actor).hiddenEquipment.has('weapon0'), 'Visibility survives reopening and fresh configuration');
+          contextClick(tileFor('weapon0')); await bar.configWrites.get(actor);
+          check(!tileFor('weapon0').classList.contains('co2prism-equipment-masked') &&
+            !actor.flags.co2prism.hiddenEquipment.weapon0, 'Second context click restores normal equipment');
+          contextClick(tileFor('weapon30')); await bar.configWrites.get(actor);
+          actor.inventory[0].items.pop();
+          actor.items.delete('weapon30');
+          hooks.get('deleteItem')({ parent: actor });
+          check(names(weaponGroup).length === 30 && !tileFor('weapon30') && actor.flags.co2prism.hiddenEquipment.weapon30,
+            'Deleting masked equipment leaves no ghost and writes no cleanup');
+          weapons[0].name = 'Renamed weapon';
+          hooks.get('updateItem')({ parent: other });
+          check(names(weaponGroup)[0] === 'weapon0', 'Equipment ignores unrelated item changes');
+          hooks.get('updateItem')({ parent: actor });
+          check(names(weaponGroup)[0] === 'Renamed weapon', 'Equipment refreshes changed item labels');
+          const selected = canvas.tokens.controlled;
+          canvas.tokens.controlled = []; bar.refreshActor();
+          check(equipment.hidden && bar.equipmentToggle.disabled, 'Equipment hidden without a selected actor');
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(equipment.hidden && bar.equipmentToggle.getAttribute('aria-expanded') === 'false', 'Equipment state isolated per actor');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          check(!equipment.hidden && names(weaponGroup).length === 30, 'Equipment restores actor state');
+          actor.inventory = []; actor.containers = [];
+          hooks.get('createItem')({ parent: actor });
+          check(equipment.querySelectorAll('.co2prism-equipment-category').length === 5 && !equipment.querySelector('img'), 'Empty equipment keeps category controls');
+          const menu = bar.equipmentMenu;
+          const operations = () => [...menu.children].map(button => button.textContent);
+          const settled = () => new Promise(resolve => setTimeout(resolve, 0));
+          const equipmentPill = equipmentItem('elixir', 1);
+          const inventoryBlade = equipmentItem('blade', 2);
+          Object.assign(equipmentPill.system, { properties: { stackable: true }, quantity: { current: 1, max: 2 },
+            charges: { current: 4 } });
+          let quantityWrites = 0;
+          equipmentPill.update = async update => {
+            quantityWrites++;
+            check(Object.keys(update).join() === 'system.quantity.current', 'Equipment writes only the native quantity field');
+            await settled();
+            equipmentPill.system.quantity.current = update['system.quantity.current'];
+            hooks.get('updateItem')(equipmentPill);
+          };
+          Object.assign(inventoryBlade.system, { properties: { equipable: true }, equipped: false });
+          actor.inventory = [{ category: 'consumable', items: [equipmentPill, stored] },
+            { category: 'weapon', items: [inventoryBlade] }];
+          actor.containers = [bag];
+          settings.locked = true; bar.updateLock();
+          check(!tileFor('stored') && !contextClick(tileFor('bag')) && !menu.matches(':popover-open'),
+            'Contained items stay excluded and ordinary containers have no operation menu');
+          const openItemMenu = id => contextClick(tileFor(id)) && menu.matches(':popover-open');
+          check(openItemMenu('elixir') && operations().join() === 'Quantité −1,Quantité +1', 'Stack menu has both feasible operations');
+          tileFor('elixir').dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true,
+            clientX: innerWidth - 1, clientY: innerHeight - 1 }));
+          const menuBounds = menu.getBoundingClientRect();
+          check(menuBounds.right <= innerWidth && menuBounds.bottom <= innerHeight, 'Operations menu fits at the viewport edge');
+          const decrease = menu.firstElementChild;
+          decrease.click(); decrease.click();
+          check(!contextClick(tileFor('elixir')), 'An in-flight mutation prevents a second operation menu');
+          await settled(); await settled();
+          check(quantityWrites === 1 && equipmentPill.system.quantity.current === 0 && equipmentPill.system.charges.current === 4
+            && actor.items.get('elixir') === equipmentPill, 'Quantity reaches zero once, without changing charges or deleting the item');
+          check(openItemMenu('elixir') && operations().join() === 'Quantité +1', 'No decrease at zero');
+          menu.firstElementChild.click(); await settled(); await settled();
+          check(openItemMenu('elixir'), 'Quantity operation reopens after completion');
+          menu.lastElementChild.click(); await settled(); await settled();
+          check(openItemMenu('elixir') && operations().join() === 'Quantité −1', 'No increase at the native positive maximum');
+          bar.closeEquipmentMenu();
+          const equipCalls = [];
+          actor.toggleEquipmentEquipped = async (id, bypass) => {
+            equipCalls.push([id, bypass]);
+            if (bypass) actor.items.get(id).system.equipped = !actor.items.get(id).system.equipped;
+          };
+          check(openItemMenu('blade') && operations().join() === 'Équiper', 'Non-stackable blade only offers Equip');
+          menu.firstElementChild.click(); await settled();
+          check(openItemMenu('blade') && operations().join() === 'Équiper', 'Native refusal leaves the real label intact');
+          menu.firstElementChild.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })); await settled();
+          check(openItemMenu('blade') && operations().join() === 'Déséquiper' &&
+            JSON.stringify(equipCalls) === JSON.stringify([['blade', false], ['blade', true]]),
+            'Shift reaches the native equipment toggle once and uses the true equipment state');
+          inventoryBlade.canUserModify = () => false;
+          menu.firstElementChild.click(); await settled();
+          check(equipCalls.length === 2 && !contextClick(tileFor('blade')), 'Permission loss prevents both stale and new operations');
+          inventoryBlade.canUserModify = () => true;
+          const inventoryAction = (indice, actionName) => ({ indice, actionName, type: 'heal', actionTypeFinal: 'm',
+            properties: { visible: true }, isVisible: async () => true });
+          equipmentPill.actions = equipmentPill.system.actions = [inventoryAction(0, 'First'), inventoryAction(1, 'Second')];
+          const inventoryExecutions = [];
+          game.system.api.macros.useAction = async (source, indice, type) => {
+            const guards = [];
+            const details = { item: equipmentPill, source, indice, type, state: true, guard: promise => guards.push(promise) };
+            hooks.get('co2.preActivateAction')?.(actor, details);
+            if ((await Promise.all(guards)).includes(false)) return false;
+            inventoryExecutions.push([source, indice, type]);
+            hooks.get('co2.postActivateAction')?.(actor, { ...details, success: true });
+          };
+          await economy.reset();
+          await bar.setPanelState('combat', false);
+          const onlyAction = equipmentPill.actions.pop();
+          check(openItemMenu('elixir') && operations().filter(label => label.startsWith('Exécuter')).join() === 'Exécuter First',
+            'A single configured action shows a single action command');
+          equipmentPill.actions.push(onlyAction);
+          check(openItemMenu('elixir') && operations().filter(label => label.startsWith('Exécuter')).join() === 'Exécuter First,Exécuter Second',
+            'Multiple native actions display their actual names with Combat closed');
+          onlyAction.isVisible = async () => false;
+          [...menu.children].find(button => button.textContent === 'Exécuter Second').click();
+          await settled();
+          check(!inventoryExecutions.length && economy.getSnapshot().normal.m, 'Failed native action conditions leave the budget intact');
+          onlyAction.isVisible = async () => true;
+          check(openItemMenu('elixir'), 'Operations menu reopens after a failed action condition');
+          [...menu.children].find(button => button.textContent === 'Exécuter Second').click();
+          await settled();
+          check(JSON.stringify(inventoryExecutions) === JSON.stringify([[equipmentPill.uuid, 1, 'heal']]) &&
+            economy.getSnapshot().normal.m === false, 'Selected action uses native index and existing movement-action budget');
+          check(openItemMenu('elixir'), 'Operations menu available before document deletion');
+          actor.items.delete('elixir'); actor.inventory[0].items.shift();
+          hooks.get('deleteItem')(equipmentPill);
+          check(!menu.matches(':popover-open'), 'Deleting target closes operations menu');
+          check(openItemMenu('blade'), 'Operations menu available before switching token');
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(!menu.matches(':popover-open'), 'Switching token closes operations menu');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          check(openItemMenu('blade'), 'Operations menu available before closing the panel');
+          await bar.setPanelState('equipements', false);
+          check(!menu.matches(':popover-open'), 'Closing equipment panel dismisses operations menu');
+          settings.locked = false; bar.updateLock();
+          await bar.setPanelState('combat', true);
+          await economy.reset();
+          inventoryBlade.actions = inventoryBlade.system.actions = ['First', 'Second', 'Third', 'Fourth'].map((name, index) =>
+            ({ ...inventoryAction(index, name), source: inventoryBlade.uuid, actionImg: 'icons/svg/' +
+              ['sword', 'shield', 'fire', 'sun'][index] + '.svg' }));
+          Object.assign(inventoryBlade.actions[0].properties, { activable: true, temporary: true, enabled: true });
+          Object.assign(inventoryBlade.actions[0], { iconFA: 'fa-solid fa-sword', manaCost: 2,
+            resolvers: [{ type: 'consumable' }] });
+          inventoryBlade.system.quantity = { current: 3 };
+          inventoryBlade.actions[1].isVisible = async () => false;
+          const groupCalls = [];
+          const groupActivation = async ({ source, indice, type, state }) => {
+            const guards = [];
+            const details = { item: inventoryBlade, source, indice, type, state, guard: promise => guards.push(promise) };
+            hooks.get('co2.preActivateAction')?.(actor, details);
+            if ((await Promise.all(guards)).includes(false)) return false;
+            groupCalls.push(['activate', source, indice, type ?? null, state]);
+            if (indice === 0) {
+              inventoryBlade.actions[0].properties.enabled = state;
+              if (state) inventoryBlade.system.quantity.current--;
+            }
+            hooks.get('co2.postActivateAction')?.(actor, { ...details, success: true });
+            hooks.get('updateItem')(inventoryBlade);
+            return true;
+          };
+          actor.activateAction = groupActivation;
+          inventoryBlade.actions[0].toObject = function() {
+            return { source: this.source, indice: this.indice, label: this.actionName, properties: { ...this.properties } };
+          };
+          game.system.api.macros.useAction = (source, indice, type) => groupActivation({ source, indice, type, state: true });
+          game.system.api.macros.openSheet = source => groupCalls.push(['sheet', source]);
+          game.system.api.macros.sendToChat = (source, _name, indice) => groupCalls.push(['chat', source, indice]);
+          const groupRow = bar.combatRows[1];
+          const groupSlot = () => root.querySelector('.co2prism-slot-group');
+          const dropAction = async (indice, target) => {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData('text/plain', JSON.stringify({ type: 'co.action', source: inventoryBlade.uuid, indice }));
+            target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+            await bar.configWrites.get(actor);
+          };
+          await dropAction(0, groupRow.lastElementChild);
+          const firstShortcut = () => [...groupRow.children].find(slot => slot.title.includes('First'));
+          const presetMenu = bar.presetActionMenu;
+          const presetMenuOpen = () => presetMenu.matches(':popover-open');
+          const ruleIcon = node => node.querySelector('.co2prism-slot-rule');
+          const selectRule = async index => {
+            presetMenu.children[index].click();
+            await bar.configWrites.get(actor);
+          };
+          actor.flags.co2prism.hands.presets = {};
+          await bar.setActivePreset(1);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-circle-dashed') &&
+            contextClick(firstShortcut()) && presetMenuOpen() && presetMenu.children.length === 3 &&
+            presetMenu.children[2].getAttribute('aria-pressed') === 'true', 'Eligible simple shortcut offers three exclusive rules');
+          await selectRule(0);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-toggle-large-on') && !groupCalls.length,
+            'Choosing Activate only updates the rule indicator');
+          await bar.setActivePreset(2);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-circle-dashed'), 'Second preset initially has its own default');
+          contextClick(firstShortcut()); await selectRule(1);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-toggle-large-off'), 'Second preset has its own deactivation indicator');
+          await bar.setActivePreset(3);
+          contextClick(firstShortcut());
+          settings.locked = true; bar.updateLock();
+          presetMenu.children[0].click();
+          check(!presetMenuOpen() && !ruleIcon(firstShortcut()) && contextClick(firstShortcut()) && !presetMenuOpen(),
+            'Locked default is hidden and neither a right click nor a stale menu can edit it');
+          await bar.setActivePreset(1);
+          check(ruleIcon(firstShortcut()).classList.contains('fa-toggle-large-on') && !groupCalls.length &&
+            inventoryBlade.actions[0].properties.enabled, 'Locked active rule stays visible and preset switching does not activate anything');
+          settings.locked = false; bar.updateLock();
+          await dropAction(1, firstShortcut());
+          const members = () => [...groupSlot().querySelectorAll('.co2prism-slot-quadrant')];
+          const quadrantCommand = index => members()[index].querySelector('.co2prism-quadrant-command');
+          const clickQuadrant = (index, options = {}) => quadrantCommand(index).dispatchEvent(new MouseEvent('click', { bubbles: true, ...options }));
+          const images = () => members().map(member => member.querySelector('img')?.getAttribute('src') ?? '');
+          const preview = bar.shortcutPreview;
+          const previewOpen = () => preview.matches(':popover-open');
+          const pointer = (node, type) => node.dispatchEvent(new PointerEvent(type, { pointerType: 'mouse' }));
+          const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+          check(contextClick(quadrantCommand(0)) && presetMenuOpen() &&
+            presetMenu.children[0].getAttribute('aria-pressed') === 'true' &&
+            !ruleIcon(groupSlot()), 'Eligible quadrant uses the same saved rule without drawing it in the miniature');
+          await selectRule(1);
+          check(!contextClick(quadrantCommand(1)) && !presetMenuOpen() && !groupCalls.length,
+            'Ineligible quadrant has no automation menu and configuring its neighbor has no action effect');
+          pointer(members()[2], 'pointerenter');
+          await pause(360);
+          check(!previewOpen(), 'Empty quadrant never opens an action preview');
+          check(images().join() === 'icons/svg/sword.svg,icons/svg/shield.svg,,' &&
+            members().slice(2).every(member => getComputedStyle(member).backgroundColor === 'rgb(0, 0, 0)' &&
+              !member.querySelector('button')), 'Two actions leave two black, inert quadrants');
+          members()[2].click(); groupSlot().click();
+          clickQuadrant(1); await settled();
+          check(!groupCalls.length && economy.getSnapshot().normal.m, 'Empty zones and an unavailable action produce no execution');
+          clickQuadrant(0); await settled();
+          check(groupCalls.length === 1 && groupCalls[0][2] === 0 && groupCalls[0][4] === false &&
+            economy.getSnapshot().normal.m && !members()[0].classList.contains('co2prism-action-active'),
+            'Two-member group deactivates only its selected action without spending time');
+          clickQuadrant(0); await settled();
+          check(groupCalls.length === 2 && groupCalls[1][2] === 0 && groupCalls[1][4] === true &&
+            !economy.getSnapshot().normal.m && inventoryBlade.system.quantity.current === 2,
+            'Reactivation uses native consumption and the shared budget');
+          await economy.reset();
+          await dropAction(2, groupSlot());
+          check(images()[2] === 'icons/svg/fire.svg' && !images()[3], 'Third action fills the bottom-left quadrant');
+          clickQuadrant(2); await settled();
+          check(groupCalls.length === 3 && groupCalls[2][2] === 2 && !economy.getSnapshot().normal.m,
+            'Third quadrant executes its native index in a three-member group');
+          await economy.reset();
+          await dropAction(3, groupSlot());
+          await settled();
+          check(images()[3] === 'icons/svg/sun.svg' && groupSlot().querySelectorAll('button').length === 4 &&
+            !groupSlot().classList.contains('co2prism-slot-executable') &&
+            !groupSlot().querySelector('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost'),
+            'Full group has four images and individual remove buttons, without corner badges or execution');
+          check(members().map(member => member.classList.contains('co2prism-action-active')).join() === 'true,false,false,false'
+            && members().map(member => member.classList.contains('co2prism-condition-unavailable')).join() === 'false,true,false,false',
+            'Activation and unavailable conditions affect only the matching quadrant');
+          check(getComputedStyle(members()[0].querySelector('img')).filter.startsWith('brightness') &&
+            getComputedStyle(members()[1].querySelector('img')).filter.startsWith('grayscale') &&
+            getComputedStyle(members()[2].querySelector('img')).filter === 'none', 'Each quadrant renders its own visual filter');
+          pointer(members()[0], 'pointerenter');
+          await pause(100);
+          check(!previewOpen(), 'Hover stays hidden before the delay');
+          pointer(members()[0], 'pointerleave'); pointer(members()[1], 'pointerenter');
+          await pause(260);
+          check(!previewOpen(), 'Switching quadrants cancels the previous timer');
+          await pause(100);
+          check(previewOpen() && preview.textContent.includes('Second') &&
+            preview.querySelector('.co2prism-condition-unavailable'), 'Only the new quadrant opens with its own state');
+          members()[1].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+          check(!previewOpen(), 'Right click dismisses the preview');
+          inventoryBlade.actions[1].isVisible = async () => true;
+          Object.assign(inventoryBlade.actions[2], { type: 'melee', hasResolversWithDomage: true });
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(members()[0].classList.contains('co2prism-action-active') &&
+            !members()[1].classList.contains('co2prism-condition-unavailable'), 'Native Item update refreshes individual quadrant states');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const bounds = groupSlot().getBoundingClientRect(), plain = groupRow.lastElementChild.getBoundingClientRect();
+            const [topLeft, topRight, bottomLeft, bottomRight] = members().map(member => member.getBoundingClientRect());
+            check(Math.abs(bounds.width - plain.width) < 1 && Math.abs(bounds.height - plain.height) < 1 &&
+              topLeft.top === topRight.top && topLeft.left === bottomLeft.left && topRight.left === bottomRight.left &&
+              bottomRight.bottom <= bounds.bottom && bottomRight.right <= bounds.right &&
+              getComputedStyle(groupSlot()).borderTopColor === 'rgb(114, 14, 53)',
+              'Quadrants preserve square geometry and burgundy border at ' + size);
+            groupRow.scrollLeft = groupSlot().offsetLeft;
+            await settled();
+            pointer(members()[0], 'pointerenter');
+            await pause(360);
+            const popup = preview.getBoundingClientRect(), previewSquare = preview.firstElementChild?.getBoundingClientRect();
+            check(previewOpen() && Math.abs(previewSquare.width - bounds.width) < 1
+              && Math.abs(previewSquare.height - bounds.height) < 1 && popup.left >= 0 && popup.top >= 0
+              && popup.right <= innerWidth && popup.bottom <= innerHeight &&
+              getComputedStyle(preview.firstElementChild).pointerEvents === 'none' &&
+              preview.querySelectorAll('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost').length === 4 &&
+              preview.querySelector('.co2prism-action-active') && !preview.querySelector('button') &&
+              ruleIcon(preview).classList.contains('fa-toggle-large-off') &&
+              ruleIcon(preview).getBoundingClientRect().left >= preview.querySelector('.co2prism-slot-type').getBoundingClientRect().right &&
+              ruleIcon(preview).getBoundingClientRect().right <= preview.querySelector('.co2prism-slot-time').getBoundingClientRect().left &&
+              preview.querySelector('.co2prism-shortcut-preview-title').textContent === 'First',
+              'Preview preserves the full square, four badges, and viewport geometry at ' + size);
+            pointer(members()[0], 'pointerleave');
+            check(!previewOpen(), 'Leaving the quadrant dismisses its preview immediately');
+          }
+          settings.locked = true; bar.updateLock();
+          check(images().every(Boolean) && !groupSlot().querySelector('button') && !members().some(member => member.draggable),
+            'Locked group preserves images and hides all editing controls');
+          pointer(members()[3], 'pointerenter');
+          await pause(360);
+          check(previewOpen() && preview.textContent.includes('Fourth'), 'Locked quadrant previews its own action');
+          const storedGroup = JSON.stringify(actor.flags.co2prism.shortcuts);
+          clickQuadrant(3, { ctrlKey: true }); await settled();
+          check(!previewOpen() && groupCalls.at(-1).join() === ['chat', inventoryBlade.uuid, 3].join(),
+            'Locked Ctrl-click closes preview and sends exactly its action to chat');
+          clickQuadrant(3, { shiftKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['sheet', inventoryBlade.uuid].join(), 'Locked Shift-click opens the native sheet');
+          clickQuadrant(2, { altKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['activate', inventoryBlade.uuid, 2, 'damage', true].join() &&
+            economy.getSnapshot().normal.m, 'Alt-click uses the native damage command without an action-time debit');
+          actor.testUserPermission = (_, permission) => permission !== 'OWNER';
+          bar.refreshActor();
+          const beforeDenied = groupCalls.length;
+          clickQuadrant(3); await settled();
+          check(groupCalls.length === beforeDenied, 'Observer cannot execute a group action');
+          actor.testUserPermission = () => true;
+          bar.refreshActor();
+          const beforeFourth = groupCalls.length;
+          const fourth = quadrantCommand(3);
+          fourth.click(); fourth.click();
+          await settled();
+          check(groupCalls.length === beforeFourth + 1 && groupCalls.at(-1)[2] === 3 &&
+            !economy.getSnapshot().normal.m && JSON.stringify(actor.flags.co2prism.shortcuts) === storedGroup,
+            'Rapid locked clicks activate the fourth action once and preserve the references');
+          const staleFourth = quadrantCommand(3);
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          staleFourth.click();
+          check(groupCalls.length === beforeFourth + 1, 'A stale quadrant cannot execute after a token change');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          pointer(members()[3], 'pointerenter');
+          hooks.get('updateItem')(inventoryBlade);
+          check(!previewOpen() && !bar.shortcutHover, 'Rebuilding Combat clears the active preview and its timer');
+          pointer(members()[0], 'pointerenter');
+          await bar.setPanelState('combat', false);
+          check(!previewOpen() && !bar.shortcutHover, 'Closing Combat cancels a pending preview');
+          await bar.setPanelState('combat', true);
+          pointer(members()[0], 'pointerenter');
+          root.hidden = true;
+          await settled();
+          check(!previewOpen() && !bar.shortcutHover, 'Hiding Prism cancels a pending preview');
+          root.hidden = false;
+          settings.locked = false; bar.updateLock();
+          const wholeTransfer = new DataTransfer();
+          pointer(members()[0], 'pointerenter');
+          groupSlot().dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: wholeTransfer }));
+          check(!previewOpen() && !bar.shortcutHover, 'Starting a drag cancels a pending preview');
+          check(JSON.parse(wholeTransfer.getData('text/plain')).actionIndex === undefined, 'Group border starts a whole-slot drag');
+          bar.combatRows[0].lastElementChild.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: wholeTransfer }));
+          await bar.configWrites.get(actor);
+          check(groupSlot().parentElement === bar.combatRows[0] && images().every(Boolean), 'Moving the square preserves all four images');
+          const groupTransfer = new DataTransfer();
+          members()[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: groupTransfer }));
+          check(JSON.parse(groupTransfer.getData('text/plain')).actionIndex === 0, 'Member drag identifies the native slot and action index');
+          members()[2].dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: groupTransfer }));
+          await bar.configWrites.get(actor);
+          check(images().join() === 'icons/svg/shield.svg,icons/svg/fire.svg,icons/svg/sword.svg,icons/svg/sun.svg',
+            'Quadrant drop reorders the images within the group');
+          for (const index of [3, 0, 0]) {
+            members()[index].querySelector('button').click();
+            await bar.configWrites.get(actor);
+          }
+          check(!groupSlot() && [...bar.combatRows[0].children].some(slot => slot.title.includes('First') &&
+            slot.classList.contains('co2prism-slot-executable') && slot.querySelector('.co2prism-slot-time')),
+            'Removing quadrants restores a normal executable shortcut with its corner indicators');
+          const finalShortcut = [...bar.combatRows[0].children].find(slot => slot.title.includes('First'));
+          finalShortcut.querySelector('.co2prism-slot-remove').click();
+          await bar.configWrites.get(actor);
+          check(![...bar.combatRows[0].children].some(slot => slot.title.includes('First')),
+            'The final remaining action is removed with the ordinary shortcut command');
+          inventoryBlade.actions[0].properties.enabled = true;
+          inventoryBlade.actions[1].conditions = [{ predicate: 'isLinkedActionActivated', object: '0' }];
+          await dropAction(0, groupRow.lastElementChild);
+          await settled();
+          const linkedGroup = () => bar.conditionalActionGroups.find(group => group.source.itemId === inventoryBlade.id);
+          const conditionalZone = bar.conditionalZone;
+          check(linkedGroup()?.available[0]?.indice === 1 && conditionalZone.children.length === 1,
+            'Combat renders the available native dependent references');
+          inventoryBlade.actions[0].properties.enabled = false;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(linkedGroup()?.dependencies.length === 1 && linkedGroup()?.available.length === 0 &&
+            conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            'An Item update removes availability but keeps the dependency');
+          let releaseLinkedVisibility;
+          inventoryBlade.actions[0].properties.enabled = true;
+          inventoryBlade.actions[1].isVisible = () => new Promise(resolve => { releaseLinkedVisibility = resolve; });
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          releaseLinkedVisibility(true);
+          await settled();
+          check(!linkedGroup() && conditionalZone.hidden, 'An old visibility result cannot escape its actor context');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          inventoryBlade.actions[1].isVisible = async () => true;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(linkedGroup()?.available[0]?.indice === 1, 'Returning to the actor rebuilds the conditional data');
+          const conditionalLink = object => ({ predicate: 'isLinkedActionActivated', object });
+          inventoryBlade.actions[2].conditions = [conditionalLink('0')];
+          inventoryBlade.actions[3].conditions = [conditionalLink('0'), conditionalLink('2')];
+          inventoryBlade.actions[3].isVisible = async () => inventoryBlade.actions[2].properties.enabled;
+          inventoryBlade.actions[2].properties.enabled = true;
+          await dropAction(2, [...groupRow.children].find(slot => slot.title.includes('First')));
+          await dropAction(0, bar.combatRows[0].lastElementChild);
+          await dropAction(1, bar.combatRows[0].lastElementChild);
+          await settled();
+          const temporaryIndices = () => [...conditionalZone.children].map(row =>
+            [...row.children].map(square => square.dataset.co2prismIndice).join()).join('|');
+          check(temporaryIndices() === '1,2,3|3' && conditionalZone.querySelectorAll('.co2prism-slot-time').length === 4,
+            'Two sources render separate rows in native order with the ordinary badges');
+          check(groupSlot().querySelectorAll('.co2prism-slot-quadrant.co2prism-conditional-halo').length === 2 &&
+            !groupSlot().classList.contains('co2prism-conditional-halo') &&
+            [...bar.combatRows[0].children].some(slot => slot.title.includes('First') && slot.classList.contains('co2prism-conditional-halo')) &&
+            [...bar.combatRows[0].children].some(slot => slot.title.includes('Second') && !slot.classList.contains('co2prism-conditional-halo')),
+            'All source representations are highlighted and the manually saved dependent remains separate');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.position = { x: 40, y: 500 }; bar.layout();
+            const normal = bar.combatRows[0].getBoundingClientRect();
+            const firstRow = conditionalZone.firstElementChild;
+            const square = firstRow.firstElementChild.getBoundingClientRect();
+            const base = bar.combatRows[0].firstElementChild.getBoundingClientRect();
+            check(firstRow.getBoundingClientRect().bottom < normal.top && Math.abs(square.width - base.width) < 1 &&
+              Math.abs(square.height - base.height) < 1 && Math.abs(square.left - normal.left) < 1 &&
+              conditionalZone.getBoundingClientRect().top >= 0 && getComputedStyle(conditionalZone).pointerEvents === 'none',
+              'Conditional rows keep exact card size and stay above normal rows at ' + size);
+          }
+          conditionalZone.style.setProperty('--conditional-width', '172');
+          check(conditionalZone.firstElementChild.scrollWidth > conditionalZone.firstElementChild.clientWidth,
+            'A long conditional row scrolls without reducing the squares');
+          bar.layout();
+          const conditionalSquare = (index, row = 0) =>
+            conditionalZone.children[row].querySelector('[data-co2prism-indice="' + index + '"]');
+          document.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+          await settled();
+          const dispatchConditional = (index, options) => conditionalSquare(index).dispatchEvent(
+            new MouseEvent('click', { bubbles: true, ...options }));
+          const persistentDependent = () => [...bar.combatRows[0].children].find(slot => slot.title.includes('Second'));
+          check(conditionalSquare(1).title === persistentDependent().title &&
+            !conditionalSquare(1).draggable && !conditionalSquare(1).querySelector('.co2prism-slot-remove'),
+            'Temporary and permanent action share the tooltip, while temporary actions cannot be edited');
+          for (const locked of [false, true]) {
+            settings.locked = locked; bar.updateLock(); await settled();
+            check(contextClick(conditionalSquare(1)) && !presetMenuOpen(), 'Conditional right-click opens no configuration menu');
+          }
+          const conditionalCalls = groupCalls.length;
+          for (const index of [1, 2, 3]) {
+            await economy.reset(); bar.refreshActor(); await settled();
+            const square = conditionalSquare(index);
+            square.click(); square.click();
+            await settled();
+            check(groupCalls.length === conditionalCalls + index && groupCalls.at(-1)[2] === index &&
+              groupCalls.at(-1)[1] === inventoryBlade.uuid && !economy.getSnapshot().normal.m,
+              'Locked conditional action executes the right native index once and uses the shared budget: ' + index);
+          }
+          dispatchConditional(1, { ctrlKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['chat', inventoryBlade.uuid, 1].join(), 'Conditional Ctrl-click uses native chat');
+          dispatchConditional(1, { shiftKey: true }); await settled();
+          check(groupCalls.at(-1).join() === ['sheet', inventoryBlade.uuid].join(), 'Conditional Shift-click uses the native sheet');
+          await economy.reset(); bar.refreshActor(); await settled();
+          persistentDependent().click(); await settled();
+          check(groupCalls.at(-1)[2] === 1, 'The same dependent remains executable as a permanent shortcut');
+          const beforeInvalidConditional = groupCalls.length;
+          inventoryBlade.actions[3].isVisible = async () => false;
+          conditionalSquare(3).click(); await settled();
+          check(groupCalls.length === beforeInvalidConditional && temporaryIndices() === '1,2',
+            'A now-false native condition denies a stale card and refreshes the rows');
+          inventoryBlade.actions[3].isVisible = async () => inventoryBlade.actions[2].properties.enabled;
+          hooks.get('updateItem')(inventoryBlade); await settled();
+          const obsoleteConditional = conditionalSquare(1);
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          obsoleteConditional.click();
+          check(groupCalls.length === beforeInvalidConditional && conditionalZone.hidden,
+            'Switching actor invalidates a previously attached temporary shortcut');
+          canvas.tokens.controlled = selected; bar.refreshActor(); await settled();
+          settings.locked = false; bar.updateLock(); await settled();
+          const anchoredRow = bar.combatRows[0].getBoundingClientRect().toJSON();
+          inventoryBlade.actions[2].properties.enabled = false;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(temporaryIndices() === '1,2' && groupSlot().querySelectorAll('.co2prism-conditional-halo').length === 1 &&
+            JSON.stringify(bar.combatRows[0].getBoundingClientRect().toJSON()) === JSON.stringify(anchoredRow),
+            'A second false condition removes only the affected row and halo without moving normal slots');
+          inventoryBlade.actions[0].properties.enabled = false;
+          hooks.get('updateItem')(inventoryBlade);
+          await settled();
+          check(conditionalZone.hidden && !conditionalZone.children.length && !root.querySelector('.co2prism-conditional-halo'),
+            'Deactivation clears the conditional cards and every highlight');
+          const conditionalSource = { itemId: inventoryBlade.id, source: inventoryBlade.uuid, indice: 0 };
+          const permanentShortcuts = JSON.stringify(actor.flags.co2prism.shortcuts);
+          await economy.reset();
+          await bar.setPresetActionRule(actor, conditionalSource, 3, 'activate');
+          await bar.setActivePreset(3);
+          await settled();
+          check(temporaryIndices() === '1,2' && JSON.stringify(actor.flags.co2prism.shortcuts) === permanentShortcuts,
+            'Preset automation shows conditional rows without writing permanent shortcuts');
+          await bar.setActivePreset(1);
+          await settled();
+          check(conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            'Preset deactivation removes the temporary row and highlights');
+          await economy.reset();
+          await bar.setActivePreset(3);
+          await settled();
+          game.system.api.macros.useAction = async (source, indice, type) => {
+            const result = await groupActivation({ source, indice, type, state: true });
+            if (result && indice === 1) {
+              inventoryBlade.actions[0].properties.enabled = false;
+              hooks.get('updateItem')(inventoryBlade);
+            }
+            return result;
+          };
+          await economy.reset(); bar.refreshActor(); await settled();
+          conditionalSquare(1).click(); await settled();
+          check(conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            'A dependent action changing the native source state clears the temporary row');
+          const pathSheets = [];
+          const makePathItem = (owner, type, id, sort, system, img) => {
+            const document = { id, uuid: owner.uuid + '.Item.' + id, type, name: id, sort, img, parent: owner,
+              system: { description: '<p>Details of ' + id + '</p>', ...system },
+              testUserPermission: () => true, sheet: { render: force => { if (force) pathSheets.push(id); } } };
+            owner.items.set(id, document);
+            return document;
+          };
+          for (const owner of [actor, other]) {
+            owner.getEmbeddedItemByUuid = uuid => owner.items.get(uuid.split('.').at(-1));
+            owner.paths = []; owner.capacities = [];
+          }
+          for (const count of [12, 7, 6, 5, 3, 1, 0]) {
+            const path = makePathItem(actor, 'path', 'path' + count, count, { capacities: [] }, 'icons/svg/sun.svg');
+            actor.paths.push(path);
+            for (let rank = count; rank > 0; rank--) {
+              const capacity = makePathItem(actor, 'capacity', path.id + 'rank' + rank, rank,
+                { path: path.uuid, rank, learned: rank % 2 === 1 }, 'icons/svg/sword.svg');
+              actor.capacities.push(capacity);
+              path.system.capacities.push(capacity.uuid);
+            }
+            if (count) path.system.capacities.push(path.system.capacities[0], actor.uuid + '.Item.deleted');
+          }
+          const foreign = makePathItem(actor, 'capacity', 'foreign', 0,
+            { path: 'Actor.other.Item.missing', rank: 0 }, 'icons/svg/fire.svg');
+          actor.capacities.push(foreign);
+          actor.paths[0].system.capacities.push('Actor.other.Item.foreign');
+          actor.capacities.push(makePathItem(actor, 'capacity', 'free', 0, { path: null, rank: 0 }, 'icons/svg/fire.svg'));
+          const encounterPath = makePathItem(other, 'path', 'encounter-path', 0, { capacities: [] }, 'icons/svg/sun.svg');
+          other.type = 'encounter';
+          other.paths.push(encounterPath);
+          for (let rank = 1; rank <= 3; rank++) {
+            const capacity = makePathItem(other, 'capacity', 'encounter-rank' + rank, rank,
+              { path: encounterPath.uuid, rank }, 'icons/svg/sword.svg');
+            other.capacities.push(capacity);
+            encounterPath.system.capacities.push(capacity.uuid);
+          }
+          other.capacities.push(...Array.from({ length: 6 }, (_, index) => makePathItem(other, 'capacity',
+            'encounter-free' + index, index, { path: null, rank: index }, 'icons/svg/fire.svg')));
+          const pathPanel = bar.pathsPanel;
+          const pathGroup = id => pathPanel.querySelector('[data-path-key="' + id + '"]');
+          const pathCapacities = id => [...pathGroup(id).querySelectorAll('[data-learned]')];
+          const togglePaths = async () => { bar.pathsToggle.click(); await bar.configWrites.get(bar.actor); };
+          const pathHeader = id => pathGroup(id).querySelector('.co2prism-path-header');
+          const togglePathGroup = async target => {
+            check(contextClick(target), 'Paths context click is handled locally');
+            await bar.configWrites.get(bar.actor);
+          };
+          await bar.setPanelState('equipements', true);
+          await togglePaths();
+          check(!pathPanel.hidden && equipment.hidden && actor.flags.co2prism.panels.equipements === false,
+            'Opening Paths closes Equipment in the same configuration');
+          check([...pathPanel.children].map(node => node.dataset.pathKey).join() === 'path0,path1,path3,path5,path6,path7,path12,off-paths',
+            'Native path sort and final off-path block');
+          for (const count of [0, 1, 3, 5, 6, 7, 12]) {
+            const id = 'path' + count, tiles = pathCapacities(id);
+            check(tiles.length === count && tiles.every((tile, index) => tile.dataset.itemId === id + 'rank' + (index + 1)
+              && Number(tile.style.getPropertyValue('--column')) === index % 5 + 1 &&
+              tile.dataset.learned === String(index % 2 === 0)), 'Path rank order, deduplication, learning and wrapping: ' + count);
+          }
+          check(pathGroup('path12').querySelector('.co2prism-path-header img').alt === 'path12' &&
+            pathGroup('path12').querySelector('.co2prism-path-label').textContent === 'path12' &&
+            pathGroup('off-paths').querySelector('.fa-circle-star') && pathCapacities('off-paths').length === 1 &&
+            !pathPanel.querySelector('[data-item-id="foreign"]'), 'Path image, off-path icon, and actor-scoped UUID resolution');
+          await settled();
+          for (const node of [pathHeader('path12'), ...pathCapacities('path12').slice(0, 2)]) {
+            check(node.dataset.tooltipHtml.includes('Details of ' + node.dataset.itemId), 'Path or capacity tooltip uses its own description');
+            node.querySelector('img').click();
+          }
+          pathHeader('off-paths').click();
+          check(pathSheets.join() === 'path12,path12rank1,path12rank2' &&
+            pathHeader('off-paths').dataset.tooltipText && !pathHeader('off-paths').dataset.tooltipHtml,
+            'Native sheets open for both learning states, while Off-path only has its category label');
+          const pathProjection = node => {
+            const bounds = node.getBoundingClientRect();
+            const x = (bounds.left + bounds.right) / 2, y = (bounds.top + bounds.bottom) / 2;
+            return { along: (x - y) / Math.SQRT2, across: (x + y) / Math.SQRT2,
+              width: node.offsetWidth, height: node.offsetHeight };
+          };
+          const pathOverlap = (a, b) => Math.abs(a.along - b.along) < (a.width + b.width) / 2 - 1 &&
+            Math.abs(a.across - b.across) < (a.height + b.height) / 2 - 1;
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const tiles = pathCapacities('path12'), first = tiles[0].getBoundingClientRect(), fifth = tiles[4].getBoundingClientRect();
+            const sixth = tiles[5].getBoundingClientRect();
+            check(first.width > 0 && fifth.left > first.left && fifth.top < first.top && sixth.top > first.top &&
+              Math.abs(sixth.left - first.left) < 1 && getComputedStyle(pathPanel).overflowY === 'visible' &&
+              new DOMMatrix(getComputedStyle(tiles[0]).transform).b < 0, 'Paths share scaled diagonal geometry at ' + size);
+            for (const count of [3, 5, 7, 12]) {
+              const id = 'path' + count, group = pathGroup(id), capacities = pathCapacities(id);
+              const header = pathProjection(group.querySelector('.co2prism-path-header'));
+              const title = pathProjection(group.querySelector('.co2prism-path-label'));
+              const leading = pathProjection(capacities[0]);
+              check(Math.abs(header.width / leading.width - 1.5) < 0.075 &&
+                header.along + header.width / 2 < leading.along - leading.width / 2 &&
+                title.along - title.width / 2 > header.along + header.width / 2 &&
+                title.across + title.height / 2 < leading.across - leading.height / 2 &&
+                Math.abs(header.across + header.height / 2 - leading.across - leading.height / 2) < 1.5,
+                'Larger header and aligned title keep the portrait margin for ' + count + ' capacities at ' + size);
+              check(capacities.filter((_, index) => index % 5 === 0).every(tile =>
+                Math.abs(tile.getBoundingClientRect().left - capacities[0].getBoundingClientRect().left) < 1),
+                'Continuation rows align with the first capacity at ' + size);
+            }
+            const shapes = [...pathPanel.querySelectorAll('.co2prism-path-tile, .co2prism-path-label')].map(pathProjection);
+            check(!shapes.some((shape, index) => shapes.slice(index + 1).some(other => pathOverlap(shape, other))),
+              'Rotated tiles and titles do not overlap at ' + size);
+            const offHeader = pathGroup('off-paths').querySelector('.co2prism-path-header');
+            check(!offHeader.querySelector('img') && Math.abs(pathCapacities('off-paths')[0].getBoundingClientRect().left - first.left) < 1,
+              'Off-path icon shares the first-capacity alignment at ' + size);
+            check(getComputedStyle(tiles[0]).boxShadow !== 'none' && getComputedStyle(tiles[1]).boxShadow === 'none' &&
+              getComputedStyle(tiles[0].querySelector('img')).filter === 'none' &&
+              getComputedStyle(tiles[1].querySelector('img')).filter === 'none' &&
+              getComputedStyle(pathHeader('path12')).boxShadow === 'none' && getComputedStyle(offHeader).boxShadow === 'none',
+              'Only learned capacities receive a perimeter halo at ' + size);
+          }
+          const expandedPathsHeight = pathPanel.getBoundingClientRect().height;
+          await togglePathGroup(pathHeader('path7').querySelector('img'));
+          check(pathCapacities('path7').length === 0 && pathGroup('path7').querySelector('.co2prism-path-header img') &&
+            getComputedStyle(pathGroup('path7').querySelector('.co2prism-path-label')).display === 'none' &&
+            pathPanel.getBoundingClientRect().height < expandedPathsHeight && pathCapacities('path12').length === 12,
+            'Collapsed path retains only its enlarged image and compacts the next blocks');
+          await togglePathGroup(pathHeader('off-paths').querySelector('i'));
+          check(!pathCapacities('off-paths').length && pathHeader('off-paths').querySelector('.fa-circle-star'), 'Off-path collapses and retains its icon');
+          await togglePathGroup(bar.pathsToggle);
+          check([...pathPanel.children].every(group => group.dataset.collapsed === 'true'), 'Global click collapses mixed states');
+          await togglePathGroup(bar.pathsToggle);
+          check(pathCapacities('path7').length === 7 && pathCapacities('off-paths').length === 1,
+            'Global reopening restores the individual paths and Off-path');
+          settings.locked = true; bar.updateLock();
+          await togglePathGroup(pathHeader('path7'));
+          check(pathGroup('path7').dataset.collapsed === 'true', 'Individual path collapse works locked');
+          await togglePaths();
+          await togglePathGroup(bar.pathsToggle);
+          check(pathPanel.hidden && actor.flags.co2prism.panels.voies === false &&
+            Object.values(actor.flags.co2prism.pathCollapsed).every(Boolean), 'Global collapse works locked without reopening Paths');
+          await togglePaths();
+          check([...pathPanel.children].every(group => group.dataset.collapsed === 'true'), 'Opening Paths reads the persisted collapse flags');
+          const compactHeaders = [...pathPanel.children].map(group => group.querySelector('.co2prism-path-header').getBoundingClientRect());
+          check(compactHeaders[1].left > compactHeaders[0].left && compactHeaders[1].top < compactHeaders[0].top &&
+            Math.abs(compactHeaders[5].left - compactHeaders[0].left) < 1, 'Collapsed headers pack in diagonal runs of five');
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const shapes = [...pathPanel.querySelectorAll('.co2prism-path-tile')].map(pathProjection);
+            check(!shapes.some((shape, index) => shapes.slice(index + 1).some(other => pathOverlap(shape, other))),
+              'Compact path images remain clear of each other at ' + size);
+          }
+          actor.testUserPermission = (_, permission) => permission !== 'OWNER'; bar.refreshActor();
+          contextClick(pathHeader('path12'));
+          check(pathGroup('path12').dataset.collapsed === 'true', 'Observer cannot change path flags');
+          pathHeader('path12').click();
+          check(pathSheets.at(-1) === 'path12', 'Observer can still consult an Item sheet');
+          actor.testUserPermission = () => true; bar.refreshActor();
+          await togglePathGroup(pathHeader('path12'));
+          check(pathCapacities('path12').length === 12 && !pathCapacities('path7').length, 'Individual reopening after global collapse stays independent');
+          await togglePathGroup(bar.pathsToggle);
+          await togglePathGroup(bar.pathsToggle);
+          settings.locked = false; bar.updateLock();
+          await bar.setPanelState('equipements', true);
+          check(pathPanel.hidden && !equipment.hidden && actor.flags.co2prism.panels.voies === false, 'Equipment closes Paths');
+          await togglePaths();
+          canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
+          check(pathPanel.hidden, 'Different actor has its own Paths panel state');
+          await togglePaths();
+          check(pathCapacities('encounter-path').length === 3 && pathCapacities('off-paths').length === 6, 'Encounter Paths and off-path inventory');
+          other.capacities = other.capacities.filter(capacity => capacity.system.path);
+          hooks.get('deleteItem')({ parent: other });
+          check(!pathGroup('off-paths'), 'No empty off-path category after an Item update');
+          await togglePathGroup(bar.pathsToggle);
+          check(other.flags.co2prism.pathCollapsed['encounter-path'] && !('off-paths' in other.flags.co2prism.pathCollapsed),
+            'Global collapse does not persist an absent Off-path category');
+          await togglePaths();
+          check(pathPanel.hidden && bar.pathsToggle.getAttribute('aria-expanded') === 'false', 'Paths button closes its own panel');
+          canvas.tokens.controlled = selected; bar.refreshActor();
+          check(!pathPanel.hidden && pathCapacities('path12').length === 12, 'Returning to actor restores its panel and items');
+          const learnedTile = () => pathPanel.querySelector('[data-item-id="path12rank2"]');
+          const learningCapacity = actor.items.get('path12rank2');
+          for (const locked of [true, false]) {
+            settings.locked = locked; bar.updateLock();
+            for (const learned of [true, false]) {
+              learningCapacity.system.learned = learned;
+              hooks.get('updateItem')(learningCapacity);
+              check((getComputedStyle(learnedTile()).boxShadow !== 'none') === learned,
+                'Native learning update toggles the halo in lock mode ' + locked);
+            }
+          }
+          const changedPath = actor.items.get('path12');
+          changedPath.name = 'Voie renommée';
+          changedPath.img = 'icons/svg/fire.svg';
+          hooks.get('updateItem')(changedPath);
+          check(pathGroup('path12').querySelector('.co2prism-path-label').textContent === changedPath.name &&
+            pathHeader('path12').querySelector('img').getAttribute('src') === changedPath.img, 'Path title and image follow native updates');
+          Object.assign(learningCapacity, { name: 'Capacité renommée', img: 'icons/svg/sun.svg' });
+          Object.assign(learningCapacity.system, { rank: 0, description: '<p>Description mise à jour</p>' });
+          hooks.get('updateItem')(learningCapacity);
+          await settled();
+          check(pathCapacities('path12')[0] === learnedTile() &&
+            learnedTile().querySelector('img').getAttribute('src') === learningCapacity.img &&
+            learnedTile().dataset.tooltipHtml.includes(learningCapacity.name) &&
+            learnedTile().dataset.tooltipHtml.includes('Description mise à jour'), 'Native rank, name, image and description update together');
+          learningCapacity.system.path = actor.items.get('path3').uuid;
+          hooks.get('updateItem')(learningCapacity);
+          check(pathCapacities('path3')[0] === learnedTile() && pathCapacities('path12').length === 11 &&
+            pathPanel.querySelectorAll('[data-item-id="path12rank2"]').length === 1, 'Reassociation moves the tile without duplicating it');
+          learningCapacity.system.path = null;
+          learningCapacity.system.learned = true;
+          hooks.get('updateItem')(learningCapacity);
+          check(pathCapacities('off-paths').includes(learnedTile()) && pathCapacities('path3').length === 3 &&
+            getComputedStyle(learnedTile()).boxShadow !== 'none', 'A detached and learned capacity moves to Off-path with its halo');
+          const newPath = makePathItem(actor, 'path', 'new-path', 20, { capacities: [] }, 'icons/svg/sun.svg');
+          actor.paths.push(newPath);
+          hooks.get('createItem')(newPath);
+          const newCapacity = makePathItem(actor, 'capacity', 'new-capacity', 1,
+            { path: newPath.uuid, rank: 1, learned: true }, 'icons/svg/fire.svg');
+          actor.capacities.push(newCapacity);
+          hooks.get('createItem')(newCapacity);
+          check(pathCapacities('new-path').length === 1, 'New embedded capacity appears in the new path');
+          await togglePathGroup(pathHeader('new-path'));
+          actor.items.delete(newCapacity.id);
+          actor.capacities = actor.capacities.filter(capacity => capacity !== newCapacity);
+          hooks.get('deleteItem')(newCapacity);
+          check(pathGroup('new-path').dataset.collapsed === 'true', 'Deleting an item preserves its path preference');
+          actor.items.delete(newPath.id);
+          actor.paths = actor.paths.filter(path => path !== newPath);
+          hooks.get('deleteItem')(newPath);
+          check(!pathGroup('new-path') && actor.flags.co2prism.pathCollapsed['new-path'] &&
+            pathCapacities('path12').length === 11, 'Deleting a collapsed path leaves no visual ghost or affects other paths');
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";
@@ -1144,7 +2348,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
     const execution = spawnSync(edge, ["--headless", "--no-sandbox", "--disable-gpu", "--in-process-gpu",
       "--disable-software-rasterizer", "--no-first-run", "--no-default-browser-check",
       "--allow-file-access-from-files", `--user-data-dir=${join(directory, "profile")}`,
-      "--window-size=2400,1400", "--virtual-time-budget=4000",
+      "--window-size=2400,1400", "--virtual-time-budget=6000",
       ...(process.env.CO2PRISM_SCREENSHOT ? [`--screenshot=${process.env.CO2PRISM_SCREENSHOT}`] : []),
       "--dump-dom", pathToFileURL(fixture).href], {
       encoding: "utf8", timeout: 25000, maxBuffer: 2000000, windowsHide: true
@@ -1168,7 +2372,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const persistedSlots = ${JSON.stringify(result.restoredSlots)};
           const actor = { uuid: "Actor.test", name: "Narrow", type: "character", system: {},
             testUserPermission: () => true, getSkillBonuses: () => [],
-            flags: { co2prism: { activePreset: 3, panels: { combat: false, competences: true }, presets: { 3: { slots: persistedSlots } } } },
+            flags: { co2prism: { hands: { active: 3 }, panels: { combat: false, competences: true }, shortcuts: persistedSlots } },
             getFlag(scope, key) { return key.split(".").reduce((value, part) => value?.[part], this.flags[scope]); },
             async setFlag(scope, key, value) {
               let target = this.flags[scope]; const parts = key.split(".");
@@ -1182,11 +2386,11 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           canvas.tokens.controlled = [{ actor, document: { baseActor: actor } }];
           bar.refreshActor();
           bar.position = { x: innerWidth - 432, y: 350 }; bar.layout();
-          await bar.selectCombatPreset(3);
+          await bar.setPanelState("combat", true);
           const root = document.getElementById("co2prism-bar"), scale = 430 / 724;
           const [first, second] = bar.combatRows;
-          check(first.children.length === 3 && second.children.length === 4, "Restauration après relance du navigateur incorrecte");
-          check((731 + bar.combatRowWidths[1]) * scale + bar.panelOffset.x > innerWidth,
+          check(first.children.length === 1 && second.children.length === 4, "Restauration après relance du navigateur incorrecte");
+          check((948 + bar.combatRowWidths[1]) * scale + bar.panelOffset.x > innerWidth,
             "Le manque de place n'est pas réel");
           check(first.scrollWidth <= first.clientWidth && first.scrollLeft === 0, "Première ligne inutilement réduite");
           check(second.scrollWidth > second.clientWidth, "Défilement nécessaire absent");

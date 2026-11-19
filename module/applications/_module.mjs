@@ -7,9 +7,27 @@ import { MovementZones } from "../movement/movement-zones.mjs";
 const MODULE = "co2prism";
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
-const COMBAT_ROW_ORIGINS = [522, 731];
-const BUDGET_ORIGIN = 522;
+const COMBAT_ROW_ORIGIN = 948;
+const COMBAT_SLOT_SIZE = 172;
+const COMBAT_SLOT_GAP = 8;
+const MAX_SHORTCUT_ACTIONS = 4;
+const SHORTCUT_PREVIEW_DELAY = 350;
+const BUDGET_ORIGIN = 308 + 43 + 20;
+const MOVEMENT_ORIGIN = 246;
+const MOVEMENT_BOTTOM = 28;
 const BASE_BOTTOM = 569;
+const EQUIPMENT_COLUMNS = 6;
+const CAPACITY_COLUMNS = 5;
+const PANELS = ["combat", "competences", "equipements", "voies"];
+const EXCLUSIVE_PANELS = { equipements: "voies", voies: "equipements" };
+// Depuis le portrait vers l'extérieur du volet.
+const EQUIPMENT_GROUPS = [
+  ["weapon", "fa-axe", ["weapon"]],
+  ["protection", "fa-helmet-battle", ["armor", "shield"]],
+  ["consumable", "fa-flask-round-potion", ["consumable"]],
+  ["misc", "fa-backpack", ["misc"]],
+  ["containers", "fa-treasure-chest", []]
+];
 let bar;
 
 function economyEnabled() {
@@ -62,6 +80,7 @@ class PrismBar {
     this.movementNotifications = new MovementNotifications();
     this.movementContextVersion = 0;
     this.movementZones = new MovementZones();
+    this.changingHands = new WeakSet();
   }
 
   async render() {
@@ -77,14 +96,25 @@ class PrismBar {
     this.portrait = this.element.querySelector(".co2prism-portrait");
     this.name = this.element.querySelector(".co2prism-name");
     this.combatPanel = this.element.querySelector(".co2prism-combat");
+    this.combatToggle = this.element.querySelector(".co2prism-combat-toggle");
+    this.combatToggle.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.writeConfiguration("panels.combat", value => !value);
+    });
     this.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key =>
       [key, this.element.querySelector(`[data-co2prism-combat-value="${key}"]`)]));
     this.combatEffects = this.element.querySelector(".co2prism-effects");
     this.combatSlots = this.element.querySelector(".co2prism-combat-slots");
     this.combatRows = [...this.combatSlots.querySelectorAll(".co2prism-combat-row")];
-    this.combatLine = this.element.querySelector(".co2prism-combat-line");
-    this.combatArrow = this.element.querySelector(".co2prism-combat-arrow");
+    this.conditionalZone = this.combatSlots.querySelector(".co2prism-conditional-zone");
+    this.shortcutPreview = this.element.querySelector(".co2prism-shortcut-preview");
+    this.presetActionMenu = this.element.querySelector(".co2prism-preset-action-menu");
+    for (const row of this.combatRows) row.addEventListener("scroll", () => this.clearShortcutPreview());
+    this.combatHands = Object.fromEntries([...this.combatSlots.querySelectorAll("[data-co2prism-hand-container]")]
+      .map(node => [node.dataset.co2prismHandContainer, node]));
     this.budgetScroll = this.element.querySelector(".co2prism-budget-scroll");
+    this.timeCommands = this.element.querySelector(".co2prism-time-commands");
     this.budgetContent = this.element.querySelector(".co2prism-budget-content");
     this.budgetBar = this.element.querySelector(".co2prism-time-bar");
     this.budgetCommands = [...this.element.querySelectorAll("[data-co2prism-time]")];
@@ -103,9 +133,11 @@ class PrismBar {
       event.preventDefault(); event.stopPropagation(); void this.toggleMovementZones();
     });
     this.movementZonesObserver = new MutationObserver(() => {
+      if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
       if (!this.element.isConnected) { this.movementZones.clear(); this.movementZonesObserver.disconnect(); }
     });
     this.movementZonesObserver.observe(document.body, { childList: true });
+    this.movementZonesObserver.observe(this.element, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
     this.movementToggle.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation();
       if (event.detail > 1) return;
@@ -126,6 +158,7 @@ class PrismBar {
     });
     // Observer le début/la fin du drag, sans intercepter les dépôts hors Prism.
     document.addEventListener("dragstart", event => {
+      this.clearShortcutPreview();
       if (this.combatSlots.contains(event.target)) return;
       this.refreshActor();
       this.slotDrag = { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
@@ -143,6 +176,8 @@ class PrismBar {
       event.stopPropagation();
       void this.writeConfiguration("panels.competences", value => !value);
     });
+    this.connectEquipment();
+    this.connectPaths();
     this.skillNodes = ABILITIES.map(key => {
       const button = this.element.querySelector(`[data-co2prism-ability="${key}"]`);
       button.addEventListener("click", event => {
@@ -158,7 +193,7 @@ class PrismBar {
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        void this.selectCombatPreset(Number(button.dataset.co2prismPreset));
+        void this.setActivePreset(Number(button.dataset.co2prismPreset), event.shiftKey);
       });
     }
     this.actions = [...this.element.querySelectorAll("[data-co2prism-action]")];
@@ -177,11 +212,23 @@ class PrismBar {
     this.lock.addEventListener("click", () => {
       void game.settings.set(MODULE, "locked", !game.settings.get(MODULE, "locked"));
     });
-    this.handle.addEventListener("pointerdown", event => this.startDrag(event));
+    this.handle.addEventListener("pointerdown", event => {
+      if (event.button === 0) this.portraitMoved = false;
+      this.startDrag(event);
+    });
     this.handle.addEventListener("pointermove", event => this.moveDrag(event));
     this.handle.addEventListener("pointerup", event => this.endDrag(event));
     this.handle.addEventListener("pointercancel", event => this.endDrag(event));
     this.handle.addEventListener("lostpointercapture", event => this.endDrag(event));
+    this.portrait.addEventListener("click", event => {
+      if (event.detail === 1) this.portraitFirstClickMoved = this.portraitMoved;
+    });
+    this.portrait.addEventListener("dblclick", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!this.portraitFirstClickMoved && !this.portraitMoved) void this.performAction("sheet");
+    });
     window.addEventListener("resize", () => this.layout());
     this.updateLock();
     this.layout();
@@ -230,7 +277,10 @@ class PrismBar {
       const relevant = Object.keys(changed).some(key => ["system", "img", "name", "ownership", "flags"].includes(key)
         || key.startsWith("system.") || key.startsWith("ownership.")
         || key === "flags.co2prism" || key === "flags.-=co2prism" || key.startsWith("flags.co2prism."));
-      if (relevant && this.concernsActor(actor)) this.refreshActor();
+      if (relevant && this.concernsActor(actor)) {
+        if (Object.keys(changed).some(key => /^(system|ownership)(\.|$)/.test(key))) this.invalidateShortcutVisibility();
+        this.refreshActor();
+      }
     });
     Hooks.on("deleteActor", actor => {
       if (this.concernsActor(actor)) this.refreshActor(false);
@@ -238,7 +288,10 @@ class PrismBar {
     Hooks.on("updateToken", (token, changed) => {
       const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta", "ownership"].includes(key)
         || key.startsWith("delta."));
-      if (relevant && token === this.token?.document) this.refreshActor();
+      if (relevant && token === this.token?.document) {
+        this.invalidateShortcutVisibility();
+        this.refreshActor();
+      }
     });
     Hooks.on("deleteToken", token => {
       if (token === this.movementZones.token) this.movementZones.clear();
@@ -250,7 +303,10 @@ class PrismBar {
       for (const event of ["create", "update", "delete"]) {
         Hooks.on(`${event}${type}`, document => {
           const parent = document.parent?.documentName === "Item" ? document.parent.parent : document.parent;
-          if (this.concernsActor(parent)) this.refreshActor();
+          if (this.concernsActor(parent)) {
+            this.invalidateShortcutVisibility();
+            this.refreshActor();
+          }
         });
       }
     }
@@ -268,6 +324,7 @@ class PrismBar {
     const candidate = token?.actor;
     // Comme les feuilles CO2, réserver les statistiques aux observateurs autorisés.
     const actor = candidate?.testUserPermission(game.user, "OBSERVER") ? candidate : null;
+    if (actor !== this.actor || token !== this.token) this.shortcutVisibilityCache = null;
     this.token = token;
     this.actor = actor;
     if (this.slotDrag && (this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
@@ -284,7 +341,7 @@ class PrismBar {
       if (nodes.text.textContent !== text) nodes.text.textContent = text;
       nodes.fill.style.setProperty("--fill", `${fill}%`);
       // Réduire seulement les longues valeurs pour les garder dans leur zone.
-      const width = 110;
+      const width = 92;
       nodes.text.style.setProperty("--text-size", Math.min(36, width / (text.length * 0.58)));
       const label = `${game.i18n.localize(`CO2PRISM.Gauges.${key}`)} : ${text}`;
       nodes.fill.title = label;
@@ -298,12 +355,452 @@ class PrismBar {
       : game.i18n.localize("CO2PRISM.NoActor"));
     this.updateActions();
     this.configuration = this.readConfiguration(actor);
-    if (this.slotDrag && this.slotDrag.preset !== this.configuration.activePreset) this.slotDrag.cancelled = true;
     this.updatePresets();
     const skillsChanged = this.updateSkills();
+    // Fermer d'abord le volet qui partage la même zone.
+    if (this.configuration.panels.voies) {
+      this.updateEquipment();
+      this.updatePaths();
+    } else {
+      this.updatePaths();
+      this.updateEquipment();
+    }
     const combatChanged = this.updateCombat();
     const movementChanged = this.updateMovementPanel();
     if (skillsChanged || combatChanged || movementChanged) this.layout({ preserveAnchor: true });
+  }
+
+  readPathGroups(actor) {
+    // Les groupes de la feuille enrichissent aussi les capacités liées. Prism ne lit que les Items embarqués.
+    const paths = [...(actor.paths ?? [])].sort((a, b) => a.sort - b.sort);
+    const groups = new Map(paths.map(path => [path.id, { path, capacities: [] }]));
+    const resolve = (uuid, type) => {
+      if (!uuid || typeof uuid !== "string") return null;
+      const item = actor.getEmbeddedItemByUuid(uuid);
+      const base = actor.isToken ? this.token?.document.baseActor : null;
+      if (item?.type !== type || (item.uuid !== uuid && base?.items.get(item.id)?.uuid !== uuid)) return null;
+      return item;
+    };
+    const seen = new Set();
+    const add = (group, capacity) => {
+      if (seen.has(capacity.id)) return;
+      seen.add(capacity.id);
+      group.capacities.push(capacity);
+    };
+    for (const group of groups.values()) {
+      for (const uuid of group.path.system.capacities) {
+        const capacity = resolve(uuid, "capacity");
+        // Un détachement explicite prime sur une ancienne liste de la voie.
+        if (!capacity || capacity.system.path === null || capacity.system.path === "") continue;
+        const linkedPath = resolve(capacity.system.path, "path");
+        if (!linkedPath || linkedPath.id === group.path.id) add(group, capacity);
+      }
+    }
+    const offPaths = { path: null, capacities: [] };
+    for (const capacity of actor.capacities ?? []) {
+      const path = resolve(capacity.system.path, "path");
+      const group = groups.get(path?.id);
+      if (group) add(group, capacity);
+      // Un lien encore non résolu reste distinct d'une capacité sans voie.
+      else if (!capacity.system.path) add(offPaths, capacity);
+    }
+    const result = [...groups.values()];
+    if (offPaths.capacities.length) result.push(offPaths);
+    for (const group of result) group.capacities.sort((a, b) => a.system.rank - b.system.rank);
+    return result;
+  }
+
+  connectPaths() {
+    this.pathsPanel = this.element.querySelector(".co2prism-paths");
+    this.pathsToggle = this.element.querySelector(".co2prism-paths-toggle");
+    this.pathsToggle.addEventListener("click", event => {
+      event.stopPropagation();
+      void this.writeConfiguration("panels.voies", value => !value);
+    });
+    this.pathsToggle.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.togglePathGroups();
+    });
+    this.pathsPanel.addEventListener("click", event => {
+      const tile = event.target.closest(".co2prism-path-tile[data-item-id]");
+      if (!tile || event.button !== 0 || this.pathsPanel.hidden) return;
+      event.stopPropagation();
+      const item = this.actor?.items.get(tile.dataset.itemId);
+      if (item?.uuid === tile.dataset.itemUuid && ["path", "capacity"].includes(item.type)) void this.openItemSheet(item);
+    });
+    this.pathsPanel.addEventListener("contextmenu", event => {
+      const header = event.target.closest(".co2prism-path-header");
+      if (!header || this.pathsPanel.hidden) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.togglePathGroups(header.closest(".co2prism-path-group").dataset.pathKey);
+    });
+  }
+
+  togglePathGroups(key) {
+    const { actor, token } = this;
+    if (!this.canConfigure(actor)) return Promise.resolve(false);
+    return this.queueConfiguration(actor, async () => {
+      if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)) return false;
+      const keys = this.readPathGroups(actor).map(({ path }) => path?.id ?? "off-paths");
+      const targets = key === undefined ? keys : keys.filter(id => id === key);
+      if (!targets.length) return false;
+      const { pathCollapsed } = this.readConfiguration(actor);
+      const next = !targets.every(id => pathCollapsed.has(id));
+      if (key === undefined) {
+        const states = Object.fromEntries([...pathCollapsed].map(id => [id, true]));
+        for (const id of targets) states[id] = next;
+        await actor.setFlag(MODULE, "pathCollapsed", states);
+      } else await actor.setFlag(MODULE, `pathCollapsed.${key}`, next);
+      return true;
+    });
+  }
+
+  updatePaths() {
+    if (!this.pathsPanel) return;
+    const open = Boolean(this.actor && this.configuration.panels.voies);
+    this.pathsPanel.hidden = !open;
+    this.pathsToggle.disabled = !this.canConfigure();
+    this.pathsToggle.setAttribute("aria-expanded", String(open));
+    const label = game.i18n.localize(open ? "CO2PRISM.Paths.Close" : "CO2PRISM.Paths.Open");
+    this.pathsToggle.setAttribute("aria-label", label);
+    this.pathsToggle.title = this.pathsToggle.disabled ? label
+      : `${label}\n${game.i18n.localize("CO2PRISM.Paths.ToggleAllHint")}`;
+    const dismissTooltip = () => {
+      if (game.tooltip?.element && this.pathsPanel.contains(game.tooltip.element)) game.tooltip.deactivate();
+    };
+    if (!open) {
+      dismissTooltip();
+      return;
+    }
+
+    const groups = this.readPathGroups(this.actor);
+    const itemSignature = item => [item.uuid, item.name, item.img, this.itemTooltipDescription(item), item.isOwner];
+    const signature = JSON.stringify(groups.map(({ path, capacities }) => [
+      path && itemSignature(path), capacities.map(capacity => [...itemSignature(capacity), capacity.system.learned]),
+      this.configuration.pathCollapsed.has(path?.id ?? "off-paths")
+    ]));
+    if (signature === this.pathsSignature) return;
+    this.pathsSignature = signature;
+    dismissTooltip();
+    let compactColumn = 0;
+    this.pathsPanel.replaceChildren(...groups.map(({ path, capacities }) => {
+      const key = path?.id ?? "off-paths";
+      const collapsed = this.configuration.pathCollapsed.has(key);
+      const rows = collapsed ? 1 : Math.max(1, Math.ceil(capacities.length / CAPACITY_COLUMNS));
+      const group = document.createElement("section");
+      group.className = "co2prism-path-group";
+      group.dataset.pathKey = key;
+      group.dataset.collapsed = String(collapsed);
+      group.style.setProperty("--rows", rows);
+      if (collapsed) {
+        group.style.setProperty("--compact-column", compactColumn);
+        compactColumn = (compactColumn + 1) % CAPACITY_COLUMNS;
+      } else compactColumn = 0;
+      const title = document.createElement("span");
+      title.className = "co2prism-path-label";
+      title.textContent = path?.name ?? game.i18n.localize("CO2PRISM.Paths.OffPaths");
+      group.setAttribute("aria-label", title.textContent);
+      const tile = (item, column, row) => {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = "co2prism-path-tile";
+        node.dataset.itemId = item.id;
+        node.dataset.itemUuid = item.uuid;
+        node.style.setProperty("--column", column);
+        node.style.setProperty("--row", row);
+        const image = document.createElement("img");
+        image.src = item.img || "icons/svg/item-bag.svg";
+        image.alt = item.name;
+        image.draggable = false;
+        node.append(image);
+        void this.prepareItemTooltip(node, item, this.itemTooltipDescription(item));
+        return node;
+      };
+      const header = path ? tile(path, 0, rows - 1) : document.createElement("span");
+      header.classList.add("co2prism-path-header");
+      if (!path) {
+        header.style.setProperty("--row", rows - 1);
+        header.classList.add("co2prism-path-off");
+        header.dataset.tooltipText = title.textContent;
+        const icon = document.createElement("i");
+        icon.className = "fa-solid fa-circle-star";
+        icon.setAttribute("aria-hidden", "true");
+        header.append(icon);
+      }
+      group.append(title, header);
+      if (!collapsed) capacities.forEach((capacity, index) => {
+        const node = tile(capacity, index % CAPACITY_COLUMNS + 1, rows - 1 - Math.floor(index / CAPACITY_COLUMNS));
+        node.dataset.learned = String(capacity.system.learned === true);
+        group.append(node);
+      });
+      return group;
+    }));
+  }
+
+  connectEquipment() {
+    this.equipmentPanel = this.element.querySelector(".co2prism-equipment");
+    this.equipmentToggle = this.element.querySelector(".co2prism-equipment-toggle");
+    this.equipmentMenu = this.element.querySelector(".co2prism-equipment-menu");
+    this.equipmentToggle.addEventListener("click", event => {
+      event.stopPropagation();
+      void this.writeConfiguration("panels.equipements", value => !value);
+    });
+    this.equipmentToggle.addEventListener("contextmenu", event => {
+      if (!this.canConfigure()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.writeConfiguration("equipmentCollapsed", states => !Object.values(states).every(Boolean));
+    });
+    this.equipmentPanel.addEventListener("click", event => {
+      const item = this.equipmentItem(event);
+      if (!item || event.button !== 0) return;
+      event.stopPropagation();
+      void this.openItemSheet(item);
+    });
+    this.equipmentPanel.addEventListener("contextmenu", event => {
+      const actor = this.actor;
+      const item = this.equipmentItem(event);
+      if (!item) return;
+      if (game.settings.get(MODULE, "locked")) {
+        this.openEquipmentMenu(event, item);
+        return;
+      }
+      if (!this.canConfigure(actor)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.queueConfiguration(actor, async () => {
+        if (game.settings.get(MODULE, "locked") || !this.canConfigure(actor) || actor.items.get(item.id) !== item) return false;
+        const path = `hiddenEquipment.${item.id}`;
+        if (this.readConfiguration(actor).hiddenEquipment.has(item.id)) await actor.unsetFlag(MODULE, path);
+        else await actor.setFlag(MODULE, path, true);
+        return true;
+      });
+    });
+    this.equipmentGroups = EQUIPMENT_GROUPS.map(([key, glyph, subtypes]) => {
+      const group = document.createElement("div");
+      group.className = "co2prism-equipment-group";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "co2prism-equipment-category";
+      const icon = document.createElement("i");
+      icon.className = `fa-solid ${glyph}`;
+      icon.setAttribute("aria-hidden", "true");
+      button.append(icon);
+      const items = document.createElement("div");
+      items.className = "co2prism-equipment-items";
+      items.id = `co2prism-equipment-${key}`;
+      items.setAttribute("role", "group");
+      button.setAttribute("aria-controls", items.id);
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+        void this.writeConfiguration(`equipmentCollapsed.${key}`, value => !value);
+      });
+      group.append(button, items);
+      this.equipmentPanel.append(group);
+      return { key, subtypes, group, button, items };
+    });
+  }
+
+  equipmentItem(event) {
+    const tile = event.target.closest(".co2prism-equipment-tile[data-item-id]");
+    if (!tile || !this.equipmentPanel.contains(tile) || this.equipmentPanel.hidden || tile.closest("[hidden]")) return null;
+    return this.actor?.items.get(tile.dataset.itemId);
+  }
+
+  equipmentOperationItem({ actor, token, itemId }, config = this.readConfiguration(actor)) {
+    if (this.actor !== actor || this.token !== token || !game.settings.get(MODULE, "locked")
+      || !config.panels.equipements || config.hiddenEquipment.has(itemId)) return null;
+    const item = actor.items?.get(itemId);
+    if (!item || !["equipment", "container"].includes(item.type) || actor.containedItemUuids?.has(item.uuid)
+      || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
+      || !item.canUserModify?.(game.user, "update")) return null;
+    return item;
+  }
+
+  equipmentOperations(actor, item) {
+    const operations = [];
+    const { properties, quantity, equipped, actions } = item.system;
+    if (properties?.stackable === true && Number.isSafeInteger(quantity?.current) && quantity.current >= 0
+      && typeof item.update === "function") {
+      if (quantity.current > 0) operations.push({ key: "Decrease", quantity: quantity.current - 1 });
+      // CO2 n'affiche un plafond que lorsqu'il est strictement positif.
+      if (quantity.current < Number.MAX_SAFE_INTEGER && (!(quantity.max > 0) || quantity.current < quantity.max)) {
+        operations.push({ key: "Increase", quantity: quantity.current + 1 });
+      }
+    }
+    if (Array.isArray(actions)) for (const action of actions) {
+      if (typeof action?.type !== "string" || !action.type.trim()
+        || (!action.hasConditions && action.properties?.visible === false)) continue;
+      const reference = { itemId: item.id, source: item.uuid, indice: action.indice };
+      if (this.resolveShortcut(actor, reference)?.action !== action) continue;
+      const toggle = this.shortcutCanToggle(action);
+      if (toggle ? typeof actor.activateAction !== "function" : typeof game.system.api?.macros?.useAction !== "function") continue;
+      operations.push({ key: "Action", name: action.actionName || item.name, action, reference });
+    }
+    if (item.type === "equipment" && properties?.equipable === true && typeof equipped === "boolean"
+      && typeof actor.toggleEquipmentEquipped === "function") {
+      operations.push({ key: equipped ? "Unequip" : "Equip" });
+    }
+    return operations;
+  }
+
+  closeEquipmentMenu() {
+    if (this.equipmentMenu?.matches(":popover-open")) this.equipmentMenu.hidePopover();
+  }
+
+  openEquipmentMenu(event, item) {
+    this.closeEquipmentMenu();
+    const context = { actor: this.actor, token: this.token, itemId: item.id, equipment: true };
+    if (this.busyEquipment || this.busyAction || this.equipmentOperationItem(context) !== item) return;
+    const operations = this.equipmentOperations(context.actor, item);
+    if (!operations.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    game.tooltip?.deactivate();
+    const menu = this.equipmentMenu;
+    menu.replaceChildren(...operations.map(operation => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = game.i18n.format(`CO2PRISM.Equipment.Operations.${operation.key}`, { action: operation.name });
+      button.addEventListener("click", event => {
+        if (!menu.matches(":popover-open") || event.detail > 1) return;
+        this.closeEquipmentMenu();
+        void this.runEquipmentOperation(event, context, operation);
+      });
+      return button;
+    }));
+    this.showActionPopover(menu, event, event.target.closest(".co2prism-equipment-tile"));
+  }
+
+  showActionPopover(menu, event, anchor) {
+    const tile = anchor.getBoundingClientRect();
+    const x = event.clientX || tile.left;
+    const y = event.clientY || tile.bottom;
+    menu.showPopover();
+    menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(y, innerHeight - menu.offsetHeight - 4))}px`;
+    menu.firstElementChild.focus({ preventScroll: true });
+  }
+
+  async runEquipmentOperation(event, context, chosen) {
+    if (this.busyEquipment || this.busyAction) return;
+    const item = this.equipmentOperationItem(context);
+    const operation = item && this.equipmentOperations(context.actor, item)
+      .find(entry => entry.key === chosen.key && entry.action === chosen.action);
+    if (!operation) return;
+    if (operation.action) {
+      await this.executeShortcut(event, { ...context, ...operation });
+      return;
+    }
+    this.busyEquipment = true;
+    try {
+      if (operation.quantity !== undefined) await item.update({ "system.quantity.current": operation.quantity });
+      else await context.actor.toggleEquipmentEquipped(item.id, event.shiftKey);
+    } catch (error) {
+      console.error("co2prism | Equipment operation", item.uuid, error);
+      ui.notifications.error(game.i18n.localize("CO2PRISM.ActionError"));
+    } finally {
+      this.busyEquipment = false;
+      this.refreshActor();
+    }
+  }
+
+  async openItemSheet(item) {
+    try {
+      if (!item.testUserPermission(game.user, "LIMITED")) return;
+      const sheet = item.sheet;
+      if (sheet?.isVisible !== false) await sheet?.render?.(true);
+    } catch (error) {
+      console.warn("co2prism | Item sheet", item.uuid, error);
+    }
+  }
+
+  itemTooltipDescription(item) {
+    return item.testUserPermission(game.user, "OBSERVER") ? item.system.description : "";
+  }
+
+  async prepareItemTooltip(tile, item, description) {
+    const name = `<strong>${foundry.utils.escapeHTML(item.name)}</strong>`;
+    tile.dataset.tooltipHtml = name;
+    if (!description) return;
+    try {
+      const editor = foundry.applications.ux.TextEditor.implementation;
+      const html = await editor.enrichHTML(description, { relativeTo: item, secrets: item.isOwner });
+      tile.dataset.tooltipHtml = `${name}${foundry.utils.cleanHTML(html)}`;
+      if (game.tooltip?.element === tile) game.tooltip.activate(tile);
+    } catch (error) {
+      console.warn("co2prism | Item tooltip", item.uuid, error);
+    }
+  }
+
+  updateEquipment() {
+    if (!this.equipmentPanel) return;
+    this.closeEquipmentMenu();
+    const open = Boolean(this.actor && this.configuration.panels.equipements);
+    const canConfigure = this.canConfigure();
+    this.equipmentPanel.hidden = !open;
+    this.equipmentToggle.disabled = !canConfigure;
+    this.equipmentToggle.setAttribute("aria-expanded", String(open));
+    const label = game.i18n.localize(open ? "CO2PRISM.Equipment.Close" : "CO2PRISM.Equipment.Open");
+    this.equipmentToggle.setAttribute("aria-label", label);
+    this.equipmentToggle.title = canConfigure
+      ? `${label}\n${game.i18n.localize("CO2PRISM.Equipment.ToggleAllHint")}` : label;
+    if (!open) return;
+
+    const inventory = new Map((this.actor.inventory ?? []).map(({ category, items }) => [category, items]));
+    const seen = new Set(this.actor.containedItemUuids);
+    const locked = game.settings.get(MODULE, "locked");
+    const { hiddenEquipment } = this.configuration;
+    let compactColumn = 0;
+    for (const entry of this.equipmentGroups) {
+      const { key, subtypes, group, button, items } = entry;
+      const expanded = !this.configuration.equipmentCollapsed[key];
+      group.style.setProperty("--compact-column", expanded ? 0 : compactColumn);
+      compactColumn = expanded ? 0 : compactColumn + 1;
+      const label = game.i18n.localize(`CO2PRISM.Equipment.Groups.${key}`);
+      button.disabled = !canConfigure;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", label);
+      button.title = game.i18n.format(expanded ? "CO2PRISM.Equipment.Collapse" : "CO2PRISM.Equipment.Expand", { category: label });
+      items.setAttribute("aria-label", label);
+      items.hidden = !expanded;
+      const source = key === "containers" ? this.actor.containers ?? []
+        : subtypes.flatMap(subtype => inventory.get(subtype) ?? []);
+      // Le tri stable conserve l'ordre natif à sort égal au sein d'un sous-type.
+      const displayed = [...source].sort((a, b) => a.sort - b.sort).filter(item => {
+        if (seen.has(item.uuid)) return false;
+        seen.add(item.uuid);
+        return expanded && (!locked || !hiddenEquipment.has(item.id));
+      });
+      const rows = Math.max(1, Math.ceil(displayed.length / EQUIPMENT_COLUMNS));
+      group.style.setProperty("--rows", rows);
+      const descriptions = displayed.map(item => this.itemTooltipDescription(item));
+      const signature = JSON.stringify(displayed.map((item, index) =>
+        [item.uuid, item.name, item.img, hiddenEquipment.has(item.id), descriptions[index], item.isOwner]));
+      if (signature === entry.signature) continue;
+      entry.signature = signature;
+      items.replaceChildren(...displayed.map((item, index) => {
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = "co2prism-equipment-tile";
+        tile.dataset.itemId = item.id;
+        if (hiddenEquipment.has(item.id)) {
+          tile.classList.add("co2prism-equipment-masked");
+          tile.setAttribute("aria-label", game.i18n.format("CO2PRISM.Equipment.HiddenItem", { item: item.name }));
+        }
+        tile.style.setProperty("--column", index % EQUIPMENT_COLUMNS + 1);
+        tile.style.setProperty("--row", Math.floor(index / EQUIPMENT_COLUMNS));
+        const image = document.createElement("img");
+        image.src = item.img || "icons/svg/item-bag.svg";
+        image.alt = item.name;
+        image.draggable = false;
+        tile.append(image);
+        void this.prepareItemTooltip(tile, item, descriptions[index]);
+        return tile;
+      }));
+    }
   }
 
   movementToken() {
@@ -512,15 +1009,15 @@ class PrismBar {
     const settled = Boolean(token && this.movementResults.get(token)?.success && this.movementResults.get(token).sessionId === view?.state.sessionId);
     const busy = Boolean(token && (this.movementResets.has(token) || validating || this.movementClosures.has(token)));
     const error = token ? this.movementErrors.get(token) : null;
-    const signature = JSON.stringify([open, available, token?.uuid ?? token?.id, view, busy, settled, validating, error,
+    const combatOpen = this.configuration.panels.combat;
+    const signature = JSON.stringify([open, combatOpen, available, token?.uuid ?? token?.id, view, busy, settled, validating, error,
       this.movementZones.visible, this.movementZones.busy, this.movementZones.diagnostic, this.movementZones.stats]);
     if (signature === this.movementSignature) return false;
     this.movementSignature = signature;
     const localize = key => game.i18n.localize(`CO2PRISM.Movement.${key}`);
     const format = (key, data) => game.i18n.format(`CO2PRISM.Movement.${key}`, data);
     this.movementPanel.hidden = !open;
-    this.movementToggle.disabled = !token || busy;
-    this.movementToggle.textContent = game.i18n.localize("CO2PRISM.Combat.Movement");
+    this.movementToggle.disabled = !token || !combatOpen || busy;
     this.movementToggle.classList.toggle("co2prism-movement-unavailable", available <= 0);
     this.movementToggle.setAttribute("aria-pressed", String(open));
     this.movementToggle.setAttribute("aria-expanded", String(open));
@@ -533,7 +1030,7 @@ class PrismBar {
     this.movementReset.disabled = busy || settled || !view?.state.segmentCount || available <= 0;
     if (this.movementValidate) this.movementValidate.disabled = busy || !view?.state.segmentCount || (available <= 0 && !settled);
     if (available <= 0 || !view) return true;
-    const { state, valid, capacity, excess } = view;
+    const { state, valid, remaining, excess } = view;
     if (this.movementZonesButton) {
       const unsupported = this.movementZones.supported(token, state.start);
       this.movementZonesButton.disabled = busy || settled || (!this.movementZones.visible && Boolean(unsupported));
@@ -542,12 +1039,13 @@ class PrismBar {
       this.movementZonesButton.title = localize(diagnostic || unsupported ? `Zones${diagnostic ?? unsupported}` : this.movementZones.visible ? "ZonesHide" : "ZonesShow");
       this.movementZonesButton.setAttribute("aria-label", this.movementZonesButton.title);
     }
-    const data = { used: state.cellsUsed, capacity, actions: 1, available, cells: state.cellsPerAction, excess };
     query("summary").hidden = !view.budgetActive;
-    query("summary").textContent = format(available === 1 ? "ActionsOne" : "Actions", data);
+    query("summary").textContent = valid
+      ? format(remaining <= 1 ? "CellsAvailableOne" : "CellsAvailable", { cells: remaining })
+      : localize("SpeedUnavailable");
     const message = query("message");
     message.textContent = !valid ? localize("Unavailable") : !state.segmentCount ? localize("NoMovement")
-      : excess > 0 ? format(excess === 1 ? "ExcessOne" : "Excess", data) : localize("Normal");
+      : excess > 0 ? format(excess === 1 ? "ExcessOne" : "Excess", { excess }) : localize("Normal");
     message.classList.toggle("co2prism-movement-excess", excess > 0);
     query("error").hidden = !error;
     const errorKey = { "movement-in-progress": "Busy", "invalid-measurement": "InvalidValidation", "context-changed": "ContextChanged", "validation-failed": "ValidationFailed", "closure-pending": "ClosurePending" }[error] ?? "ReturnFailed";
@@ -586,6 +1084,12 @@ class PrismBar {
   }
 
   destroy() {
+    this.conditionRender = null;
+    this.conditionalActionGroups = [];
+    this.renderConditionalRows([]);
+    this.clearShortcutPreview();
+    this.closePresetActionMenu();
+    this.closeEquipmentMenu();
     this.movementDestroyed = true;
     this.movementZones.clear(); this.movementZonesObserver?.disconnect();
   }
@@ -605,7 +1109,7 @@ class PrismBar {
     for (const { key, button, value, count } of this.skillNodes) {
       const modifier = this.actor.system?.abilities?.[key]?.value;
       value.textContent = Number.isFinite(modifier) ? `${modifier >= 0 ? "+" : ""}${modifier}` : unavailable;
-      value.style.setProperty("--co2prism-skill-size", Math.min(52, 90 / (value.textContent.length * 0.55)));
+      value.style.setProperty("--co2prism-skill-size", Math.min(40, 82 / (value.textContent.length * 0.55)));
       // Le système inclut déjà les bonus généraux et conditionnels.
       let bonuses = null;
       try {
@@ -652,21 +1156,57 @@ class PrismBar {
     if (!actor) return [];
     const entries = [], statuses = new Set();
     for (const effect of actor.appliedEffects ?? []) {
-      entries.push({ name: effect.name, img: effect.img });
-      for (const id of effect.statuses ?? []) statuses.add(id);
+      const effectStatuses = Array.from(effect.statuses ?? []);
+      let description, duration, durationTitle;
+      try { description = effect.description; } catch { /* Description indisponible. */ }
+      try {
+        const nativeDuration = effect.duration;
+        duration = nativeDuration?.label;
+        if (effectStatuses.length) {
+          // Un statut permanent reçoit aussi le libellé natif « Aucun ».
+          if ((nativeDuration?.value !== undefined && (!Number.isFinite(nativeDuration.value) || nativeDuration.value <= 0))
+            || (nativeDuration?.remaining !== undefined && !Number.isFinite(nativeDuration.remaining))
+            || duration === game.i18n.localize("COMMON.None")) duration = undefined;
+          durationTitle = game.i18n.localize("EFFECT.DURATION.Label");
+          if (durationTitle === "EFFECT.DURATION.Label") durationTitle = game.i18n.localize("CO.ui.duration");
+          if (durationTitle === "CO.ui.duration") durationTitle = "";
+        }
+      } catch { /* Durée native indisponible. */ }
+      entries.push({ name: effect.name, img: effect.img, description, duration, durationTitle });
+      for (const id of effectStatuses) statuses.add(id);
     }
     for (const effect of actor.system?.currentEffects ?? []) {
       // Le modèle CO2 expose l'Item source des effets personnalisés.
-      let img;
+      let img, description;
       try { img = effect.sourceParts?.item?.img; } catch { /* Source supprimée ou inaccessible. */ }
-      entries.push({ name: effect.name, img });
+      try { description = effect.tooltip; } catch { /* Conserver le nom si CO2 ne résout plus la source. */ }
+      entries.push({ name: effect.name, img, description, html: true });
     }
     for (const id of actor.statuses ?? []) {
       if (statuses.has(id)) continue;
       const status = globalThis.CONFIG?.statusEffects?.find(entry => entry.id === id);
-      entries.push({ name: status ? game.i18n.localize(status.name) : id, img: status?.img });
+      let description;
+      try { description = status?.description; } catch { /* Configuration tierce inaccessible. */ }
+      entries.push({ name: status ? game.i18n.localize(status.name) : id, img: status?.img, description });
     }
-    return entries;
+    return entries.map(effect => {
+      const name = typeof effect.name === "string" ? effect.name : game.i18n.localize("CO2PRISM.Unavailable");
+      const escaped = foundry.utils.escapeHTML(name);
+      let description = typeof effect.description === "string" ? effect.description.trim() : "";
+      if (description && game.i18n.has?.(description)) description = game.i18n.localize(description);
+      const html = effect.html || /<\/?[a-z][^>]*>/i.test(description);
+      let details = html ? description : foundry.utils.escapeHTML(description).replace(/\r?\n/g, "<br>");
+      try { details = foundry.utils.cleanHTML(details); } catch { details = ""; }
+      const firstLine = details.replace(/<br\s*\/?>|<\/(?:p|div|h[1-6])>/gi, "\n")
+        .replace(/<[^>]*>/g, "").trim().split("\n")[0].trim();
+      const includesName = details && [name, escaped].includes(firstLine);
+      let tooltip = includesName ? details : `<strong>${escaped}</strong>${details ? `<br>${details}` : ""}`;
+      if (typeof effect.duration === "string" && effect.duration.trim()) {
+        const title = effect.durationTitle ?? game.i18n.localize("DURATION.Label");
+        tooltip += `<br>${title ? `${foundry.utils.escapeHTML(title)} : ` : ""}${foundry.utils.escapeHTML(effect.duration)}`;
+      }
+      return { name, img: effect.img, tooltip };
+    });
   }
 
   updateCombat() {
@@ -674,37 +1214,58 @@ class PrismBar {
     const open = Boolean(this.actor && this.configuration.panels.combat);
     const changed = this.combatPanel.hidden === open;
     this.combatPanel.hidden = !open;
-    if (!open) return changed;
+    if (this.combatToggle) {
+      this.combatToggle.disabled = !this.canConfigure();
+      this.combatToggle.setAttribute("aria-expanded", String(open));
+    }
+    this.updateEffects();
+    if (!open) {
+      this.clearShortcutPreview();
+      this.closePresetActionMenu();
+      this.conditionRender = null;
+      this.conditionalActionGroups = [];
+      this.renderConditionalRows([]);
+      return changed;
+    }
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const economy = new ActionEconomy(this.actor).getSnapshot();
+    const movements = economyEnabled() ? economy.movementsRemaining : 1;
     for (const [key, value] of Object.entries(this.readCombatData())) {
       const node = this.combatValues[key];
+      const isMovement = key === "meters" || key === "cells";
       const format = number => {
         if (!Number.isFinite(number) || (key === "cells" && number < 0)) return unavailable;
         if (key !== "cells") return String(Math.round(number * 100) / 100);
         return String(roundMovementCells(number, game.settings?.get(MODULE, "movementRounding")));
       };
-      node.textContent = economyEnabled() && ["meters", "cells"].includes(key) && value !== null
-        ? `${format(value * economy.movementsRemaining)} / ${format(value * economy.movementsMaximum)}` : format(value);
-      node.style.setProperty("--co2prism-combat-size", Math.min(key === "def" ? 68 : 48, 115 / (node.textContent.length * 0.58)));
+      node.textContent = format(isMovement && value !== null ? value * movements : value);
+      node.style.setProperty("--co2prism-combat-size", Math.min(isMovement ? 42 : key === "def" ? 72 : 48,
+        (isMovement ? 62 : 115) / (node.textContent.length * 0.58)));
     }
+    this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
+    const budgetChanged = this.renderEconomy(economy);
+    const resized = this.changingHands.has(this.actor) ? false : this.renderCombatSlots();
+    return changed || resized || budgetChanged;
+  }
+
+  updateEffects() {
+    const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     const effects = this.readCombatEffects();
     const elements = effects.map(effect => {
       const element = document.createElement("span");
       element.className = "co2prism-effect";
-      element.title = typeof effect.name === "string" ? effect.name : unavailable;
+      const name = typeof effect.name === "string" ? effect.name : unavailable;
+      // Le gestionnaire natif nettoie ce HTML avant de l'afficher.
+      element.dataset.tooltipHtml = effect.tooltip;
+      element.setAttribute("aria-label", name);
       if (typeof effect.img === "string" && effect.img) {
         const img = document.createElement("img");
-        img.src = effect.img; img.alt = element.title; img.draggable = false;
+        img.src = effect.img; img.alt = name; img.draggable = false;
         element.append(img);
-      } else element.textContent = element.title;
+      } else element.textContent = name;
       return element;
     });
     this.combatEffects.replaceChildren(...elements);
-    this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
-    const budgetChanged = this.renderEconomy(economy);
-    const resized = this.renderCombatSlots();
-    return changed || resized || budgetChanged;
   }
 
   async changeEconomy(operation, type) {
@@ -745,6 +1306,7 @@ class PrismBar {
     const hidden = !economyEnabled();
     const visibilityChanged = scroll && scroll.hidden !== hidden;
     if (scroll) scroll.hidden = hidden;
+    if (this.timeCommands) this.timeCommands.hidden = hidden;
     this.updateEconomyCommands(state);
     if (hidden) return Boolean(visibilityChanged);
     const labels = { l: "L", a: "A", am: "AM", m: "M" };
@@ -781,16 +1343,17 @@ class PrismBar {
     const barWidth = widths.reduce((sum, width) => sum + width, 16) + (nodes.length - 1) * 8;
     this.budgetBar.replaceChildren(...nodes);
     this.budgetBar.style.setProperty("--w", barWidth);
-    this.budgetReset.style.setProperty("--x", 235 + barWidth + 6);
-    const width = Math.max(492, 235 + barWidth + 48);
+    this.budgetReset.style.setProperty("--x", barWidth + 4);
+    const width = barWidth + 44;
     const changed = width !== this.budgetWidth;
     this.budgetWidth = width;
     this.budgetContent.style.setProperty("--budget-width", width);
     return changed || Boolean(visibilityChanged);
   }
 
-  slotRows(actor = this.actor, preset = this.configuration.activePreset) {
-    const slots = this.readConfiguration(actor).presets[preset].slots;
+  slotRows(actor = this.actor) {
+    const config = this.readConfiguration(actor);
+    const slots = config.slots;
     const rows = [[], []];
     for (const [key, reference] of Object.entries(slots)) {
       if (["left-hand", "right-hand"].includes(key)) continue;
@@ -798,11 +1361,43 @@ class PrismBar {
       rows[row - 1].push({ key, reference, row, order: Number.isSafeInteger(reference?.order) ? reference.order : 0 });
     }
     for (const row of rows) row.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
-    rows[0].unshift(...["left", "right"].map(hand => ({ key: `${hand}-hand`, hand, row: 1,
-      order: hand === "left" ? 0 : 1, reference: slots[`${hand}-hand`] })));
+    const hands = ["left", "right"].map((hand, order) => ({ key: `${hand}-hand`, hand, row: 1,
+      order, reference: slots[`${hand}-hand`] ?? undefined }));
+    const primary = hands.find(slot => this.handItem(actor, slot.reference)?.system.usage?.twoHand);
+    if (primary) {
+      const other = hands[1 - primary.order];
+      if (!other.reference || other.reference.itemId === primary.reference.itemId) {
+        other.mirror = primary.reference;
+        other.reference = undefined;
+      }
+    }
+    rows[0].unshift(...hands);
     rows.forEach((row, index) => row.push({ row: index + 1, order: 1 + Math.max(-1,
       ...row.filter(slot => !slot.hand).map(slot => slot.order)), terminal: true }));
     return rows;
+  }
+
+  shortcutReferences(entry) {
+    if (entry === undefined) return [];
+    if (Array.isArray(entry?.actions)) return entry.actions;
+    return [entry];
+  }
+
+  shortcutEntry(entry, references) {
+    const { actions, source, indice, itemId, ...slot } = entry;
+    if (references.length === 1) {
+      const { source, indice, itemId } = references[0];
+      return { ...slot, source, indice, itemId, ...(actions ? { "-=actions": null } : {}) };
+    }
+    return { ...slot, actions: references.map(reference =>
+      ({ source: reference?.source, indice: reference?.indice, itemId: reference?.itemId })),
+      ...(source !== undefined || indice !== undefined || itemId !== undefined
+        ? { "-=source": null, "-=indice": null, "-=itemId": null } : {}) };
+  }
+
+  sameShortcutReference(a, b) {
+    return Boolean(a && b && a.indice === b.indice && (a.itemId || null) === (b.itemId || null)
+      && (a.itemId || a.source === b.source));
   }
 
   resolveShortcut(actor, reference) {
@@ -823,13 +1418,99 @@ class PrismBar {
     } catch { return null; }
   }
 
+  handKey(key) {
+    return key === "left-hand" || key === "right-hand";
+  }
+
+  handItem(actor, reference) {
+    if (!reference?.itemId) return null;
+    const direct = reference.kind === "equipment";
+    const item = direct ? actor.items?.get(reference.itemId) : this.resolveShortcut(actor, reference)?.item;
+    if (!this.isHandEquipment(actor, item) || item.testUserPermission?.(game.user, "OBSERVER") === false) return null;
+    const model = item.system;
+    return direct || ((model.isWeapon || model.isShield) && model.useHands) ? item : null;
+  }
+
+  isHandEquipment(actor, item) {
+    const model = item?.system;
+    return item?.type === "equipment" && item.parent === actor
+      && model?.properties?.equipable && typeof model.equipped === "boolean";
+  }
+
+  async updateHands(actor, config, number, key, reference, bypassChecks = false) {
+    const warn = code => { ui.notifications.warn(game.i18n.localize(`CO2PRISM.Combat.${code}`)); return false; };
+    if (this.busyAction || this.changingHands.has(actor)) return false;
+    const previous = config.handPresets[config.activePreset];
+    const incoming = { "left-hand": null, "right-hand": null, ...config.handPresets[number], ...(key ? { [key]: reference } : {}) };
+    if (key) {
+      const other = key === "left-hand" ? "right-hand" : "left-hand";
+      if (this.slotRows(actor)[0].find(slot => slot.key === key)?.mirror) return warn("HandsConflict");
+      if (this.handItem(actor, previous[key])?.system.usage?.twoHand
+        && incoming[other]?.itemId === previous[key]?.itemId) incoming[other] = null;
+    }
+    const items = Object.entries(incoming).filter(([hand, ref]) => this.handKey(hand) && ref != null)
+      .map(([, ref]) => this.handItem(actor, ref));
+    if (items.includes(null)) return warn("HandsInvalidItem");
+    const required = new Set(items);
+    const hands = item => item.system.usage?.twoHand ? 2 : 1;
+    if (items.length !== required.size && [...required].some(item => hands(item) === 1)) return warn("HandsConflict");
+    if ([...required].reduce((used, item) => used + hands(item), 0) > 2) return warn("HandsConflict");
+    const outgoing = new Set(Object.entries(previous).filter(([hand]) => this.handKey(hand))
+      .map(([, ref]) => actor.items?.get(ref?.itemId))
+      .filter(item => this.isHandEquipment(actor, item) && !required.has(item)));
+    const changes = [...[...outgoing].filter(item => item.system.equipped).map(item => [item, false]),
+      ...[...required].filter(item => !item.system.equipped).map(item => [item, true])];
+    if (changes.length && typeof actor.toggleEquipmentEquipped !== "function") return warn("HandsEquipmentFailed");
+    if (!key && number === config.activePreset && !changes.length) return true;
+    const token = this.token;
+    const attempted = [];
+    const apply = async (item, value) => {
+      if (actor.items?.get(item.id) !== item) throw Error("Item indisponible");
+      if (item.system.equipped !== value) await actor.toggleEquipmentEquipped(item.id, value && bypassChecks);
+      if (actor.items?.get(item.id) !== item || item.system.equipped !== value) throw Error("Équipement refusé");
+    };
+    this.changingHands.add(actor);
+    try {
+      for (const [item, value] of changes) {
+        attempted.push([item, item.system.equipped]);
+        await apply(item, value);
+      }
+      if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)
+        || [...required].some(item => actor.items?.get(item.id) !== item || !item.system.equipped)
+        || [...outgoing].some(item => item.system.equipped)) throw Error("Contexte d’équipement modifié");
+      if (key) {
+        await actor.setFlag(MODULE, `hands.presets.${number}`, incoming);
+        const saved = this.readConfiguration(actor).handPresets[number][key];
+        if (reference ? ["kind", "source", "itemId", "indice"].some(field => saved?.[field] !== reference[field]) : saved != null) {
+          throw Error("Preset de mains non enregistré");
+        }
+      } else if (number !== config.activePreset) {
+        await actor.setFlag(MODULE, "hands.active", number);
+        if (this.readConfiguration(actor).activePreset !== number) throw Error("Preset actif non enregistré");
+      }
+      return true;
+    } catch {
+      let restored = true;
+      for (const [item, value] of attempted.reverse()) {
+        try { await apply(item, value); } catch { restored = false; }
+      }
+      return warn(restored ? "HandsEquipmentFailed" : "HandsRestoreFailed");
+    } finally {
+      this.changingHands.delete(actor);
+      if (this.actor === actor && changes.length) this.invalidateShortcutVisibility();
+    }
+  }
+
   shortcutFromDrop(actor, data) {
     try {
       if (data?.type === "co.attack") {
         const item = [...(actor.items?.values() ?? [])].find(entry => entry.uuid === data.uuid && entry.type === "attack");
         const action = item?.actions?.[0];
-        if (!action) return null;
-        data = { type: "co.action", source: action.source, indice: action.indice };
+        if (!action || item.parent !== actor
+          || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))) return null;
+        // La source exportée peut être commune à plusieurs attaques : garder le support réel.
+        const reference = { source: item.uuid, indice: action.indice, itemId: item.id };
+        return this.resolveShortcut(actor, reference) ? reference : null;
       }
       if (data?.type !== "co.action" || typeof data.source !== "string" || !Number.isSafeInteger(data.indice)) return null;
       // La collection native de l'acteur agrège aussi les actions de ses Items.
@@ -843,6 +1524,14 @@ class PrismBar {
     } catch { return null; }
   }
 
+  slotReferenceFromDrop(actor, data, slot) {
+    if (!slot.hand || data?.type !== "Item") return this.shortcutFromDrop(actor, data);
+    if (typeof data.uuid !== "string") return null;
+    const item = [...(actor.items?.values() ?? [])].find(owned => owned.uuid === data.uuid);
+    const reference = { kind: "equipment", itemId: item?.id };
+    return this.handItem(actor, reference) ? reference : null;
+  }
+
   plainText(html) {
     const template = document.createElement("template");
     template.innerHTML = typeof html === "string" ? html : "";
@@ -851,7 +1540,7 @@ class PrismBar {
   }
 
   pruneShortcuts(rows) {
-    const actor = this.actor, token = this.token, preset = this.configuration.activePreset;
+    const actor = this.actor, token = this.token;
     if (!this.canConfigure(actor) || !globalThis.canvas?.ready || !actor.items || actor.invalid) return;
     const missing = reference => {
       try {
@@ -862,184 +1551,707 @@ class PrismBar {
         // Sans tableau natif chargé, l'absence n'est pas une preuve de suppression.
         const actions = item ? item.system?.actions : reference.source === actor.uuid ? actor.system?.actions : null;
         if (!Array.isArray(actions)) return false;
-        const matches = actions.filter(action => action.indice === reference.indice);
-        return matches.length === 0 || (matches.length === 1 && actions[reference.indice] !== matches[0]);
+        return !actions.some(action => action?.indice === reference.indice);
       } catch { return false; }
     };
-    const invalid = rows.flat().filter(slot => !slot.terminal && slot.reference !== undefined && missing(slot.reference));
+    const survivors = entry => this.shortcutReferences(entry).filter(reference => !missing(reference));
+    const invalid = rows.flat().filter(slot => !slot.hand && !slot.terminal && slot.reference !== undefined
+      && (!this.shortcutReferences(slot.reference).length || this.shortcutReferences(slot.reference).some(missing)));
     if (!invalid.length) return;
     this.prunedSignatures ??= new WeakMap();
-    const signature = JSON.stringify([preset, invalid.map(slot => [slot.key, slot.reference])]);
+    const signature = JSON.stringify(invalid.map(slot => [slot.key, slot.reference]));
     if (this.prunedSignatures.get(actor) === signature) return;
     this.prunedSignatures.set(actor, signature);
     void this.queueConfiguration(actor, async () => {
       const config = this.readConfiguration(actor);
-      if (this.actor !== actor || this.token !== token || config.activePreset !== preset || !this.canConfigure(actor)) {
+      if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)) {
         this.prunedSignatures.delete(actor); return false;
       }
-      const slots = config.presets[preset].slots;
-      const keys = invalid.filter(slot => JSON.stringify(slots[slot.key]) === JSON.stringify(slot.reference)
-        && missing(slots[slot.key])).map(slot => slot.key);
-      if (!keys.length) { this.prunedSignatures.delete(actor); return false; }
+      const slots = config.shortcuts;
+      const keys = [];
+      let changed = false;
+      for (const { key, reference } of invalid) {
+        if (JSON.stringify(slots[key]) !== JSON.stringify(reference)) continue;
+        const kept = survivors(slots[key]);
+        if (!kept.length) keys.push(key);
+        else if (kept.length < this.shortcutReferences(slots[key]).length) slots[key] = this.shortcutEntry(slots[key], kept);
+        else continue;
+        changed = true;
+      }
+      if (!changed) { this.prunedSignatures.delete(actor); return false; }
       for (const key of keys) delete slots[key];
-      for (const row of this.slotRows(actor, preset)) row.filter(slot => !slot.hand && !slot.terminal && !keys.includes(slot.key))
+      if (keys.length) for (const row of this.slotRows(actor)) row.filter(slot => !slot.hand && !slot.terminal && !keys.includes(slot.key))
         .forEach((slot, order) => { slots[slot.key] = { ...slots[slot.key], order }; });
       for (const key of keys) slots[`-=${key}`] = null;
-      await actor.setFlag(MODULE, `presets.${preset}.slots`, slots);
+      await actor.setFlag(MODULE, "shortcuts", slots);
       this.prunedSignatures.delete(actor);
       return true;
     });
   }
 
+  async collectConditionalActions(actor, rows, generation) {
+    const sources = new Map();
+    for (const slot of rows.flat()) {
+      if (slot.hand || slot.terminal) continue;
+      const references = this.shortcutReferences(slot.reference);
+      for (const [actionIndex, reference] of references.entries()) {
+        const resolved = this.resolveShortcut(actor, reference);
+        const item = resolved?.item;
+        const actions = item?.system?.actions;
+        if (!Array.isArray(actions) || actor.items?.get(item.id) !== item) continue;
+        const index = actions.indexOf(resolved.action);
+        if (index < 0) continue;
+        const key = `${item.id}:${index}`;
+        let source = sources.get(key);
+        if (!source) {
+          source = { item, action: resolved.action, index, origins: [] };
+          sources.set(key, source);
+        }
+        source.origins.push({ key: slot.key, row: slot.row, actionIndex: references.length > 1 ? actionIndex : undefined });
+      }
+    }
+    const groups = await Promise.all([...sources.values()].map(async ({ item, action, index, origins }) => {
+      const source = { itemId: item.id, source: item.uuid, indice: action.indice };
+      const dependencies = [];
+      const evaluations = [];
+      for (const candidate of item.system.actions) {
+        if (candidate === action || !this.shortcutDependsOn(candidate, index)) continue;
+        const reference = { ...source, indice: candidate.indice };
+        if (this.resolveShortcut(actor, reference)?.action !== candidate) continue;
+        dependencies.push(reference);
+        const visible = action.properties?.enabled === true && typeof candidate.isVisible === "function"
+          ? this.shortcutVisibility(candidate, item, actor, generation).catch(() => false) : false;
+        evaluations.push(visible);
+      }
+      if (!dependencies.length) return null;
+      const visible = await Promise.all(evaluations);
+      return { source, origins, dependencies, available: dependencies.filter((_, index) => visible[index]) };
+    }));
+    return groups.filter(Boolean);
+  }
+
+  shortcutDependsOn(action, index) {
+    return index >= 0 && Array.isArray(action?.conditions) && action.conditions.some(condition =>
+      condition?.predicate === "isLinkedActionActivated" && String(condition.object) === String(index));
+  }
+
   renderCombatSlots() {
+    this.clearShortcutPreview();
+    this.closePresetActionMenu();
     const editable = !game.settings.get(MODULE, "locked") && this.canConfigure();
-    const generation = this.conditionRender = {};
+    const disabled = Boolean(this.busyAction) || !(game.user.isGM || this.actor?.testUserPermission(game.user, "OWNER"));
+    const { actor, token } = this;
+    if (this.conditionRender?.actor !== actor || this.conditionRender?.token !== token) this.renderConditionalRows([]);
     const allRows = this.slotRows();
+    const signature = this.combatSlotsSignature(allRows, editable, disabled);
+    const reuse = this.conditionRender?.actor === actor && this.conditionRender?.token === token
+      && this.conditionRender.signature === signature;
+    const originNodes = reuse ? this.conditionRender.originNodes : new Map();
+    const bindings = reuse ? this.conditionRender.bindings : [];
+    const generation = this.conditionRender = { actor, token, signature, originNodes, bindings, ...this.actionVisibilityCache() };
+    this.conditionalActionGroups = [];
+    void this.collectConditionalActions(actor, allRows, generation).then(groups => {
+      if (this.conditionRender === generation && this.actor === actor && this.token === token) {
+        this.conditionalActionGroups = groups;
+        this.renderConditionalRows(groups, originNodes);
+      }
+    }).catch(error => console.warn("co2prism | Dépendances des actions", error));
     this.pruneShortcuts(allRows);
+    if (reuse) {
+      for (const { node, context, reference, onState } of bindings) {
+        const resolved = this.resolveShortcut(actor, reference);
+        if (resolved) this.renderShortcutConditions(node, resolved, context, generation, onState);
+      }
+      return false;
+    }
     const rows = allRows.map(row => row.filter(slot => !game.settings.get(MODULE, "locked")
-      || slot.hand || (slot.reference !== undefined && this.resolveShortcut(this.actor, slot.reference))));
+      || slot.hand || this.shortcutReferences(slot.reference).some(reference => this.resolveShortcut(this.actor, reference))));
     for (const [index, row] of rows.entries()) {
       const scroll = this.combatRows[index].scrollLeft;
-      const nodes = row.map(slot => {
+      const nodes = row.flatMap(slot => {
         const node = document.createElement("div");
         node.className = "co2prism-combat-slot";
+        if (!slot.hand && slot.key) originNodes.set(slot.key, node);
         node.dataset.co2prismRow = String(slot.row);
         if (slot.hand) node.dataset.co2prismHand = slot.hand;
         node.setAttribute("role", "group");
         const label = game.i18n.localize(slot.hand === "left" ? "CO2PRISM.Combat.LeftHand"
           : slot.hand === "right" ? "CO2PRISM.Combat.RightHand" : "CO2PRISM.Combat.EmptySlot");
-        const resolved = slot.reference !== undefined ? this.resolveShortcut(this.actor, slot.reference) : null;
+        const direct = slot.hand && slot.reference?.kind === "equipment";
+        const equipment = direct ? this.handItem(this.actor, slot.reference) : null;
+        const references = slot.hand ? [slot.reference] : this.shortcutReferences(slot.reference);
+        const group = references.length > 1;
+        const editContext = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
+          key: slot.key, reference: slot.reference };
+        const resolved = references.length === 1 && !direct ? this.resolveShortcut(this.actor, references[0]) : null;
         const add = (tag, cls, text) => {
           const child = document.createElement(tag); child.className = cls;
           if (text !== undefined) child.textContent = text;
           node.append(child); return child;
         };
         node.title = label;
-        if (slot.hand && !resolved && game.settings.get(MODULE, "locked")) {
+        if (slot.hand) {
+          const icon = add("i", "co2prism-slot-hand fa-solid fa-hand");
+          icon.setAttribute("aria-hidden", "true");
+        }
+        if (slot.mirror) {
+          const item = this.handItem(this.actor, slot.mirror);
+          const action = this.resolveShortcut(this.actor, slot.mirror)?.action;
+          const image = action?.actionImg || action?.img || item?.img;
+          node.classList.add("co2prism-hand-mirror");
+          const occupied = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
+          node.title = occupied;
+          node.setAttribute("aria-label", occupied);
+          if (image) {
+            const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = ""; img.draggable = false;
+          }
+          node.addEventListener("dragover", event => event.stopPropagation());
+          node.addEventListener("drop", event => { event.preventDefault(); event.stopPropagation(); });
+          this.combatHands[slot.hand].replaceChildren(node);
+          return [];
+        }
+        if (slot.hand && slot.reference === undefined && game.settings.get(MODULE, "locked")) {
           node.classList.add("co2prism-hand-empty");
           node.setAttribute("role", "img");
           node.setAttribute("aria-label", label);
-          const icon = add("i", "fa-solid fa-hand");
-          icon.setAttribute("aria-hidden", "true");
-          return node;
+          this.combatHands[slot.hand].replaceChildren(node);
+          return [];
         }
-        if (slot.reference !== undefined && !resolved) {
+        if (group) {
+          node.title = game.i18n.format("CO2PRISM.Combat.ShortcutGroup", { count: references.length });
+          node.classList.add("co2prism-slot-group");
+          node.dataset.co2prismSlotKey = slot.key;
+          for (let index = 0; index < MAX_SHORTCUT_ACTIONS; index++) {
+            const quadrant = add("div", "co2prism-slot-quadrant");
+            if (index >= references.length) {
+              quadrant.setAttribute("aria-hidden", "true");
+              continue;
+            }
+            quadrant.dataset.co2prismActionIndex = String(index);
+            quadrant.dataset.co2prismSlotKey = slot.key;
+            const reference = references[index];
+            const context = { ...editContext, actionIndex: index };
+            const member = this.resolveShortcut(this.actor, reference);
+            if (member) {
+              const { action, item } = member;
+              const image = this.shortcutImage(action, item);
+              if (image) {
+                const img = document.createElement("img");
+                img.className = "co2prism-slot-image";
+                img.src = image;
+                img.alt = "";
+                img.draggable = false;
+                quadrant.append(img);
+              }
+              const command = document.createElement("div");
+              command.className = "co2prism-quadrant-command";
+              command.setAttribute("aria-label", action.actionName || item?.name || label);
+              command.setAttribute("aria-description", game.i18n.localize("CO2PRISM.Combat.ShortcutControls"));
+              if (action.properties?.activable === true) {
+                command.setAttribute("aria-pressed", String(action.properties.enabled === true));
+              }
+              quadrant.append(command);
+              this.bindShortcutInteraction(command, { ...context, reference }, disabled);
+              quadrant.classList.toggle("co2prism-action-active", this.shortcutActive(action));
+              quadrant.classList.toggle("co2prism-action-exhausted", this.shortcutUses(action, item)?.value === 0);
+              quadrant.classList.toggle("co2prism-time-insufficient",
+                economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[action.actionTypeFinal] === false);
+              const onState = available => {
+                command.setAttribute("aria-disabled", String(disabled || Boolean(this.busyAction) || !available));
+                if (this.shortcutHover?.quadrant === quadrant && this.shortcutPreview.firstElementChild) {
+                  this.copyShortcutCondition(quadrant, this.shortcutPreview.firstElementChild);
+                }
+              };
+              bindings.push({ node: quadrant, context, reference, onState });
+              this.renderShortcutConditions(quadrant, member, context, generation, onState);
+              quadrant.addEventListener("pointerenter", event => {
+                if (event.pointerType !== "touch") this.scheduleShortcutPreview(quadrant, context);
+              });
+              quadrant.addEventListener("pointerleave", () => {
+                if (this.shortcutHover?.quadrant === quadrant) this.clearShortcutPreview();
+              });
+              for (const type of ["pointerdown", "pointercancel", "click", "contextmenu"]) {
+                quadrant.addEventListener(type, () => this.clearShortcutPreview(), { capture: true });
+              }
+            } else quadrant.classList.add("co2prism-slot-unavailable");
+            if (editable) {
+              quadrant.draggable = true;
+              this.addShortcutRemove(quadrant, context);
+            }
+          }
+        } else if (equipment) {
+          if (equipment.img) {
+            const img = add("img", "co2prism-slot-image"); img.src = equipment.img; img.alt = equipment.name; img.draggable = false;
+          }
+          node.title = equipment.name;
+          if (!equipment.system.equipped) {
+            node.classList.add("co2prism-hand-unequipped");
+            node.title += `\n${game.i18n.localize("CO2PRISM.Combat.HandUnequipped")}`;
+          }
+        } else if (slot.reference !== undefined && !resolved) {
           node.classList.add("co2prism-slot-unavailable");
           add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.UnavailableSlot"));
           node.title = game.i18n.localize("CO2PRISM.Combat.UnavailableSlot");
         } else if (resolved) {
           const { action, item } = resolved;
-          const read = key => { try { return action[key]; } catch { return undefined; } };
-          const image = read("actionImg") || read("img") || item?.img;
-          if (typeof image === "string" && image) {
-            const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = read("actionName") || item?.name || ""; img.draggable = false;
-          }
-          const icon = read("iconFA");
-          if (typeof icon === "string" && icon) add("i", "co2prism-slot-type fa-solid "
-            + icon.split(/\s+/).filter(cls => /^fa-[a-z0-9-]+$/.test(cls) && cls !== "fa-solid").join(" "));
-          const time = { l: "L", a: "A", m: "M", f: "G" }[read("actionTypeFinal")];
-          if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
-          const uses = this.shortcutUses(action, item);
-          if (uses) {
-            const badge = add("span", "co2prism-slot-uses", `${uses.value} `);
-            badge.title = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
-            const icon = document.createElement("i");
-            icon.className = `fa-solid fa-${uses.icon}`; badge.append(icon);
-            if (uses.value === 0) node.classList.add("co2prism-action-exhausted");
-          }
-          const cost = read("manaCost");
-          if (Number.isFinite(cost) && cost > 0) {
-            const badge = add("span", "co2prism-slot-cost", `${cost} `);
-            const bolt = document.createElement("i"); bolt.className = "fa-solid fa-bolt"; badge.append(bolt);
-          }
-          node.title = [read("actionName") || item?.name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
-          node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ShortcutControls")}`;
-          if (economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[read("actionTypeFinal")] === false) {
-            node.classList.add("co2prism-time-insufficient");
-            node.title += `\n${game.i18n.localize("CO2PRISM.Combat.InsufficientTimeHint")}`;
-          }
-          node.classList.add("co2prism-slot-executable");
-          node.setAttribute("role", "button");
-          if (action.properties?.activable === true) {
-            node.setAttribute("aria-pressed", String(action.properties.enabled === true));
-            node.title += `\n${game.i18n.localize(action.properties.enabled ? "CO2PRISM.Combat.Active" : "CO2PRISM.Combat.Inactive")}`;
-            if (action.properties.temporary === true && action.properties.enabled === true) node.classList.add("co2prism-action-active");
-          }
-          const disabled = Boolean(this.busyAction) || !(game.user.isGM || this.actor.testUserPermission(game.user, "OWNER"));
-          node.setAttribute("aria-disabled", String(disabled));
-          node.tabIndex = disabled ? -1 : 0;
-          const context = { actor: this.actor, token: this.token, preset: this.configuration.activePreset,
-            key: slot.key, reference: slot.reference };
-          if (typeof action.isVisible === "function") {
-            node.classList.add("co2prism-condition-pending");
-            node.setAttribute("aria-disabled", "true");
-            Promise.resolve().then(() => action.isVisible(item, context.actor)).then(available => {
-              if (this.conditionRender !== generation || !node.isConnected || this.actor !== context.actor
-                || this.token !== context.token || this.configuration.activePreset !== context.preset) return;
-              node.classList.remove("co2prism-condition-pending");
-              node.classList.toggle("co2prism-condition-unavailable", !available);
-              node.setAttribute("aria-disabled", String(disabled || !available));
-              if (!available) node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ConditionsUnavailable")}`;
-              node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
-            }).catch(error => {
-              if (this.conditionRender !== generation || !node.isConnected) return;
-              node.classList.remove("co2prism-condition-pending");
-              node.classList.add("co2prism-condition-unavailable");
-              node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ConditionsUnknown")}`;
-              node.setAttribute("aria-label", node.title);
-              console.warn("co2prism | Conditions", error);
-            });
-          }
-          node.addEventListener("click", event => { void this.executeShortcut(event, context); });
-          node.addEventListener("keydown", event => {
-            if (event.key === "Enter" || event.key === " ") void this.executeShortcut(event, context);
-          });
+          const name = this.renderShortcutVisual(node, resolved, references[0]);
+          const unequipped = Boolean(slot.hand && !item?.system.equipped);
+          this.describeShortcut(node, resolved, name, unequipped);
+          const context = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
+            key: slot.key, reference: references[0] };
+          this.bindShortcutInteraction(node, context, disabled, unequipped);
+          const title = node.title;
+          const onState = (available, error) => {
+            node.setAttribute("aria-disabled", String(disabled || Boolean(this.busyAction) || unequipped || !available));
+            node.title = title;
+            if (!available) node.title += `\n${game.i18n.localize(error
+              ? "CO2PRISM.Combat.ConditionsUnknown" : "CO2PRISM.Combat.ConditionsUnavailable")}`;
+            node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
+          };
+          bindings.push({ node, context, reference: references[0], onState });
+          this.renderShortcutConditions(node, resolved, context, generation, onState);
         } else add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.EmptySlot"));
-        if (slot.hand) add("span", "co2prism-slot-hand", game.i18n.localize(`CO2PRISM.Combat.Hand_${slot.hand}`));
         if (editable && slot.reference !== undefined) {
-          const context = { actor: this.actor, token: this.token, preset: this.configuration.activePreset,
-            key: slot.key, reference: slot.reference };
-          const remove = add("button", "co2prism-slot-remove");
-          remove.type = "button";
-          remove.title = game.i18n.localize("CO2PRISM.Combat.RemoveShortcut");
-          remove.setAttribute("aria-label", remove.title);
-          const icon = document.createElement("i"); icon.className = "fa-solid fa-trash"; remove.append(icon);
-          for (const type of ["pointerdown", "mousedown", "dragstart", "keydown"]) remove.addEventListener(type, event => event.stopPropagation());
-          remove.addEventListener("dragstart", event => event.preventDefault());
-          remove.addEventListener("click", event => {
-            event.preventDefault(); event.stopPropagation(); void this.manageShortcut(context);
-          });
+          if (!group) this.addShortcutRemove(node, editContext);
           if (!slot.hand) {
             node.draggable = true;
             node.addEventListener("dragstart", event => {
+              this.clearShortcutPreview();
               event.stopPropagation();
-              if (event.target.closest?.(".co2prism-slot-remove") || !this.validShortcutContext(context)) { event.preventDefault(); return; }
-              this.slotDrag = { ...context, internal: true };
+              if (event.target.closest?.(".co2prism-slot-remove") || !this.validShortcutContext(editContext)) { event.preventDefault(); return; }
+              const actionIndex = this.shortcutActionIndex(event, slot);
+              this.slotDrag = { ...editContext, actionIndex, internal: true };
               this.suppressShortcutClick = true;
-              event.dataTransfer.setData("text/plain", JSON.stringify({ type: "co2prism.shortcut", key: slot.key }));
+              event.dataTransfer.setData("text/plain", JSON.stringify({ type: "co2prism.shortcut", key: slot.key, actionIndex }));
               event.dataTransfer.effectAllowed = "move";
             });
             node.addEventListener("dragend", () => { setTimeout(() => { this.suppressShortcutClick = false; }, 0); });
           }
         }
         node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
+        if (group) node.removeAttribute("title");
         node.addEventListener("dragenter", event => this.hoverSlot(event, slot, node));
         node.addEventListener("dragover", event => this.hoverSlot(event, slot, node));
         node.addEventListener("dragleave", () => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
         node.addEventListener("drop", event => { void this.dropSlot(event, slot, node); });
-        return node;
+        if (!slot.hand) return [node];
+        this.combatHands[slot.hand].replaceChildren(node);
+        return [];
       });
       this.combatRows[index].replaceChildren(...nodes);
       this.combatRows[index].scrollLeft = scroll;
     }
-    const widths = rows.map(row => Math.max(0, row.length * 209 - 11));
-    const extent = Math.max(economyEnabled() ? BUDGET_ORIGIN + (this.budgetWidth ?? 492) : 0,
-      ...widths.map((width, index) => COMBAT_ROW_ORIGINS[index] + width)) + 121;
+    const widths = rows.map(row => {
+      const count = row.filter(slot => !slot.hand).length;
+      return count * COMBAT_SLOT_SIZE + Math.max(0, count - 1) * COMBAT_SLOT_GAP;
+    });
+    const extent = Math.max(COMBAT_ROW_ORIGIN + Math.max(0, ...widths),
+      economyEnabled() ? BUDGET_ORIGIN + (this.budgetWidth ?? 228) : 0);
     // Une ligne peut grandir sans changer l'extrémité globale du volet.
     const resized = extent !== this.combatExtent || widths.some((width, index) => width !== this.combatRowWidths?.[index]);
     this.combatExtent = extent;
     this.combatRowWidths = widths;
     return resized;
+  }
+
+  combatSlotsSignature(rows, editable, disabled) {
+    const state = new ActionEconomy(this.actor).getSnapshot().canSpend;
+    const visual = reference => {
+      const resolved = this.resolveShortcut(this.actor, reference);
+      if (!resolved) return null;
+      const { action, item } = resolved;
+      try {
+        return [this.shortcutImage(action, item), action.actionName, item?.name, item?.system?.description,
+          item?.system?.equipped, action.iconFA, action.actionTypeFinal, action.manaCost, this.shortcutUses(action, item),
+          action.properties?.activable, action.properties?.temporary, action.properties?.enabled,
+          this.shortcutCanToggle(action) ? this.presetActionIdentity(this.actor, reference)?.fingerprint : null];
+      } catch { return null; }
+    };
+    return JSON.stringify([editable, disabled, game.settings.get(MODULE, "locked"), this.configuration.activePreset,
+      this.configuration.presetActionRules, economyEnabled(), state, this.budgetWidth,
+      rows.map(row => row.map(slot => [
+        slot, this.shortcutReferences(slot.reference).map(visual), visual(slot.mirror),
+        slot.reference?.kind === "equipment" ? (() => {
+          const item = this.handItem(this.actor, slot.reference);
+          return [item?.name, item?.img, item?.system?.equipped];
+        })() : null
+      ]))]);
+  }
+
+  renderConditionalRows(groups, originNodes) {
+    const zone = this.conditionalZone;
+    if (!zone) return;
+    for (const origin of originNodes?.values() ?? []) {
+      origin.classList.remove("co2prism-conditional-halo");
+      origin.querySelectorAll(".co2prism-conditional-halo").forEach(node => node.classList.remove("co2prism-conditional-halo"));
+    }
+    const scroll = new Map([...zone.children].map(row => [row.dataset.sourceKey, row.scrollLeft]));
+    const verticalScroll = zone.scrollTop;
+    const focused = zone.contains(document.activeElement) ? document.activeElement : null;
+    const rows = [];
+    for (const group of groups) {
+      if (!group.available.length) continue;
+      const row = document.createElement("div");
+      row.className = "co2prism-combat-row co2prism-conditional-row";
+      row.dataset.sourceKey = `${group.source.itemId}:${group.source.indice}`;
+      row.tabIndex = 0;
+      row.setAttribute("role", "group");
+      const source = this.resolveShortcut(this.actor, group.source);
+      if (!source) continue;
+      row.setAttribute("aria-label", source.action.actionName || source.item?.name || "");
+      for (const reference of group.available) {
+        const resolved = this.resolveShortcut(this.actor, reference);
+        if (!resolved) continue;
+        const square = document.createElement("div");
+        square.className = "co2prism-combat-slot co2prism-conditional-halo";
+        square.dataset.co2prismItemId = reference.itemId;
+        square.dataset.co2prismSource = reference.source;
+        square.dataset.co2prismIndice = String(reference.indice);
+        const name = this.renderShortcutVisual(square, resolved, reference);
+        this.describeShortcut(square, resolved, name);
+        square.setAttribute("aria-label", square.title);
+        this.bindShortcutInteraction(square, { actor: this.actor, token: this.token, reference,
+          conditionalSource: group.source, expectedAction: resolved.action },
+        Boolean(this.busyAction) || !(game.user.isGM || this.actor.testUserPermission(game.user, "OWNER")));
+        row.append(square);
+      }
+      if (!row.children.length) continue;
+      for (const { key, actionIndex } of group.origins) {
+        const node = originNodes.get(key);
+        const origin = actionIndex === undefined ? node
+          : node?.querySelector(`[data-co2prism-action-index="${actionIndex}"]`);
+        origin?.classList.add("co2prism-conditional-halo");
+      }
+      rows.push(row);
+    }
+    zone.hidden = !rows.length;
+    zone.replaceChildren(...rows);
+    zone.scrollTop = verticalScroll;
+    for (const row of rows) row.scrollLeft = scroll.get(row.dataset.sourceKey) ?? 0;
+    if (focused) {
+      const row = rows.find(row => row.dataset.sourceKey === focused.closest(".co2prism-conditional-row").dataset.sourceKey);
+      const target = focused.dataset.co2prismIndice === undefined ? row : [...(row?.children ?? [])]
+        .find(square => square.dataset.co2prismIndice === focused.dataset.co2prismIndice);
+      target?.focus({ preventScroll: true });
+    }
+  }
+
+  shortcutImage(action, item) {
+    const read = key => { try { return action[key]; } catch { return undefined; } };
+    return read("actionImg") || read("img") || item?.img;
+  }
+
+  bindShortcutInteraction(node, context, disabled, unequipped = false) {
+    node.classList.add("co2prism-slot-executable");
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-disabled", String(disabled || unequipped));
+    node.tabIndex = disabled ? -1 : 0;
+    node.addEventListener("click", event => { void this.executeShortcut(event, context); });
+    node.addEventListener("contextmenu", event => {
+      if (context.conditionalSource) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      this.openPresetActionMenu(event, context, node);
+    });
+    node.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") void this.executeShortcut(event, context);
+    });
+  }
+
+  describeShortcut(node, { action, item }, name, unequipped = false) {
+    node.title = [name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
+    node.title += `\n${game.i18n.localize("CO2PRISM.Combat.ShortcutControls")}`;
+    if (unequipped) {
+      node.classList.add("co2prism-hand-unequipped");
+      node.title += `\n${game.i18n.localize("CO2PRISM.Combat.HandUnequipped")}`;
+    }
+    if (node.classList.contains("co2prism-time-insufficient")) {
+      node.title += `\n${game.i18n.localize("CO2PRISM.Combat.InsufficientTimeHint")}`;
+    }
+    if (action.properties?.activable === true) {
+      node.setAttribute("aria-pressed", String(action.properties.enabled === true));
+      node.title += `\n${game.i18n.localize(action.properties.enabled ? "CO2PRISM.Combat.Active" : "CO2PRISM.Combat.Inactive")}`;
+    }
+  }
+
+  closePresetActionMenu() {
+    if (this.presetActionMenu?.matches(":popover-open")) this.presetActionMenu.hidePopover();
+  }
+
+  openPresetActionMenu(event, { actor, token, key, reference, actionIndex }, anchor) {
+    this.closePresetActionMenu();
+    if (game.settings.get(MODULE, "locked")) {
+      event.preventDefault();
+      return;
+    }
+    const preset = this.configuration.activePreset;
+    const isCurrent = () => {
+      if (!anchor.isConnected || this.actor !== actor || this.token !== token || game.settings.get(MODULE, "locked")
+        || !this.canConfigure(actor)) return false;
+      const config = this.readConfiguration(actor);
+      const current = this.shortcutReferenceAt(config, key, actionIndex);
+      return config.panels.combat && config.activePreset === preset && current
+        && ["source", "indice", "itemId"].every(field => current[field] === reference[field]);
+    };
+    if (!isCurrent()) return;
+    const identity = this.presetActionIdentity(actor, reference);
+    if (!identity) return;
+    event.preventDefault();
+    event.stopPropagation();
+    game.tooltip?.deactivate();
+    const menu = this.presetActionMenu;
+    const currentRule = this.getPresetActionRule(actor, reference, preset);
+    menu.replaceChildren(...["activate", "deactivate", "unchanged"].map(rule => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(rule === currentRule));
+      const mark = document.createElement("i");
+      mark.className = "fa-solid fa-check";
+      mark.setAttribute("aria-hidden", "true");
+      button.append(mark, game.i18n.localize(`CO2PRISM.PresetAction.${rule}`));
+      button.addEventListener("click", () => {
+        if (!menu.matches(":popover-open")) return;
+        this.closePresetActionMenu();
+        if (this.presetActionIdentity(actor, reference)?.fingerprint !== identity.fingerprint) return;
+        void this.setPresetActionRule(actor, reference, preset, rule, isCurrent);
+      });
+      return button;
+    }));
+    this.showActionPopover(menu, event, anchor);
+  }
+
+  renderShortcutVisual(node, { action, item }, reference) {
+    const read = key => { try { return action[key]; } catch { return undefined; } };
+    const add = (tag, className, text) => {
+      const child = document.createElement(tag);
+      child.className = className;
+      if (text !== undefined) child.textContent = text;
+      node.append(child);
+      return child;
+    };
+    const name = read("actionName") || item?.name || "";
+    const image = this.shortcutImage(action, item);
+    if (typeof image === "string" && image) {
+      const img = add("img", "co2prism-slot-image");
+      img.src = image; img.alt = name; img.draggable = false;
+    }
+    const icon = read("iconFA");
+    if (typeof icon === "string" && icon) add("i", "co2prism-slot-type fa-solid "
+      + icon.split(/\s+/).filter(cls => /^fa-[a-z0-9-]+$/.test(cls) && cls !== "fa-solid").join(" "));
+    const actionTime = read("actionTypeFinal");
+    const time = { l: "L", a: "A", m: "M", f: "G" }[actionTime];
+    if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
+    const uses = this.shortcutUses(action, item);
+    if (uses) {
+      const badge = add("span", "co2prism-slot-uses", `${uses.value} `);
+      badge.title = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
+      const icon = document.createElement("i");
+      icon.className = `fa-solid fa-${uses.icon}`; badge.append(icon);
+      if (uses.value === 0) node.classList.add("co2prism-action-exhausted");
+    }
+    const cost = read("manaCost");
+    if (Number.isFinite(cost) && cost > 0) {
+      const badge = add("span", "co2prism-slot-cost", `${cost} `);
+      const bolt = document.createElement("i"); bolt.className = "fa-solid fa-bolt"; badge.append(bolt);
+    }
+    if (this.shortcutActive(action)) node.classList.add("co2prism-action-active");
+    if (economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[actionTime] === false) {
+      node.classList.add("co2prism-time-insufficient");
+    }
+    if (this.shortcutCanToggle(action) && this.presetActionIdentity(this.actor, reference)) {
+      const rule = this.getPresetActionRule(this.actor, reference, this.configuration.activePreset, this.configuration);
+      if (rule !== "unchanged" || !game.settings.get(MODULE, "locked")) {
+        const icon = { activate: "fa-toggle-large-on", deactivate: "fa-toggle-large-off", unchanged: "fa-circle-dashed" }[rule];
+        const indicator = add("i", `co2prism-slot-rule co2prism-slot-rule-${rule} fa-solid ${icon}`);
+        indicator.setAttribute("role", "img");
+        indicator.setAttribute("aria-label", game.i18n.localize(`CO2PRISM.PresetAction.${rule}`));
+      }
+    }
+    return name;
+  }
+
+  copyShortcutCondition(quadrant, square) {
+    for (const state of ["co2prism-condition-pending", "co2prism-condition-unavailable"]) {
+      square.classList.toggle(state, quadrant.classList.contains(state));
+    }
+  }
+
+  clearShortcutPreview() {
+    if (this.shortcutHover) clearTimeout(this.shortcutHover.delay);
+    this.shortcutHover = null;
+    if (this.shortcutPreview?.matches(":popover-open")) {
+      this.shortcutPreview.hidePopover();
+      this.shortcutPreview.replaceChildren();
+    }
+  }
+
+  scheduleShortcutPreview(quadrant, { actor, token, key, actionIndex }) {
+    if (this.shortcutHover?.quadrant === quadrant) return;
+    this.clearShortcutPreview();
+    if (this.slotDrag || !this.shortcutPreview || this.presetActionMenu?.matches(":popover-open")) return;
+    const hover = { quadrant };
+    this.shortcutHover = hover;
+    hover.delay = setTimeout(() => {
+      if (this.shortcutHover !== hover) return;
+      if (this.element.hidden || !quadrant.getClientRects().length || this.combatPanel.hidden
+        || this.actor !== actor || this.token !== token) {
+        this.clearShortcutPreview();
+        return;
+      }
+      const entry = this.readConfiguration(actor).shortcuts[key];
+      const references = this.shortcutReferences(entry);
+      const resolved = references.length > 1 && this.resolveShortcut(actor, references[actionIndex]);
+      if (!resolved) {
+        this.clearShortcutPreview();
+        return;
+      }
+      const preview = this.shortcutPreview;
+      const square = document.createElement("div");
+      square.className = "co2prism-combat-slot";
+      const name = this.renderShortcutVisual(square, resolved, references[actionIndex]);
+      this.copyShortcutCondition(quadrant, square);
+      const title = document.createElement("div");
+      title.className = "co2prism-shortcut-preview-title";
+      title.textContent = name;
+      preview.replaceChildren(square, title);
+      preview.showPopover();
+      const anchor = quadrant.getBoundingClientRect();
+      const bounds = preview.getBoundingClientRect();
+      const gap = Math.max(4, anchor.width * 0.12);
+      const above = anchor.top - bounds.height - gap;
+      const left = (anchor.left + anchor.right - bounds.width) / 2;
+      const top = above >= 4 ? above : anchor.bottom + gap;
+      preview.style.left = `${Math.max(4, Math.min(left, innerWidth - bounds.width - 4))}px`;
+      preview.style.top = `${Math.max(4, Math.min(top, innerHeight - bounds.height - 4))}px`;
+    }, SHORTCUT_PREVIEW_DELAY);
+  }
+
+  shortcutCanToggle(action) {
+    const properties = action?.properties;
+    return properties?.activable === true && properties.temporary === true;
+  }
+
+  presetActionIdentity(actor, reference) {
+    const resolved = this.resolveShortcut(actor, reference);
+    const item = resolved?.item;
+    const action = resolved?.action;
+    if (!item || actor.items.get(item.id) !== item || !/^[A-Za-z0-9_-]+$/.test(item.id)
+      || !this.shortcutCanToggle(action) || typeof action.toObject !== "function") return null;
+    try {
+      const { source, indice, properties, ...definition } = action.toObject();
+      const { enabled, ...settings } = properties;
+      // L'état actif et l'UUID contextuel ne font pas partie de la définition.
+      const serialized = JSON.stringify([item._stats?.createdTime ?? null, definition, settings], (_key, value) =>
+        value && typeof value === "object" && !Array.isArray(value)
+          ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+      let hash = 0xcbf29ce484222325n;
+      for (let index = 0; index < serialized.length; index++) {
+        hash = BigInt.asUintN(64, (hash ^ BigInt(serialized.charCodeAt(index))) * 0x100000001b3n);
+      }
+      return { key: `${item.id}:${action.indice}`, fingerprint: `v1-${hash.toString(16).padStart(16, "0")}` };
+    } catch {
+      return null;
+    }
+  }
+
+  getPresetActionRule(actor, reference, preset, configuration) {
+    if (![1, 2, 3].includes(preset)) return "unchanged";
+    const identity = this.presetActionIdentity(actor, reference);
+    const entry = identity && (configuration ?? this.readConfiguration(actor)).presetActionRules[identity.key];
+    const rule = entry?.fingerprint === identity?.fingerprint ? entry?.[preset] : undefined;
+    return ["activate", "deactivate"].includes(rule) ? rule : "unchanged";
+  }
+
+  setPresetActionRule(actor, reference, preset, rule, isCurrent = () => true) {
+    if (![1, 2, 3].includes(preset) || !["activate", "deactivate", "unchanged"].includes(rule)
+      || !this.canConfigure(actor) || !isCurrent()) return Promise.resolve(false);
+    const identity = this.presetActionIdentity(actor, reference);
+    if (!identity) return Promise.resolve(false);
+    return this.queueConfiguration(actor, async () => {
+      const current = this.presetActionIdentity(actor, reference);
+      if (!this.canConfigure(actor) || !isCurrent() || current?.key !== identity.key || current.fingerprint !== identity.fingerprint) return false;
+      const entry = this.readConfiguration(actor).presetActionRules[identity.key];
+      const rules = Object.fromEntries([1, 2, 3].map(number => [number, entry?.[number]])
+        .filter(([, previous]) => entry?.fingerprint === identity.fingerprint && ["activate", "deactivate"].includes(previous)));
+      if ((rules[preset] ?? "unchanged") === rule) return false;
+      if (rule === "unchanged") delete rules[preset];
+      else rules[preset] = rule;
+      const path = `presetActionRules.${identity.key}`;
+      if (!Object.keys(rules).length) await actor.unsetFlag(MODULE, path);
+      else {
+        const removed = Object.fromEntries([1, 2, 3].filter(number => !(number in rules)).map(number => [`-=${number}`, null]));
+        await actor.setFlag(MODULE, path, { fingerprint: identity.fingerprint, ...rules, ...removed });
+      }
+      return true;
+    });
+  }
+
+  shortcutActive(action) {
+    return this.shortcutCanToggle(action) && action.properties.enabled === true;
+  }
+
+  actionVisibilityCache() {
+    return this.shortcutVisibilityCache ??= { visibility: new Map(), results: new Map() };
+  }
+
+  invalidateShortcutVisibility() {
+    if (!this.shortcutVisibilityCache) return;
+    this.shortcutVisibilityCache = { visibility: new Map(), results: new Map(this.shortcutVisibilityCache.results) };
+  }
+
+  async nativeShortcutVisibility(action, item, actor) {
+    // Même filtre d'accès que COActor.getVisibleActions pour les Items qu'il liste.
+    if ((item?.type === "capacity" && actor.canUseCapacities === false)
+      || (item?.type === "equipment" && item.system?.container)) return false;
+    return typeof action.isVisible !== "function" || Boolean(await action.isVisible(item, actor));
+  }
+
+  shortcutVisibility(action, item, actor, generation) {
+    if (!generation.visibility.has(action)) {
+      const key = `${item?.id ?? actor.uuid}:${action.indice}`;
+      const evaluation = this.nativeShortcutVisibility(action, item, actor).then(available => {
+        generation.results?.set(key, available);
+        return available;
+      }, error => {
+        generation.results?.set(key, false);
+        if (generation.results) console.warn("co2prism | Conditions", error);
+        throw error;
+      });
+      generation.visibility.set(action, evaluation);
+    }
+    return generation.visibility.get(action);
+  }
+
+  renderShortcutConditions(node, { action, item }, context, generation, onState) {
+    const previous = generation.results.get(`${item?.id ?? context.actor.uuid}:${action.indice}`);
+    node.classList.toggle("co2prism-condition-unavailable", previous === false);
+    if (previous === undefined && typeof action.isVisible === "function") node.classList.add("co2prism-condition-pending");
+    const apply = (available, error = false) => {
+      if (this.conditionRender !== generation || !node.isConnected || this.actor !== context.actor
+        || this.token !== context.token || (context.preset && this.configuration.activePreset !== context.preset)) return;
+      node.classList.remove("co2prism-condition-pending");
+      node.classList.toggle("co2prism-condition-unavailable", !available);
+      onState?.(available, error);
+    };
+    this.shortcutVisibility(action, item, context.actor, generation)
+      .then(available => apply(available), error => apply(false, error));
+  }
+
+  addShortcutRemove(node, context) {
+    const remove = document.createElement("button");
+    remove.className = "co2prism-slot-remove";
+    remove.type = "button";
+    remove.title = game.i18n.localize("CO2PRISM.Combat.RemoveShortcut");
+    remove.setAttribute("aria-label", remove.title);
+    const icon = document.createElement("i"); icon.className = "fa-solid fa-trash"; remove.append(icon);
+    for (const type of ["pointerdown", "mousedown", "dragstart", "keydown"]) remove.addEventListener(type, event => event.stopPropagation());
+    remove.addEventListener("dragstart", event => event.preventDefault());
+    remove.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation(); void this.manageShortcut(context);
+    });
+    node.append(remove);
   }
 
   hoverSlot(event, slot, node) {
@@ -1050,50 +2262,107 @@ class PrismBar {
     const context = this.slotDrag;
     if (context.internal) {
       if (slot.hand || !this.validShortcutContext(context)) return;
+      const actionIndex = this.shortcutActionIndex(event, slot);
+      if (context.actionIndex !== undefined && (slot.key !== context.key || actionIndex === undefined
+        || actionIndex === context.actionIndex)) return;
       event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move";
       node.classList.add("co2prism-drop-insert"); return;
     }
     if (game.settings.get(MODULE, "locked") || context.cancelled || !this.canConfigure(context.actor) || !this.configuration.panels.combat) return;
     const raw = event.dataTransfer?.getData("text/plain");
     if (raw) {
-      try { if (!this.shortcutFromDrop(context.actor, JSON.parse(raw))) return; } catch { return; }
+      try {
+        const reference = this.slotReferenceFromDrop(context.actor, JSON.parse(raw), slot);
+        if (!reference || (slot.hand && !this.handItem(context.actor, reference))) return;
+      } catch { return; }
     } else if (!Array.from(event.dataTransfer?.types ?? []).includes("text/plain")) return;
     event.preventDefault(); event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
     node.classList.add(raw ? "co2prism-drop-target" : "co2prism-drop-candidate");
   }
 
+  shortcutActionIndex(event, slot) {
+    const target = event.target?.closest?.("[data-co2prism-action-index]");
+    if (slot.hand || !target || !/^\d+$/.test(target.dataset.co2prismActionIndex)) return undefined;
+    const index = Number(target.dataset.co2prismActionIndex);
+    return index < this.shortcutReferences(slot.reference).length ? index : undefined;
+  }
+
+  shortcutReferenceAt(config, key, actionIndex) {
+    const entry = config.slots[key];
+    const references = this.handKey(key) ? [entry] : this.shortcutReferences(entry);
+    if (actionIndex === undefined) return references.length === 1 ? references[0] : null;
+    return !this.handKey(key) && references.length > 1 && Number.isInteger(actionIndex)
+      && actionIndex >= 0 && actionIndex < MAX_SHORTCUT_ACTIONS ? references[actionIndex] : null;
+  }
+
+  conditionalShortcutReference({ actor, token, reference, conditionalSource }, config) {
+    if (actor !== this.actor || token !== this.token || !config.panels.combat
+      || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))) return null;
+    const origin = this.resolveShortcut(actor, conditionalSource);
+    const dependent = this.resolveShortcut(actor, reference);
+    const actions = origin?.item?.system?.actions;
+    if (!origin?.item || dependent?.item !== origin.item || origin.action.properties?.enabled !== true
+      || typeof dependent.action.isVisible !== "function"
+      || !Array.isArray(actions) || !this.shortcutDependsOn(dependent.action, actions.indexOf(origin.action))) return null;
+    const hasOrigin = Object.entries(config.shortcuts).some(([key, entry]) => !this.handKey(key)
+      && this.shortcutReferences(entry).some(saved => saved?.indice === conditionalSource.indice
+        && this.resolveShortcut(actor, saved)?.action === origin.action));
+    return hasOrigin ? reference : null;
+  }
+
   async executeShortcut(event, context) {
-    event.preventDefault(); event.stopPropagation();
-    if ((event.button !== undefined && event.button !== 0) || event.detail > 1 || event.repeat
-      || this.busyAction || this.slotDrag || this.suppressShortcutClick) return false;
-    const mode = event.shiftKey ? "sheet" : event.ctrlKey ? "chat" : event.altKey ? "damage" : "use";
+    const automated = typeof context.desiredState === "boolean";
+    if (context.actionIndex !== undefined) this.clearShortcutPreview();
+    if (event) {
+      event.preventDefault(); event.stopPropagation();
+      if ((event.button !== undefined && event.button !== 0) || event.detail > 1 || event.repeat
+        || this.slotDrag || this.suppressShortcutClick) return false;
+    }
+    if (this.busyAction || this.changingHands.has(context.actor)) return false;
+    const mode = automated || context.equipment ? "use" : event.shiftKey ? "sheet" : event.ctrlKey ? "chat" : event.altKey ? "damage" : "use";
     const warn = key => {
       if (this.shortcutWarning?.key !== key || Date.now() - this.shortcutWarning.time > 1500) {
         ui.notifications.warn(game.i18n.localize(key)); this.shortcutWarning = { key, time: Date.now() };
       }
       return false;
     };
-    if (event.currentTarget?.isConnected === false) return warn("CO2PRISM.Combat.UnavailableSlot");
+    if (event?.currentTarget?.isConnected === false) return warn("CO2PRISM.Combat.UnavailableSlot");
     this.refreshActor();
-    const { actor, token, preset, key, reference } = context;
-    const current = this.configuration.presets[preset]?.slots[key];
-    if (actor !== this.actor || token !== this.token || preset !== this.configuration.activePreset
-      || !this.configuration.panels.combat || !current
-      || ["source", "indice", "itemId"].some(field => current[field] !== reference?.[field])
-      || !(game.user.isGM || actor?.testUserPermission(game.user, "OWNER"))) {
-      return warn("CO2PRISM.CommandUnavailable");
-    }
+    const { actor, token, preset, key, reference, actionIndex } = context;
+    const currentReference = config => {
+      if (automated) {
+        const rule = context.desiredState ? "activate" : "deactivate";
+        return actor === this.actor && token === this.token && config.activePreset === preset && this.canConfigure(actor)
+          && this.getPresetActionRule(actor, reference, preset, config) === rule ? reference : null;
+      }
+      if (context.equipment) return this.equipmentOperationItem(context, config) ? reference : null;
+      if (context.conditionalSource) return this.conditionalShortcutReference(context, config);
+      const current = this.shortcutReferenceAt(config, key, actionIndex);
+      if (actor !== this.actor || token !== this.token || (this.handKey(key) && preset !== config.activePreset)
+        || !config.panels.combat || !current
+        || ["source", "indice", "itemId"].some(field => current[field] !== reference?.[field])
+        || !(game.user.isGM || actor?.testUserPermission(game.user, "OWNER"))) return null;
+      return current;
+    };
+    const current = currentReference(this.configuration);
+    if (!current) return warn("CO2PRISM.CommandUnavailable");
     const resolved = this.resolveShortcut(actor, current);
     if (!resolved) return warn("CO2PRISM.Combat.UnavailableSlot");
     const { action, item } = resolved;
+    if ((context.equipment && action !== context.action)
+      || (context.conditionalSource && action !== context.expectedAction)) return warn("CO2PRISM.CommandUnavailable");
+    if (this.handKey(key) && ["use", "damage"].includes(mode) && !item?.system.equipped) {
+      return warn("CO2PRISM.Combat.HandUnequipped");
+    }
     // Les API macros CO2 installées ciblent un Item, jamais un faux support acteur.
     if (!item && (mode !== "sheet" || current.source !== actor.uuid || typeof actor.sheet?.render !== "function")) {
       return warn("CO2PRISM.Combat.ActorActionUnsupported");
     }
     if (item && actor.items?.get(item.id) !== item) return warn("CO2PRISM.Combat.UnavailableSlot");
     const api = game.system?.api?.macros;
-    const toggle = mode === "use" && action.properties?.activable === true && action.properties?.temporary === true;
+    const toggle = mode === "use" && this.shortcutCanToggle(action);
+    if (automated && (!toggle || this.shortcutActive(action) === context.desiredState)) return false;
     if (toggle && typeof actor.activateAction !== "function") return warn("CO2PRISM.Combat.UnavailableSlot");
     if (item && !toggle && typeof api?.[mode === "sheet" ? "openSheet" : mode === "chat" ? "sendToChat" : "useAction"] !== "function") {
       return warn("CO2PRISM.Combat.UnavailableSlot");
@@ -1101,15 +2370,29 @@ class PrismBar {
     this.busyAction = "shortcut";
     this.updateActions();
     let beforeActivation, afterActivation;
+    const checkVisibility = async () => {
+      const cache = this.actionVisibilityCache();
+      try {
+        const visible = await this.nativeShortcutVisibility(action, item, actor);
+        if (this.shortcutVisibilityCache === cache) {
+          const previous = cache.results.get(`${item?.id ?? actor.uuid}:${action.indice}`);
+          if (previous !== undefined && previous !== visible) this.invalidateShortcutVisibility();
+          return visible;
+        }
+      } catch {
+        if (this.shortcutVisibilityCache === cache) this.invalidateShortcutVisibility();
+      }
+      return undefined;
+    };
     try {
-      if (["use", "damage"].includes(mode) && typeof action.isVisible === "function"
-        && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
+      if (context.conditionalSource || ["use", "damage"].includes(mode)) {
+        const visible = await checkVisibility();
+        if (!visible) return warn(visible === false ? "CO2PRISM.Combat.ConditionsUnavailable" : "CO2PRISM.Combat.ConditionsUnknown");
+      }
       // Une condition asynchrone ne doit pas poursuivre une commande sur une ancienne sélection.
-      const latest = this.readConfiguration(actor);
-      if (this.actor !== actor || this.token !== token || latest.activePreset !== preset || !latest.panels.combat
-        || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
-        || ["source", "indice", "itemId"].some(field => latest.presets[preset].slots[key]?.[field] !== reference?.[field])
-        || this.resolveShortcut(actor, latest.presets[preset].slots[key])?.action !== action) return warn("CO2PRISM.CommandUnavailable");
+      const stillAvailable = () => this.resolveShortcut(actor, currentReference(this.readConfiguration(actor)))?.action === action;
+      if (!stillAvailable()) return warn("CO2PRISM.CommandUnavailable");
+      if (automated && this.shortcutActive(action) === context.desiredState) return false;
       // UUID actuel du support, notamment pour les Items d'un acteur synthétique.
       const source = item?.uuid;
       const indice = action.indice;
@@ -1121,15 +2404,11 @@ class PrismBar {
       const economy = new ActionEconomy(actor);
       const ready = () => {
         this.refreshActor();
-        const config = this.readConfiguration(actor);
-        return this.actor === actor && this.token === token && config.activePreset === preset && config.panels.combat
-          && (game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
-          && ["source", "indice", "itemId"].every(field => config.presets[preset].slots[key]?.[field] === reference?.[field])
-          && this.resolveShortcut(actor, config.presets[preset].slots[key])?.action === action
+        return stillAvailable()
           && (!item || actor.items?.get(item.id) === item)
           && [action.properties?.activable, action.properties?.temporary, action.properties?.enabled].every((value, index) => value === activationState[index])
-          && action.actionTypeFinal === time && !(toggle && action.properties.enabled === true)
-          && this.shortcutUses(action, item)?.value !== 0;
+          && action.actionTypeFinal === time && (mode === "damage" || deactivating
+            || (!(toggle && action.properties.enabled === true) && this.shortcutUses(action, item)?.value !== 0));
       };
       if (mode === "use" && !deactivating) {
         if (!["l", "a", "m", "f", "none"].includes(time)) return warn("CO2PRISM.Combat.UnknownActionTime");
@@ -1142,25 +2421,30 @@ class PrismBar {
             no: { label: game.i18n.localize("CO2PRISM.Combat.No"), default: true }, rejectClose: false
           });
           if (accepted !== true) return false;
-          if (typeof action.isVisible === "function" && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
+          const visible = await checkVisibility();
+          if (!visible) return warn(visible === false ? "CO2PRISM.Combat.ConditionsUnavailable" : "CO2PRISM.Combat.ConditionsUnknown");
           if (!ready()) return warn("CO2PRISM.CommandUnavailable");
           forced = economyEnabled() && !economy.getSnapshot().canSpend[time];
         }
       }
       let confirmed = false, rejected = false, starts = 0, ambiguous = false, expectedType;
-      if (charged) {
+      if (charged || automated || (context.conditionalSource && ["use", "damage"].includes(mode))) {
         const matches = (target, details) => target === actor && details.item === item
-          && details.indice === indice && details.state === true && details.type === expectedType;
+          && details.indice === indice && details.state === !deactivating && details.type === expectedType;
         beforeActivation = (target, details) => {
           if (!matches(target, details)) return;
           if (++starts > 1) ambiguous = true;
           details.guard((async () => {
-            if (typeof action.isVisible === "function" && !await action.isVisible(item, actor)) {
-              rejected = "CO2PRISM.Combat.ConditionsUnavailable"; return false;
+            const visible = await checkVisibility();
+            if (!visible) {
+              rejected = visible === false ? "CO2PRISM.Combat.ConditionsUnavailable" : "CO2PRISM.Combat.ConditionsUnknown";
+              return false;
             }
             if (!ready()) { rejected = "CO2PRISM.CommandUnavailable"; return false; }
-            if (economyEnabled() && !forced && !economy.getSnapshot().canSpend[time]) { rejected = "CO2PRISM.Combat.NoActionTime"; return false; }
-            if (forced && economy.getSnapshot().canSpend[time]) forced = false;
+            if (charged && economyEnabled() && !forced && !economy.getSnapshot().canSpend[time]) {
+              rejected = "CO2PRISM.Combat.NoActionTime"; return false;
+            }
+            if (charged && forced && economy.getSnapshot().canSpend[time]) forced = false;
             return true;
           })());
         };
@@ -1185,10 +2469,12 @@ class PrismBar {
         expectedType = temporary ? (toggle ? undefined : "attack") : attack ? "attack" : item.type === "attack" && auto ? "auto" : action.type;
         if (mode === "damage") {
           if (!(attack && action.hasResolversWithDomage === true)) return warn("CO2PRISM.Combat.DamageUnavailable");
+          if (context.conditionalSource) expectedType = "damage";
           await api.useAction(source, indice, "damage");
         } else if (toggle) {
           // Comme la feuille CO2 : pas de type attaque/dommages pour une bascule temporaire.
-          nativeResult = await actor.activateAction({ state: !action.properties.enabled, source, indice, type: undefined });
+          nativeResult = await actor.activateAction({ state: automated ? context.desiredState : !action.properties.enabled,
+            source, indice, type: undefined });
         } else if (temporary) nativeResult = await api.useAction(source, indice);
         else nativeResult = await api.useAction(source, indice, expectedType);
       }
@@ -1243,11 +2529,12 @@ class PrismBar {
 
   validShortcutContext(context) {
     const current = this.readConfiguration(context.actor);
-    const reference = current.presets[context.preset]?.slots[context.key];
+    const reference = current.slots[context.key];
     return !context.cancelled && context.actor === this.actor && context.token === this.token
-      && context.preset === current.activePreset && current.panels.combat
+      && (!this.handKey(context.key) || context.preset === current.activePreset) && current.panels.combat
       && !game.settings.get(MODULE, "locked") && this.canConfigure(context.actor)
-      && reference && ["source", "indice", "itemId", "row", "order"].every(key => reference[key] === context.reference?.[key]);
+      && reference && ["kind", "source", "indice", "itemId", "row", "order"].every(key => reference[key] === context.reference?.[key])
+      && (this.handKey(context.key) || JSON.stringify(reference.actions) === JSON.stringify(context.reference?.actions));
   }
 
   manageShortcut(context, target) {
@@ -1256,8 +2543,25 @@ class PrismBar {
     return this.queueConfiguration(context.actor, async () => {
       this.refreshActor();
       if (!this.validShortcutContext(context)) return false;
-      const slots = this.readConfiguration(context.actor).presets[context.preset].slots;
-      const rows = this.slotRows(context.actor, context.preset).map(row => row.filter(slot => !slot.hand && !slot.terminal));
+      const config = this.readConfiguration(context.actor);
+      if (this.handKey(context.key)) return this.updateHands(context.actor, config, context.preset, context.key, null);
+      const slots = config.shortcuts;
+      const rows = this.slotRows(context.actor).map(row => row.filter(slot => !slot.hand && !slot.terminal));
+      const references = this.shortcutReferences(slots[context.key]);
+      if (context.actionIndex !== undefined) {
+        const index = context.actionIndex;
+        const destination = target?.actionIndex;
+        if (!Number.isInteger(index) || index < 0 || index >= references.length
+          || (target && (target.key !== context.key || !Number.isInteger(destination)
+            || destination < 0 || destination >= references.length || destination === index))) return false;
+        const updated = [...references];
+        const [reference] = updated.splice(index, 1);
+        if (target) updated.splice(destination, 0, reference);
+        if (updated.length) {
+          await context.actor.setFlag(MODULE, `shortcuts.${context.key}`, this.shortcutEntry(slots[context.key], updated));
+          return true;
+        }
+      } else if (!target && references.length > 1) return false;
       if (target) {
         if (![1, 2].includes(target.row)) return false;
         const source = rows.flat().find(slot => slot.key === context.key);
@@ -1273,7 +2577,7 @@ class PrismBar {
       }));
       // Une seule écriture native ; la clé de suppression Foundry évite la fusion résiduelle.
       if (!target) slots[`-=${context.key}`] = null;
-      await context.actor.setFlag(MODULE, `presets.${context.preset}.slots`, slots);
+      await context.actor.setFlag(MODULE, "shortcuts", slots);
       return true;
     });
   }
@@ -1284,17 +2588,17 @@ class PrismBar {
     const context = this.slotDrag ?? { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
     this.slotDrag = null;
     this.refreshActor();
-    if (context.internal) return this.manageShortcut(context, slot);
+    if (context.internal) return this.manageShortcut(context, { ...slot, actionIndex: this.shortcutActionIndex(event, slot) });
     let data;
     try { data = JSON.parse(event.dataTransfer.getData("text/plain")); } catch { /* Dépôt non CO2. */ }
     if (game.settings.get(MODULE, "locked") || context.cancelled || context.actor !== this.actor || context.token !== this.token
-      || context.preset !== this.configuration.activePreset || !this.configuration.panels.combat || !this.canConfigure(context.actor)) {
+      || (slot.hand && context.preset !== this.configuration.activePreset) || !this.configuration.panels.combat || !this.canConfigure(context.actor)) {
       ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
     }
-    const reference = this.shortcutFromDrop(context.actor, data);
+    const reference = this.slotReferenceFromDrop(context.actor, data, slot);
     if (!reference) { ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false; }
     const saved = await this.saveShortcut(context.actor, context.preset, slot, reference);
-    if (saved && slot.terminal && this.actor === context.actor && this.configuration.activePreset === context.preset) {
+    if (saved && slot.terminal && this.actor === context.actor) {
       const row = this.combatRows?.[slot.row - 1];
       if (row) row.scrollLeft = row.scrollWidth > row.clientWidth ? row.scrollWidth : 0;
     }
@@ -1302,19 +2606,34 @@ class PrismBar {
   }
 
   saveShortcut(actor, preset, slot, reference) {
-    if (game.settings.get(MODULE, "locked") || !this.canConfigure(actor) || ![1, 2, 3].includes(preset) || ![1, 2].includes(slot?.row)
+    if (game.settings.get(MODULE, "locked") || !this.canConfigure(actor) || ![1, 2].includes(slot?.row)
       || (slot.key && (!/^[A-Za-z0-9_-]+$/.test(slot.key) || ["__proto__", "constructor", "prototype"].includes(slot.key)))) {
       ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return Promise.resolve(false);
     }
+    const token = this.token;
     return this.queueConfiguration(actor, async () => {
-      if (game.settings.get(MODULE, "locked") || !this.canConfigure(actor) || !this.resolveShortcut(actor, reference)) {
+      const resolved = slot.hand ? this.handItem(actor, reference) : this.resolveShortcut(actor, reference);
+      if (game.settings.get(MODULE, "locked") || this.actor !== actor || this.token !== token || !this.canConfigure(actor) || !resolved) {
         ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
       }
-      const rows = this.slotRows(actor, preset);
+      if (slot.hand) {
+        const config = this.readConfiguration(actor);
+        if (config.activePreset !== preset || !["left", "right"].includes(slot.hand)) return false;
+        return this.updateHands(actor, config, preset, slot.hand + "-hand", reference);
+      }
+      const rows = this.slotRows(actor);
       const terminal = rows[slot.row - 1].at(-1);
       const key = slot.key ?? `slot-${foundry.utils.randomID()}`;
-      const value = { ...reference, row: slot.row, order: slot.terminal ? terminal.order : slot.order, hand: slot.hand ?? null };
-      await actor.setFlag(MODULE, `presets.${preset}.slots.${key}`, value);
+      const existing = this.readConfiguration(actor).shortcuts[key];
+      const references = this.shortcutReferences(existing).filter(entry => entry && typeof entry === "object");
+      if (references.length >= MAX_SHORTCUT_ACTIONS || references.some(entry => this.sameShortcutReference(entry, reference))) {
+        const reason = references.length >= MAX_SHORTCUT_ACTIONS ? "ShortcutGroupFull" : "ShortcutGroupDuplicate";
+        ui.notifications.warn(game.i18n.localize(`CO2PRISM.Combat.${reason}`));
+        return false;
+      }
+      const value = references.length ? this.shortcutEntry(existing, [...references, reference])
+        : { ...reference, row: slot.row, order: slot.terminal ? terminal.order : slot.order };
+      await actor.setFlag(MODULE, `shortcuts.${key}`, value);
       return true;
     });
   }
@@ -1323,17 +2642,30 @@ class PrismBar {
     const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
     // getFlag de Foundry attend un objet dans l'espace de noms.
     const read = key => isObject(actor?.flags?.[MODULE]) ? actor.getFlag?.(MODULE, key) : undefined;
-    const active = read("activePreset");
+    const active = read("hands.active");
+    const activePreset = [1, 2, 3].includes(active) ? active : 1;
     const panels = read("panels");
-    const presets = read("presets");
+    const equipmentCollapsed = read("equipmentCollapsed");
+    const pathCollapsed = read("pathCollapsed");
+    const hiddenEquipment = read("hiddenEquipment");
+    const presets = read("hands.presets");
+    const storedShortcuts = read("shortcuts");
+    const presetActionRules = read("presetActionRules");
+    const shortcuts = isObject(storedShortcuts) ? foundry.utils.deepClone(storedShortcuts) : {};
+    const handPresets = Object.fromEntries([1, 2, 3].map(number => [number,
+      isObject(presets?.[number]) ? foundry.utils.deepClone(presets[number]) : {}]));
+    const panelStates = Object.fromEntries(PANELS.map(key => [key, isObject(panels) && panels[key] === true]));
+    if (panelStates.voies) panelStates.equipements = false;
     return {
-      activePreset: [1, 2, 3].includes(active) ? active : 1,
-      panels: Object.fromEntries(["combat", "competences", "equipements"].map(key =>
-        [key, isObject(panels) && panels[key] === true])),
-      presets: Object.fromEntries([1, 2, 3].map(number => {
-        const slots = isObject(presets) && isObject(presets[number]) ? presets[number].slots : null;
-        return [number, { slots: isObject(slots) ? foundry.utils.deepClone(slots) : {} }];
-      }))
+      activePreset, shortcuts, handPresets, presetActionRules: isObject(presetActionRules) ? presetActionRules : {},
+      slots: { ...shortcuts, ...handPresets[activePreset] },
+      equipmentCollapsed: Object.fromEntries(EQUIPMENT_GROUPS.map(([key]) =>
+        [key, isObject(equipmentCollapsed) && equipmentCollapsed[key] === true])),
+      hiddenEquipment: new Set(isObject(hiddenEquipment)
+        ? Object.keys(hiddenEquipment).filter(id => hiddenEquipment[id] === true) : []),
+      pathCollapsed: new Set(isObject(pathCollapsed)
+        ? Object.keys(pathCollapsed).filter(id => pathCollapsed[id] === true) : []),
+      panels: panelStates
     };
   }
 
@@ -1346,39 +2678,60 @@ class PrismBar {
     for (const button of this.presetButtons) {
       const number = Number(button.dataset.co2prismPreset);
       const active = Boolean(this.actor && this.configuration.activePreset === number);
+      const hands = this.configuration.handPresets[number];
+      button.hidden = game.settings.get(MODULE, "locked") && !hands["left-hand"] && !hands["right-hand"];
       button.disabled = !this.canConfigure();
       button.setAttribute("aria-disabled", String(button.disabled));
       button.setAttribute("aria-pressed", String(active));
-      button.setAttribute("aria-controls", "co2prism-combat");
-      button.setAttribute("aria-expanded", String(active && this.configuration.panels.combat));
       const label = `${game.i18n.localize("CO2PRISM.Preset")} ${number}`;
       button.setAttribute("aria-label", label);
       button.title = button.disabled ? `${label} — ${game.i18n.localize("CO2PRISM.ConfigUnavailable")}` : label;
     }
   }
 
-  setActivePreset(number) {
-    if (![1, 2, 3].includes(number)) return Promise.resolve(false);
-    return this.writeConfiguration("activePreset", number);
-  }
-
-  selectCombatPreset(number) {
-    if (![1, 2, 3].includes(number)) return Promise.resolve(false);
-    return this.writeConfiguration("activePreset", number, { combat: true });
+  setActivePreset(number, bypassChecks = false) {
+    this.refreshActor();
+    const { actor, token } = this;
+    if (![1, 2, 3].includes(number) || !this.canConfigure(actor)) return Promise.resolve(false);
+    return this.queueConfiguration(actor, async () => {
+      if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)) return false;
+      const current = this.readConfiguration(actor);
+      if (number === current.activePreset) return true;
+      if (!await this.updateHands(actor, current, number, undefined, undefined, bypassChecks === true)) return false;
+      const incoming = this.readConfiguration(actor);
+      if (incoming.activePreset !== number) return false;
+      for (const key of Object.keys(incoming.presetActionRules).sort()) {
+        if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)) break;
+        const [, itemId, rawIndex] = /^([A-Za-z0-9_-]+):(0|[1-9]\d*)$/.exec(key) ?? [];
+        const item = actor.items?.get(itemId);
+        if (!item) continue;
+        const reference = { itemId, source: item.uuid, indice: Number(rawIndex) };
+        const rule = this.getPresetActionRule(actor, reference, number, this.readConfiguration(actor));
+        if (rule === "unchanged") continue;
+        const desiredState = rule === "activate";
+        const action = this.resolveShortcut(actor, reference)?.action;
+        if (!action || this.shortcutActive(action) === desiredState) continue;
+        await this.executeShortcut(null, { actor, token, preset: number, reference, desiredState });
+      }
+      return true;
+    });
   }
 
   setPanelState(panel, open) {
-    if (!["combat", "competences", "equipements"].includes(panel) || typeof open !== "boolean") {
+    if (!PANELS.includes(panel) || typeof open !== "boolean") {
       return Promise.resolve(false);
     }
     return this.writeConfiguration(`panels.${panel}`, open);
   }
 
-  writeConfiguration(path, value, { combat = false } = {}) {
-    const toggle = path === "panels.competences" && typeof value === "function";
-    // Seuls ces champs sont modifiables à cette étape.
-    if (!(path === "activePreset" && [1, 2, 3].includes(value))
-      && !(["panels.combat", "panels.competences", "panels.equipements"].includes(path) && typeof value === "boolean") && !toggle) {
+  writeConfiguration(path, value) {
+    if (typeof path !== "string") return Promise.resolve(false);
+    const [group, key, extra] = path.split(".");
+    const panel = group === "panels" && PANELS.includes(key);
+    const category = group === "equipmentCollapsed" && EQUIPMENT_GROUPS.some(([id]) => id === key);
+    const toggle = typeof value === "function";
+    const allCategories = path === "equipmentCollapsed" && toggle;
+    if (extra !== undefined || !(panel || category || allCategories) || !(toggle || typeof value === "boolean")) {
       return Promise.resolve(false);
     }
     this.refreshActor();
@@ -1388,17 +2741,21 @@ class PrismBar {
     return this.queueConfiguration(actor, async () => {
       if (!this.canConfigure(actor)) return false;
       const config = this.readConfiguration(actor);
-      const previous = path === "activePreset" ? config.activePreset : config.panels[path.split(".")[1]];
-      const next = toggle ? value(previous) : value;
-      if (toggle && typeof next !== "boolean") return false;
-      if (combat && path === "activePreset") {
-        const open = config.activePreset !== value || !config.panels.combat;
-        if (previous !== value) await actor.setFlag(MODULE, path, value);
-        if (!this.canConfigure(actor)) return false;
-        if (config.panels.combat !== open) await actor.setFlag(MODULE, "panels.combat", open);
+      if (allCategories) {
+        const next = value(config.equipmentCollapsed);
+        if (typeof next !== "boolean") return false;
+        await actor.setFlag(MODULE, path, Object.fromEntries(EQUIPMENT_GROUPS.map(([id]) => [id, next])));
         return true;
       }
+      const previous = config[group][key];
+      const next = toggle ? value(previous) : value;
+      if (toggle && typeof next !== "boolean") return false;
       if (previous === next) return false;
+      const other = panel && EXCLUSIVE_PANELS[key];
+      if (other && actor.getFlag(MODULE, `panels.${other}`) === true) {
+        await actor.setFlag(MODULE, "panels", { ...actor.getFlag(MODULE, "panels"), [key]: next, [other]: false });
+        return true;
+      }
       // Un chemin précis préserve les autres presets, volets et champs inconnus.
       await actor.setFlag(MODULE, path, next);
       return true;
@@ -1550,49 +2907,51 @@ class PrismBar {
 
   layout({ preserveAnchor = false } = {}) {
     if (!this.element) return;
+    this.clearShortcutPreview();
+    this.closePresetActionMenu();
     this.endDrag();
     const previous = this.element.getBoundingClientRect();
     const anchor = { x: previous.left + (this.panelOffset?.x ?? 0), y: previous.top + (this.panelOffset?.y ?? 0) };
     // Le même dessin conserve ses proportions, même dans une petite fenêtre.
     const open = Boolean(this.actor && this.configuration?.panels.competences);
     const combat = Boolean(this.actor && this.configuration?.panels.combat);
-    let top = open ? 237 : combat && economyEnabled() ? 32 : 0;
-    const left = open ? 168 : combat ? 122 : 0;
+    let top = 0;
+    const left = open ? 198 : 0;
+    const bottom = open ? 603 : BASE_BOTTOM;
+    const minimumRight = COMBAT_ROW_ORIGIN + COMBAT_SLOT_SIZE;
     const movementOpen = this.movementPanel?.hidden === false;
     const reserve = movementOpen ? Math.min(180, (window.innerHeight - 8) * 0.4) : 0;
     const width = Math.max(1, Math.min(WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M,
-      (window.innerWidth - 8) * 724 / ((combat ? 732 : 724) + left),
-      (window.innerHeight - 8 - reserve) * 724 / (BASE_BOTTOM + Math.max(top, movementOpen ? 44 : 0))));
+      (window.innerWidth - 8) * 724 / ((combat ? minimumRight : 724) + left),
+      (window.innerHeight - 8 - reserve) * 724 / bottom));
     // Les réserves haute et basse suivent l'ancrage du dessin d'origine.
     const scale = width / 724;
-    let right = combat ? Math.min(this.combatExtent ?? 1344,
-      Math.max(732, (window.innerWidth - width * left / 724 - 8) / scale)) : 724;
+    let right = combat ? Math.min(this.combatExtent ?? minimumRight, (window.innerWidth - 8) / scale - left) : 724;
     this.element.style.setProperty("--co2prism-unit", `${scale}px`);
     if (movementOpen) {
       this.movementPanel.style.removeProperty("width");
       this.movementPanel.style.removeProperty("max-height");
-      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (319 + left) * scale)}px`;
-      right = Math.max(right, 319 + this.movementPanel.getBoundingClientRect().width / scale);
-      top = Math.max(top, this.movementPanel.getBoundingClientRect().height / scale + 44);
+      this.movementPanel.style.maxWidth = `${Math.max(1, window.innerWidth - 8 - (MOVEMENT_ORIGIN + left) * scale)}px`;
+      const panel = this.movementPanel.getBoundingClientRect();
+      right = Math.max(right, MOVEMENT_ORIGIN + panel.width / scale);
+      top = Math.max(top, panel.height / scale - MOVEMENT_BOTTOM);
     }
     this.panelOffset = { x: width * left / 724, y: width * top / 724 };
     for (const [index, row] of (this.combatRows ?? []).entries()) {
-      row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? 198, Math.max(1, right - COMBAT_ROW_ORIGINS[index])));
+      row.style.setProperty("--w", Math.min(this.combatRowWidths?.[index] ?? COMBAT_SLOT_SIZE, Math.max(0, right - COMBAT_ROW_ORIGIN)));
     }
-    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 492, Math.max(1, right - BUDGET_ORIGIN - 8)));
-    this.combatEffects?.style.setProperty("--w", Math.min(824, Math.max(1, right - 731)));
-    this.combatLine?.style.setProperty("--w", Math.max(0, right - 480 - 60));
-    this.combatArrow?.style.setProperty("--x", right - 93);
+    this.conditionalZone?.style.setProperty("--conditional-width", Math.max(0, right - COMBAT_ROW_ORIGIN));
+    this.budgetScroll?.style.setProperty("--w", Math.min(this.budgetWidth ?? 228, Math.max(1, right - BUDGET_ORIGIN)));
     this.element.style.setProperty("--co2prism-base-width", `${width}px`);
     this.element.style.setProperty("--co2prism-base-height", `${width * 515 / 724}px`);
     this.element.style.setProperty("--co2prism-offset-x", `${this.panelOffset.x}px`);
     this.element.style.setProperty("--co2prism-offset-y", `${this.panelOffset.y}px`);
     this.element.style.width = `${width * right / 724 + this.panelOffset.x}px`;
-    this.element.style.height = `${width * BASE_BOTTOM / 724 + this.panelOffset.y}px`;
+    this.element.style.height = `${width * bottom / 724 + this.panelOffset.y}px`;
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
     const x = preserveAnchor ? anchor.x : valid ? saved.x : 40;
-    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * BASE_BOTTOM / 724 - 40;
+    const y = preserveAnchor ? anchor.y : valid ? saved.y : window.innerHeight - width * bottom / 724 - 40;
     // Le maintien du portrait ne peut pas laisser le volet déplié hors écran.
     this.place(x - this.panelOffset.x, y - this.panelOffset.y);
     for (const row of this.combatRows ?? []) {
@@ -1610,7 +2969,9 @@ class PrismBar {
   place(x, y, clamp = true) {
     const bounds = this.element.getBoundingClientRect();
     this.element.style.left = `${clamp ? Math.max(0, Math.min(x, window.innerWidth - bounds.width)) : x}px`;
-    this.element.style.top = `${clamp ? Math.max(0, Math.min(y, window.innerHeight - bounds.height)) : y}px`;
+    const top = clamp ? Math.max(0, Math.min(y, window.innerHeight - bounds.height)) : y;
+    this.element.style.top = `${top}px`;
+    this.conditionalZone?.style.setProperty("--conditional-art-top", `${top + (this.panelOffset?.y ?? 0)}px`);
   }
 
   startDrag(event) {
@@ -1630,6 +2991,7 @@ class PrismBar {
     const dy = event.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
+    this.portraitMoved = true;
     this.place(drag.left + dx, drag.top + dy);
   }
 
