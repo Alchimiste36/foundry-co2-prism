@@ -541,6 +541,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const nativeUseAction = game.system.api.macros.useAction;
           game.system.api.macros.useAction = (...args) => new Promise(resolve => { shortcutCalls.push(["useAction", ...args]); complete = resolve; });
           cards(0)[0].click(); cards(0)[0].click();
+          await new Promise(resolve => setTimeout(resolve, 0));
           check(shortcutCalls.length === countCalls + 1 && cards(0)[0].getAttribute("aria-disabled") === "true",
             "Clic pendant une opération en cours");
           complete(); await new Promise(resolve => setTimeout(resolve, 0));
@@ -798,13 +799,51 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(!consumedCard().classList.contains('co2prism-condition-unavailable') && consumedCard().getAttribute('aria-disabled') === 'false', 'Equipped availability not restored');
           const completions = [];
           nativeAction.isVisible = () => new Promise(resolve => completions.push(resolve));
-          bar.refreshActor(); await Promise.resolve();
+          hooks.get('updateItem')(item, {}); await Promise.resolve();
           nativeAction.isVisible = async () => true;
+          hooks.get('updateItem')(item, {});
           await bar.setActivePreset(2); await new Promise(resolve => setTimeout(resolve, 0));
           for (const resolve of completions) resolve(false);
           await new Promise(resolve => setTimeout(resolve, 0));
           check(!root.querySelector('.co2prism-condition-unavailable'), 'Late condition applied to new preset');
           await bar.setActivePreset(1); await new Promise(resolve => setTimeout(resolve, 0));
+          let visibilityChecks = 0;
+          item.type = 'capacity'; item.system.learned = true;
+          actor.canUseCapacities = true;
+          nativeAction.isVisible = async source => { visibilityChecks++; return source.system.learned; };
+          hooks.get('updateItem')(item, {});
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const beforeGraphics = visibilityChecks;
+          const lockedBeforeGraphics = settings.locked;
+          bar.refreshActor();
+          settings.locked = true; bar.updateLock();
+          settings.locked = false; bar.updateLock();
+          for (const size of ['S', 'M', 'L', 'XL']) { settings.size = size; bar.layout(); }
+          settings.locked = lockedBeforeGraphics; bar.updateLock();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(visibilityChecks === beforeGraphics, 'Graphic refreshes reuse native visibility checks');
+          const capacityBeforeRestriction = consumedCard();
+          actor.canUseCapacities = false;
+          hooks.get('updateActor')(actor, { system: {} });
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(consumedCard() === capacityBeforeRestriction && consumedCard().classList.contains('co2prism-condition-unavailable') &&
+            [...consumedCard().querySelectorAll('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-cost, .co2prism-slot-uses')]
+              .every(badge => getComputedStyle(badge).display === 'none'), 'Native armor/shield gate masks the badge without rebuilding the square');
+          const callsBeforeRestricted = shortcutCalls.length;
+          consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
+          check(shortcutCalls.length === callsBeforeRestricted, 'The native equipment restriction blocks execution');
+          actor.canUseCapacities = true;
+          item.system.learned = false;
+          hooks.get('updateItem')(item, {});
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(consumedCard().classList.contains('co2prism-condition-unavailable'), 'Native learned condition hides the existing shortcut');
+          item.system.learned = true;
+          hooks.get('updateItem')(item, {});
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(!consumedCard().classList.contains('co2prism-condition-unavailable'), 'Relearning restores the existing shortcut');
+          item.type = 'equipment';
+          delete actor.canUseCapacities;
+          nativeAction.isVisible = async () => true;
           check(JSON.stringify(actor.flags) === flagsBeforeConsumption, 'False conditions removed shortcut');
           nativeAction.type = 'heal'; nativeAction.properties.temporary = false;
           hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));

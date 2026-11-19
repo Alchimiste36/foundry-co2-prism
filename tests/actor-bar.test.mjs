@@ -2391,6 +2391,11 @@ test("nettoyage prudent : conditions, droits, chargement et sélection en attent
   item.system.actions = item.actions; item.actions[0].isVisible = async () => false;
   const count = writes.length;
   bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
+  item.actions.unshift({ indice: 1 });
+  const beforeMovedIndex = bar.configWrites.get(a);
+  bar.pruneShortcuts(bar.slotRows());
+  assert.equal(bar.configWrites.get(a), beforeMovedIndex);
+  assert.equal(writes.length, count);
   item.system.actions = undefined; item.actions = [];
   bar.pruneShortcuts(bar.slotRows()); assert.equal(writes.length, count);
   item.system.actions = []; item.testUserPermission = () => false;

@@ -277,7 +277,10 @@ class PrismBar {
       const relevant = Object.keys(changed).some(key => ["system", "img", "name", "ownership", "flags"].includes(key)
         || key.startsWith("system.") || key.startsWith("ownership.")
         || key === "flags.co2prism" || key === "flags.-=co2prism" || key.startsWith("flags.co2prism."));
-      if (relevant && this.concernsActor(actor)) this.refreshActor();
+      if (relevant && this.concernsActor(actor)) {
+        if (Object.keys(changed).some(key => /^(system|ownership)(\.|$)/.test(key))) this.invalidateShortcutVisibility();
+        this.refreshActor();
+      }
     });
     Hooks.on("deleteActor", actor => {
       if (this.concernsActor(actor)) this.refreshActor(false);
@@ -285,7 +288,10 @@ class PrismBar {
     Hooks.on("updateToken", (token, changed) => {
       const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta", "ownership"].includes(key)
         || key.startsWith("delta."));
-      if (relevant && token === this.token?.document) this.refreshActor();
+      if (relevant && token === this.token?.document) {
+        this.invalidateShortcutVisibility();
+        this.refreshActor();
+      }
     });
     Hooks.on("deleteToken", token => {
       if (token === this.movementZones.token) this.movementZones.clear();
@@ -297,7 +303,10 @@ class PrismBar {
       for (const event of ["create", "update", "delete"]) {
         Hooks.on(`${event}${type}`, document => {
           const parent = document.parent?.documentName === "Item" ? document.parent.parent : document.parent;
-          if (this.concernsActor(parent)) this.refreshActor();
+          if (this.concernsActor(parent)) {
+            this.invalidateShortcutVisibility();
+            this.refreshActor();
+          }
         });
       }
     }
@@ -315,6 +324,7 @@ class PrismBar {
     const candidate = token?.actor;
     // Comme les feuilles CO2, réserver les statistiques aux observateurs autorisés.
     const actor = candidate?.testUserPermission(game.user, "OBSERVER") ? candidate : null;
+    if (actor !== this.actor || token !== this.token) this.shortcutVisibilityCache = null;
     this.token = token;
     this.actor = actor;
     if (this.slotDrag && (this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
@@ -1234,7 +1244,7 @@ class PrismBar {
     }
     this.combatPanel.dataset.co2prismPreset = String(this.configuration.activePreset);
     const budgetChanged = this.renderEconomy(economy);
-    const resized = this.renderCombatSlots();
+    const resized = this.changingHands.has(this.actor) ? false : this.renderCombatSlots();
     return changed || resized || budgetChanged;
   }
 
@@ -1487,6 +1497,7 @@ class PrismBar {
       return warn(restored ? "HandsEquipmentFailed" : "HandsRestoreFailed");
     } finally {
       this.changingHands.delete(actor);
+      if (this.actor === actor && changes.length) this.invalidateShortcutVisibility();
     }
   }
 
@@ -1540,8 +1551,7 @@ class PrismBar {
         // Sans tableau natif chargé, l'absence n'est pas une preuve de suppression.
         const actions = item ? item.system?.actions : reference.source === actor.uuid ? actor.system?.actions : null;
         if (!Array.isArray(actions)) return false;
-        const matches = actions.filter(action => action.indice === reference.indice);
-        return matches.length === 0 || (matches.length === 1 && actions[reference.indice] !== matches[0]);
+        return !actions.some(action => action?.indice === reference.indice);
       } catch { return false; }
     };
     const survivors = entry => this.shortcutReferences(entry).filter(reference => !missing(reference));
@@ -1632,9 +1642,13 @@ class PrismBar {
     const disabled = Boolean(this.busyAction) || !(game.user.isGM || this.actor?.testUserPermission(game.user, "OWNER"));
     const { actor, token } = this;
     if (this.conditionRender?.actor !== actor || this.conditionRender?.token !== token) this.renderConditionalRows([]);
-    const generation = this.conditionRender = { actor, token, visibility: new Map() };
     const allRows = this.slotRows();
-    const originNodes = new Map();
+    const signature = this.combatSlotsSignature(allRows, editable, disabled);
+    const reuse = this.conditionRender?.actor === actor && this.conditionRender?.token === token
+      && this.conditionRender.signature === signature;
+    const originNodes = reuse ? this.conditionRender.originNodes : new Map();
+    const bindings = reuse ? this.conditionRender.bindings : [];
+    const generation = this.conditionRender = { actor, token, signature, originNodes, bindings, ...this.actionVisibilityCache() };
     this.conditionalActionGroups = [];
     void this.collectConditionalActions(actor, allRows, generation).then(groups => {
       if (this.conditionRender === generation && this.actor === actor && this.token === token) {
@@ -1643,6 +1657,13 @@ class PrismBar {
       }
     }).catch(error => console.warn("co2prism | Dépendances des actions", error));
     this.pruneShortcuts(allRows);
+    if (reuse) {
+      for (const { node, context, reference, onState } of bindings) {
+        const resolved = this.resolveShortcut(actor, reference);
+        if (resolved) this.renderShortcutConditions(node, resolved, context, generation, onState);
+      }
+      return false;
+    }
     const rows = allRows.map(row => row.filter(slot => !game.settings.get(MODULE, "locked")
       || slot.hand || this.shortcutReferences(slot.reference).some(reference => this.resolveShortcut(this.actor, reference))));
     for (const [index, row] of rows.entries()) {
@@ -1735,13 +1756,14 @@ class PrismBar {
               quadrant.classList.toggle("co2prism-action-exhausted", this.shortcutUses(action, item)?.value === 0);
               quadrant.classList.toggle("co2prism-time-insufficient",
                 economyEnabled() && new ActionEconomy(this.actor).getSnapshot().canSpend[action.actionTypeFinal] === false);
-              if (typeof action.isVisible === "function") command.setAttribute("aria-disabled", "true");
-              this.renderShortcutConditions(quadrant, member, context, generation, available => {
-                command.setAttribute("aria-disabled", String(disabled || !available));
+              const onState = available => {
+                command.setAttribute("aria-disabled", String(disabled || Boolean(this.busyAction) || !available));
                 if (this.shortcutHover?.quadrant === quadrant && this.shortcutPreview.firstElementChild) {
                   this.copyShortcutCondition(quadrant, this.shortcutPreview.firstElementChild);
                 }
-              });
+              };
+              bindings.push({ node: quadrant, context, reference, onState });
+              this.renderShortcutConditions(quadrant, member, context, generation, onState);
               quadrant.addEventListener("pointerenter", event => {
                 if (event.pointerType !== "touch") this.scheduleShortcutPreview(quadrant, context);
               });
@@ -1778,13 +1800,16 @@ class PrismBar {
           const context = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
             key: slot.key, reference: references[0] };
           this.bindShortcutInteraction(node, context, disabled, unequipped);
-          if (typeof action.isVisible === "function") node.setAttribute("aria-disabled", "true");
-          this.renderShortcutConditions(node, resolved, context, generation, (available, error) => {
-            if (!error) node.setAttribute("aria-disabled", String(disabled || unequipped || !available));
+          const title = node.title;
+          const onState = (available, error) => {
+            node.setAttribute("aria-disabled", String(disabled || Boolean(this.busyAction) || unequipped || !available));
+            node.title = title;
             if (!available) node.title += `\n${game.i18n.localize(error
               ? "CO2PRISM.Combat.ConditionsUnknown" : "CO2PRISM.Combat.ConditionsUnavailable")}`;
             node.setAttribute("aria-label", slot.hand ? `${label}\n${node.title}` : node.title);
-          });
+          };
+          bindings.push({ node, context, reference: references[0], onState });
+          this.renderShortcutConditions(node, resolved, context, generation, onState);
         } else add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.EmptySlot"));
         if (editable && slot.reference !== undefined) {
           if (!group) this.addShortcutRemove(node, editContext);
@@ -1829,9 +1854,37 @@ class PrismBar {
     return resized;
   }
 
+  combatSlotsSignature(rows, editable, disabled) {
+    const state = new ActionEconomy(this.actor).getSnapshot().canSpend;
+    const visual = reference => {
+      const resolved = this.resolveShortcut(this.actor, reference);
+      if (!resolved) return null;
+      const { action, item } = resolved;
+      try {
+        return [this.shortcutImage(action, item), action.actionName, item?.name, item?.system?.description,
+          item?.system?.equipped, action.iconFA, action.actionTypeFinal, action.manaCost, this.shortcutUses(action, item),
+          action.properties?.activable, action.properties?.temporary, action.properties?.enabled,
+          this.shortcutCanToggle(action) ? this.presetActionIdentity(this.actor, reference)?.fingerprint : null];
+      } catch { return null; }
+    };
+    return JSON.stringify([editable, disabled, game.settings.get(MODULE, "locked"), this.configuration.activePreset,
+      this.configuration.presetActionRules, economyEnabled(), state, this.budgetWidth,
+      rows.map(row => row.map(slot => [
+        slot, this.shortcutReferences(slot.reference).map(visual), visual(slot.mirror),
+        slot.reference?.kind === "equipment" ? (() => {
+          const item = this.handItem(this.actor, slot.reference);
+          return [item?.name, item?.img, item?.system?.equipped];
+        })() : null
+      ]))]);
+  }
+
   renderConditionalRows(groups, originNodes) {
     const zone = this.conditionalZone;
     if (!zone) return;
+    for (const origin of originNodes?.values() ?? []) {
+      origin.classList.remove("co2prism-conditional-halo");
+      origin.querySelectorAll(".co2prism-conditional-halo").forEach(node => node.classList.remove("co2prism-conditional-halo"));
+    }
     const scroll = new Map([...zone.children].map(row => [row.dataset.sourceKey, row.scrollLeft]));
     const verticalScroll = zone.scrollTop;
     const focused = zone.contains(document.activeElement) ? document.activeElement : null;
@@ -2139,23 +2192,48 @@ class PrismBar {
     return this.shortcutCanToggle(action) && action.properties.enabled === true;
   }
 
+  actionVisibilityCache() {
+    return this.shortcutVisibilityCache ??= { visibility: new Map(), results: new Map() };
+  }
+
+  invalidateShortcutVisibility() {
+    if (!this.shortcutVisibilityCache) return;
+    this.shortcutVisibilityCache = { visibility: new Map(), results: new Map(this.shortcutVisibilityCache.results) };
+  }
+
+  async nativeShortcutVisibility(action, item, actor) {
+    // Même filtre d'accès que COActor.getVisibleActions pour les Items qu'il liste.
+    if ((item?.type === "capacity" && actor.canUseCapacities === false)
+      || (item?.type === "equipment" && item.system?.container)) return false;
+    return typeof action.isVisible !== "function" || Boolean(await action.isVisible(item, actor));
+  }
+
   shortcutVisibility(action, item, actor, generation) {
     if (!generation.visibility.has(action)) {
-      generation.visibility.set(action, Promise.resolve().then(() => action.isVisible(item, actor)));
+      const key = `${item?.id ?? actor.uuid}:${action.indice}`;
+      const evaluation = this.nativeShortcutVisibility(action, item, actor).then(available => {
+        generation.results?.set(key, available);
+        return available;
+      }, error => {
+        generation.results?.set(key, false);
+        if (generation.results) console.warn("co2prism | Conditions", error);
+        throw error;
+      });
+      generation.visibility.set(action, evaluation);
     }
     return generation.visibility.get(action);
   }
 
   renderShortcutConditions(node, { action, item }, context, generation, onState) {
-    if (typeof action.isVisible !== "function") return;
-    node.classList.add("co2prism-condition-pending");
+    const previous = generation.results.get(`${item?.id ?? context.actor.uuid}:${action.indice}`);
+    node.classList.toggle("co2prism-condition-unavailable", previous === false);
+    if (previous === undefined && typeof action.isVisible === "function") node.classList.add("co2prism-condition-pending");
     const apply = (available, error = false) => {
       if (this.conditionRender !== generation || !node.isConnected || this.actor !== context.actor
         || this.token !== context.token || (context.preset && this.configuration.activePreset !== context.preset)) return;
       node.classList.remove("co2prism-condition-pending");
       node.classList.toggle("co2prism-condition-unavailable", !available);
       onState?.(available, error);
-      if (error) console.warn("co2prism | Conditions", error);
     };
     this.shortcutVisibility(action, item, context.actor, generation)
       .then(available => apply(available), error => apply(false, error));
@@ -2292,9 +2370,25 @@ class PrismBar {
     this.busyAction = "shortcut";
     this.updateActions();
     let beforeActivation, afterActivation;
+    const checkVisibility = async () => {
+      const cache = this.actionVisibilityCache();
+      try {
+        const visible = await this.nativeShortcutVisibility(action, item, actor);
+        if (this.shortcutVisibilityCache === cache) {
+          const previous = cache.results.get(`${item?.id ?? actor.uuid}:${action.indice}`);
+          if (previous !== undefined && previous !== visible) this.invalidateShortcutVisibility();
+          return visible;
+        }
+      } catch {
+        if (this.shortcutVisibilityCache === cache) this.invalidateShortcutVisibility();
+      }
+      return undefined;
+    };
     try {
-      if ((context.conditionalSource || ["use", "damage"].includes(mode)) && typeof action.isVisible === "function"
-        && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
+      if (context.conditionalSource || ["use", "damage"].includes(mode)) {
+        const visible = await checkVisibility();
+        if (!visible) return warn(visible === false ? "CO2PRISM.Combat.ConditionsUnavailable" : "CO2PRISM.Combat.ConditionsUnknown");
+      }
       // Une condition asynchrone ne doit pas poursuivre une commande sur une ancienne sélection.
       const stillAvailable = () => this.resolveShortcut(actor, currentReference(this.readConfiguration(actor)))?.action === action;
       if (!stillAvailable()) return warn("CO2PRISM.CommandUnavailable");
@@ -2327,7 +2421,8 @@ class PrismBar {
             no: { label: game.i18n.localize("CO2PRISM.Combat.No"), default: true }, rejectClose: false
           });
           if (accepted !== true) return false;
-          if (typeof action.isVisible === "function" && !await action.isVisible(item, actor)) return warn("CO2PRISM.Combat.ConditionsUnavailable");
+          const visible = await checkVisibility();
+          if (!visible) return warn(visible === false ? "CO2PRISM.Combat.ConditionsUnavailable" : "CO2PRISM.Combat.ConditionsUnknown");
           if (!ready()) return warn("CO2PRISM.CommandUnavailable");
           forced = economyEnabled() && !economy.getSnapshot().canSpend[time];
         }
@@ -2340,8 +2435,10 @@ class PrismBar {
           if (!matches(target, details)) return;
           if (++starts > 1) ambiguous = true;
           details.guard((async () => {
-            if (typeof action.isVisible === "function" && !await action.isVisible(item, actor)) {
-              rejected = "CO2PRISM.Combat.ConditionsUnavailable"; return false;
+            const visible = await checkVisibility();
+            if (!visible) {
+              rejected = visible === false ? "CO2PRISM.Combat.ConditionsUnavailable" : "CO2PRISM.Combat.ConditionsUnknown";
+              return false;
             }
             if (!ready()) { rejected = "CO2PRISM.CommandUnavailable"; return false; }
             if (charged && economyEnabled() && !forced && !economy.getSnapshot().canSpend[time]) {

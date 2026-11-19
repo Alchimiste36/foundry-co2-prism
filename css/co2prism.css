@@ -755,3 +755,11 @@ button.co2prism-time { min-height: 0; border-radius: 0; border: 0; padding: 0; m
 #co2prism-bar .co2prism-time-insufficient {
   background-color: #555;
 }
+#co2prism-bar .co2prism-condition-unavailable .co2prism-slot-image {
+  filter: grayscale(1) brightness(.55);
+}
+#co2prism-bar .co2prism-condition-unavailable { background-color: #555; }
+.co2prism-condition-unavailable :is(.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost),
+.co2prism-condition-unavailable.co2prism-action-active::after {
+  display: none;
+}
