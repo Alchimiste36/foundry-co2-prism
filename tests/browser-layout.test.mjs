@@ -253,8 +253,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               }
               check(value.textContent.startsWith(key === "agi" ? "-" : "+"), size + " signe");
               check(count.textContent === (key === "for" ? "(2)" : "(0)"), size + " compte");
-              if (key === "for") check(button.title.includes("Escalade") && button.title.includes("En montagne")
-                && !button.title.includes("<img") && !globalThis.co2prismInjected, "Description dangereuse");
+              if (key === "for") check(button.dataset.tooltipText.includes("Escalade") && button.dataset.tooltipText.includes("En montagne")
+                && !button.dataset.tooltipText.includes("<img") && !globalThis.co2prismInjected, "Description dangereuse");
               button.click(); await new Promise(resolve => setTimeout(resolve, 0));
               check(calls.at(-1) === "skill:" + key, size + " mauvais jet");
             }
@@ -495,7 +495,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(requestedShift === true && item.system.equipped, "MAJ issue du clic et preset actif réappliqué");
           check(lengths() === "3,1", "Les mains font croître la ligne");
           const occupied = cards(0)[0];
-          check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.title.includes("Description native"), "Image ou description copiée incorrectement");
+          check(occupied.querySelector("img").src === nativeAction.actionImg && occupied.dataset.tooltipText.includes("Description native"), "Image ou description copiée incorrectement");
           check(occupied.querySelector(".co2prism-slot-time").textContent === "G"
             && occupied.querySelector(".co2prism-slot-uses").textContent.trim() === "3"
             && occupied.querySelector(".co2prism-slot-cost").textContent.trim() === "2", "Décorations natives");
@@ -604,7 +604,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(calls.length === executeBefore && shortcutCalls.length === staleBefore, "Ancien carré exécuté");
           nativeAction.actionName = "Action modifiée"; nativeAction.charges = 0; nativeAction.hasCharges = false; item.system.charges.current = 0;
           bar.refreshActor();
-          check(cards(0)[0].title.includes("Action modifiée")
+          check(cards(0)[0].dataset.tooltipText.includes("Action modifiée")
             && cards(0)[0].querySelector(".co2prism-slot-uses").textContent.trim() === "0", "Données non actualisées");
           const removedSlots = structuredClone(actor.flags.co2prism.shortcuts);
           actor.items.delete(item.id); bar.refreshActor(); await bar.configWrites.get(actor);
@@ -784,7 +784,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           hooks.get('updateItem')(item, {}); await new Promise(resolve => setTimeout(resolve, 0));
           check(consumedCard().classList.contains('co2prism-condition-unavailable')
             && consumedCard().classList.contains('co2prism-action-active'), 'Condition state lost active glow');
-          check(consumedCard().getAttribute('aria-disabled') === 'true' && consumedCard().title.includes('ConditionsUnavailable'), 'Condition accessibility');
+          check(consumedCard().getAttribute('aria-disabled') === 'true' && consumedCard().dataset.tooltipText.includes('ConditionsUnavailable'), 'Condition accessibility');
           const beforeUnavailable = shortcutCalls.length;
           consumedCard().click(); await new Promise(resolve => setTimeout(resolve, 0));
           consumedCard().dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
@@ -979,7 +979,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           const emptyBudget = JSON.stringify(actor.flags.co2prism.actionEconomy), warningCount = warnings.length;
           await command('m'); await command('m');
           check(JSON.stringify(actor.flags.co2prism.actionEconomy) === emptyBudget && warnings.length === warningCount, 'Impossible spend mutated or spammed');
-          check(bar.budgetCommands.every(button => !button.disabled) && bar.budgetCommands.find(button => button.dataset.co2prismTime === 'm').title.includes('Aucun temps compatible'), 'Spent command disabled');
+          check(bar.budgetCommands.every(button => !button.disabled) && bar.budgetCommands.find(button => button.dataset.co2prismTime === 'm').dataset.tooltipText.includes('Aucun temps compatible'), 'Spent command disabled');
           await resetBudget(); await command('l'); movement('0', '0');
           check(halos() === '', 'Limited spend halos');
           await command('a', true); check(halos() === 'a', 'A bonus restores halo');
@@ -1147,7 +1147,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
                 check(bounds.left >= -0.1 && bounds.top >= -0.1 && bounds.right <= innerWidth + 0.1 && bounds.bottom <= innerHeight + 0.1, size + ' 15A screen bounds');
                 check(name.top > health.bottom && Math.abs(name.right - health.right) < 5
                   && name.bottom <= bounds.bottom + 0.1, size + ' V.3 bandeau sous les jauges');
-                check(bar.name.title === actor.name && getComputedStyle(bar.name).textOverflow === 'ellipsis', size + ' 15A long name');
+                check(bar.name.dataset.tooltipText === actor.name && getComputedStyle(bar.name).textOverflow === 'ellipsis', size + ' 15A long name');
                 check(toggle.bottom < portrait.top && movementButton.disabled
                   && Math.abs(toggle.left + toggle.width / 2 - portrait.left - portrait.width / 2) < 1,
                   size + ' V.3 commande de mouvement au-dessus du portrait');
@@ -1323,7 +1323,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               check(cells.every(cell => Math.abs(cell.getBoundingClientRect().top - cells[0].getBoundingClientRect().top) < 1),
                 language + size + ' one line of cells');
               for (const button of [bar.movementZonesButton, bar.movementReset, bar.movementValidate]) {
-                check(!button.textContent.trim() && button.querySelector('i.fa-solid') && button.title && button.getAttribute('aria-label'),
+                check(!button.textContent.trim() && button.querySelector('i.fa-solid') && button.dataset.tooltipText && button.getAttribute('aria-label'),
                   language + size + ' labelled icon only');
               }
             }
@@ -1548,7 +1548,24 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             game.tooltip.activate(tileFor('bag'));
             check(game.tooltip.tooltip.textContent.includes('Details of bag') &&
               !game.tooltip.tooltip.querySelector('[onerror]'), 'Native equipment tooltip sanitizes item description');
+            const prismTooltip = game.tooltip.tooltip;
+            check(prismTooltip.classList.contains('co2prism-tooltip') &&
+              getComputedStyle(prismTooltip).overflowWrap === 'anywhere' &&
+              prismTooltip.getBoundingClientRect().width < innerWidth, 'Prism tooltip is scoped and constrained');
+            const longText = root.appendChild(document.createElement('span'));
+            longText.dataset.tooltipText = 'Long heading\\n' + 'unbreakable'.repeat(380);
+            game.tooltip.activate(longText);
+            check(prismTooltip.textContent === longText.dataset.tooltipText &&
+              prismTooltip.scrollWidth <= prismTooltip.clientWidth + 1 &&
+              prismTooltip.getBoundingClientRect().height < innerHeight,
+              'Long plain text wraps and remains within the viewport');
+            longText.remove();
+            const external = document.body.appendChild(document.createElement('span'));
+            external.dataset.tooltipText = 'Other module';
+            game.tooltip.activate(external);
+            check(!prismTooltip.classList.contains('co2prism-tooltip'), 'Prism theme leaves other Foundry tooltips alone');
             game.tooltip.deactivate();
+            external.remove();
           }
           const contextClick = node => !node.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true }));
           const toggleAllEquipment = async () => {
@@ -1773,7 +1790,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await bar.configWrites.get(actor);
           };
           await dropAction(0, groupRow.lastElementChild);
-          const firstShortcut = () => [...groupRow.children].find(slot => slot.title.includes('First'));
+          const firstShortcut = () => [...groupRow.children].find(slot => slot.dataset.tooltipText.includes('First'));
           const presetMenu = bar.presetActionMenu;
           const presetMenuOpen = () => presetMenu.matches(':popover-open');
           const ruleIcon = node => node.querySelector('.co2prism-slot-rule');
@@ -1970,13 +1987,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             members()[index].querySelector('button').click();
             await bar.configWrites.get(actor);
           }
-          check(!groupSlot() && [...bar.combatRows[0].children].some(slot => slot.title.includes('First') &&
+          check(!groupSlot() && [...bar.combatRows[0].children].some(slot => slot.dataset.tooltipText.includes('First') &&
             slot.classList.contains('co2prism-slot-executable') && slot.querySelector('.co2prism-slot-time')),
             'Removing quadrants restores a normal executable shortcut with its corner indicators');
-          const finalShortcut = [...bar.combatRows[0].children].find(slot => slot.title.includes('First'));
+          const finalShortcut = [...bar.combatRows[0].children].find(slot => slot.dataset.tooltipText.includes('First'));
           finalShortcut.querySelector('.co2prism-slot-remove').click();
           await bar.configWrites.get(actor);
-          check(![...bar.combatRows[0].children].some(slot => slot.title.includes('First')),
+          check(![...bar.combatRows[0].children].some(slot => slot.dataset.tooltipText.includes('First')),
             'The final remaining action is removed with the ordinary shortcut command');
           inventoryBlade.actions[0].properties.enabled = true;
           inventoryBlade.actions[1].conditions = [{ predicate: 'isLinkedActionActivated', object: '0' }];
@@ -1990,7 +2007,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           hooks.get('updateItem')(inventoryBlade);
           await settled();
           check(linkedGroup()?.dependencies.length === 1 && linkedGroup()?.available.length === 0 &&
-            conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo'),
+            conditionalZone.hidden && !root.querySelector('.co2prism-conditional-halo') &&
+            root.querySelector('.co2prism-linked-origin'),
             'An Item update removes availability but keeps the dependency');
           let releaseLinkedVisibility;
           inventoryBlade.actions[0].properties.enabled = true;
@@ -2011,7 +2029,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           inventoryBlade.actions[3].conditions = [conditionalLink('0'), conditionalLink('2')];
           inventoryBlade.actions[3].isVisible = async () => inventoryBlade.actions[2].properties.enabled;
           inventoryBlade.actions[2].properties.enabled = true;
-          await dropAction(2, [...groupRow.children].find(slot => slot.title.includes('First')));
+          await dropAction(2, [...groupRow.children].find(slot => slot.dataset.tooltipText.includes('First')));
           await dropAction(0, bar.combatRows[0].lastElementChild);
           await dropAction(1, bar.combatRows[0].lastElementChild);
           await settled();
@@ -2021,8 +2039,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             'Two sources render separate rows in native order with the ordinary badges');
           check(groupSlot().querySelectorAll('.co2prism-slot-quadrant.co2prism-conditional-halo').length === 2 &&
             !groupSlot().classList.contains('co2prism-conditional-halo') &&
-            [...bar.combatRows[0].children].some(slot => slot.title.includes('First') && slot.classList.contains('co2prism-conditional-halo')) &&
-            [...bar.combatRows[0].children].some(slot => slot.title.includes('Second') && !slot.classList.contains('co2prism-conditional-halo')),
+            [...bar.combatRows[0].children].some(slot => slot.dataset.tooltipText.includes('First') && slot.classList.contains('co2prism-conditional-halo')) &&
+            [...bar.combatRows[0].children].some(slot => slot.dataset.tooltipText.includes('Second') && !slot.classList.contains('co2prism-conditional-halo')),
             'All source representations are highlighted and the manually saved dependent remains separate');
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.position = { x: 40, y: 500 }; bar.layout();
@@ -2045,8 +2063,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await settled();
           const dispatchConditional = (index, options) => conditionalSquare(index).dispatchEvent(
             new MouseEvent('click', { bubbles: true, ...options }));
-          const persistentDependent = () => [...bar.combatRows[0].children].find(slot => slot.title.includes('Second'));
-          check(conditionalSquare(1).title === persistentDependent().title &&
+          const persistentDependent = () => [...bar.combatRows[0].children].find(slot => slot.dataset.tooltipText.includes('Second'));
+          check(conditionalSquare(1).dataset.tooltipText === persistentDependent().dataset.tooltipText &&
             !conditionalSquare(1).draggable && !conditionalSquare(1).querySelector('.co2prism-slot-remove'),
             'Temporary and permanent action share the tooltip, while temporary actions cannot be edited');
           for (const locked of [false, true]) {
@@ -2368,7 +2386,13 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               const badge = paletteProbe.firstElementChild, color = getComputedStyle(paletteProbe).color;
               check(getComputedStyle(badge).backgroundColor === color, 'Action badge uses the semantic palette for ' + letter);
               if (subtype) {
-                check(getComputedStyle(root.querySelector('button.co2prism-time-' + subtype)).backgroundColor === color &&
+                const command = root.querySelector('button.co2prism-time-' + subtype);
+                const style = getComputedStyle(command);
+                check(style.getPropertyValue('--co2prism-time-color').trim() ===
+                  style.getPropertyValue(token).trim() &&
+                  (command.parentElement.classList.contains('co2prism-time-available')
+                    ? style.backgroundColor === color && style.backgroundImage !== 'none'
+                    : style.backgroundColor !== color) &&
                   getComputedStyle(paletteProbe.lastElementChild, '::before').backgroundColor === color,
                   'Budget command and indicator share the badge color for ' + letter);
               }

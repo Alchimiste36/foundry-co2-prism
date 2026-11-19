@@ -23,7 +23,7 @@ function setup() {
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
-  const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
+  const node = () => ({ textContent: "", dataset: {}, style: { setProperty(key, value) { this[key] = value; } } });
   bar.gauges = Object.fromEntries(["recovery", "fortune", "mana", "hp"].map(key => [key, { fill: node(), text: node() }]));
   bar.portrait = { getAttribute(key) { return this[key]; }, setAttribute(key, value) { this[key] = value; } };
   bar.art = { setAttribute(key, value) { this[key] = value; } };
@@ -636,9 +636,9 @@ test("déplacement depuis le portrait, verrouillage et position utilisateur", ()
   };
   context.window = { innerWidth: 1000, innerHeight: 800 };
   const capture = new Set();
-  bar.handle = { setPointerCapture: id => capture.add(id), hasPointerCapture: id => capture.has(id),
+  bar.handle = { dataset: {}, setPointerCapture: id => capture.add(id), hasPointerCapture: id => capture.has(id),
     releasePointerCapture: id => capture.delete(id), classList: { toggle() {} } };
-  bar.lock = { setAttribute() {} };
+  bar.lock = { dataset: {}, setAttribute() {} };
   bar.element = { style: { left: "40px", top: "400px", setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
     return { left: parseFloat(this.style.left), top: parseFloat(this.style.top), width: 430, height: 306 };
   } };
@@ -812,7 +812,7 @@ test("repos : handlers du registre, absence, ambiguïté et garde des doubles cl
   const { bar, context, a, calls, button } = setupActions();
   await bar.performAction("fastRest");
   assert.equal(button("fastRest").disabled, true);
-  assert.equal(button("fastRest").title, "CO2PRISM.RestUnavailable");
+  assert.equal(button("fastRest").dataset.tooltipText, "CO2PRISM.RestUnavailable");
   const rest = { id: "fastRest", handler: actor => calls.push({ rest: actor }) };
   context.game.system.CONST.restActions = [rest, { id: "fullRest", handler: actor => calls.push({ full: actor }) }];
   bar.refreshActor();
@@ -1051,10 +1051,10 @@ function setupSkills() {
   context.game.settings = { get: () => "M", set() {} };
   bar.layout();
   bar.skillsPanel = { hidden: true };
-  bar.skillsToggle = { setAttribute(key, value) { this[key] = value; } };
+  bar.skillsToggle = { dataset: {}, setAttribute(key, value) { this[key] = value; } };
   const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
   bar.skillNodes = ["for", "agi", "con", "cha", "int", "vol", "per"].map(key => ({ key,
-    value: node(), count: node(), button: { setAttribute(key, value) { this[key] = value; } } }));
+    value: node(), count: node(), button: { dataset: {}, setAttribute(key, value) { this[key] = value; } } }));
   // L'extraction HTML réelle est vérifiée dans Edge.
   context.document = { createElement: () => {
     const template = { innerHTML: "" };
@@ -1113,8 +1113,8 @@ test("Compétences : valeurs signées, compte des bonus et actualisations native
   assert.equal(bar.skillNodes[5].value.textContent, "+0");
   assert.equal(bar.skillNodes[0].count.textContent, "(2)");
   assert.equal(bar.skillNodes[1].count.textContent, "(0)");
-  assert.match(bar.skillNodes[0].button.title, /Métier — \+4/);
-  assert.match(bar.skillNodes[0].button.title, /Seulement en montagne/);
+  assert.match(bar.skillNodes[0].button.dataset.tooltipText, /Métier — \+4/);
+  assert.match(bar.skillNodes[0].button.dataset.tooltipText, /Seulement en montagne/);
   a.system.abilities.for.value = -2;
   bonuses.for.push({ name: "Nouvelle capacité", value: 9 });
   hooks.get("updateActiveEffect")({ parent: a });
