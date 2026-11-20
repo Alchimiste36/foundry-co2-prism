@@ -20,6 +20,7 @@ function setup() {
   vm.runInContext(readFileSync(new URL("../module/movement/movement-tracker.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/import[^;]+;/g, "").replace(/export /g, ""), context);
+  vm.runInContext(readFileSync(new URL("../module/combat/defense.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
@@ -814,7 +815,7 @@ test("repos : handlers du registre, absence, ambiguïté et garde des doubles cl
   const { bar, context, a, calls, button } = setupActions();
   await bar.performAction("fastRest");
   assert.equal(button("fastRest").disabled, true);
-  assert.equal(button("fastRest").dataset.tooltipText, "CO2PRISM.RestUnavailable");
+  assert.equal(button("fastRest").dataset.co2prismTooltipText, "CO2PRISM.RestUnavailable");
   const rest = { id: "fastRest", handler: actor => calls.push({ rest: actor }) };
   context.game.system.CONST.restActions = [rest, { id: "fullRest", handler: actor => calls.push({ full: actor }) }];
   bar.refreshActor();
@@ -1109,15 +1110,15 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
 test("Compétences : valeurs signées, compte des bonus et actualisations natives", async () => {
   const { bar, a, bonuses, hooks } = setupSkills();
   bonuses.for = [{ name: "Métier", value: 4, description: "Long description", pathName: "Voie du métier", additionalInfos: "Seulement en montagne" },
-    { name: "Bonus général", value: 2 }];
+    { name: "Capacité libre", sourceType: "capacity", value: 2 }];
   await bar.setPanelState("competences", true);
   assert.equal(bar.skillNodes[0].value.textContent, "+3");
   assert.equal(bar.skillNodes[1].value.textContent, "-1");
   assert.equal(bar.skillNodes[5].value.textContent, "+0");
   assert.equal(bar.skillNodes[0].count.textContent, "(2)");
   assert.equal(bar.skillNodes[1].count.textContent, "(0)");
-  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Métier — Voie du métier — \+4/);
-  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Seulement en montagne/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /\+4 — Seulement en montagne — Métier — Voie du métier/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /\+2 — Capacité libre — CO2PRISM.Paths.OffPaths/);
   assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Base : \+3/);
   assert.doesNotMatch(bar.skillNodes[0].button.dataset.co2prismDescription, /Long description/);
   assert.equal(bar.skillNodes[1].button.dataset.co2prismDescription, "CO.abilities.long.agi\nBase : -1");
@@ -1599,16 +1600,16 @@ test("presets de mains : MAJ délègue la politique des mains libres à CO2", as
 test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante", async () => {
   const { bar, a, payload } = setupShortcuts();
   const ref = bar.shortcutFromDrop(a, payload());
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1, 1]);
   await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
   await bar.saveShortcut(a, 1, bar.slotRows()[0][1], ref);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1, 1]);
   const empty = bar.slotRows()[0].at(-1);
   await Promise.all([bar.saveShortcut(a, 1, empty, ref), bar.saveShortcut(a, 1, empty, ref)]);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 1, 1]);
   assert.deepEqual(Array.from(bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal), slot => slot.order), [0, 1]);
   await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), ref);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 2]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 2, 1]);
   assert.ok(bar.slotRows().every(row => row.filter(slot => slot.terminal).length === 1));
   assert.equal(bar.slotRows()[0][0].hand, "left");
   assert.equal(bar.slotRows()[0][1].hand, "right");
@@ -1889,9 +1890,9 @@ test("raccourcis : références natives seules, restauration, isolation et dispa
   assert.deepEqual(a.flags.co2prism.shortcuts, slots);
   a.items.set(item.id, item);
   await bar.setActivePreset(2);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [4, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [4, 1, 1]);
   const { actor: b } = create("other"); select(b);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1, 1]);
   select(a); await bar.setActivePreset(1);
   assert.equal(bar.slotRows()[0].length, 4);
   const reloaded = setupConfiguration();
@@ -2711,4 +2712,70 @@ test("12D commande AM : ajout permis, dépense UI refusée, moteur polyvalent pr
   assert.equal(await bar.changeEconomy("spend", "a"), true);
   assert.equal(a.flags.co2prism.actionEconomy.bonus.am, 0);
   assert.equal(a.flags.co2prism.actionEconomy.branch, "undecided");
+});
+
+test("Defense CO2: confirmation, exclusive status and budget rollback", async () => {
+  const { a, bar, context, economy } = await setupTimedExecution();
+  context.game.system.CONST = { defenseStances: [{ id: "partialDef" }, { id: "fullDef" }] };
+  const statuses = new Set(), calls = [];
+  let refuse = false;
+  a.hasEffect = id => statuses.has(id);
+  a.canActivateDefenseStance = id => [...statuses].every(status => status === id);
+  a.toggleStatusEffect = async (id, { active }) => {
+    calls.push([id, active]);
+    if (active && refuse) return false;
+    if (active) statuses.add(id);
+    else statuses.delete(id);
+    return active;
+  };
+  await economy.grant("a"); await economy.grant("l");
+  refuse = true;
+  assert.equal(await bar.activateDefense("partialDef"), false);
+  assert.equal(economy.getSnapshot().bonus.a, 1);
+  refuse = false;
+  const activating = bar.activateDefense("partialDef");
+  assert.equal(await bar.activateDefense("fullDef"), false);
+  assert.equal(await activating, true);
+  assert.equal(await bar.activateDefense("partialDef"), false);
+  assert.equal(await bar.activateDefense("fullDef"), false);
+  assert.deepEqual([...statuses], ["partialDef"]);
+  assert.equal(economy.getSnapshot().bonus.a, 0);
+  assert.equal(economy.getSnapshot().bonus.l, 1);
+  statuses.clear();
+  const setFlag = a.setFlag;
+  a.setFlag = async () => { throw Error("write failed"); };
+  assert.equal(await bar.activateDefense("fullDef"), false);
+  assert.deepEqual(calls.slice(-2), [["fullDef", true], ["fullDef", false]]);
+  assert.equal(statuses.size, 0);
+  assert.equal(economy.getSnapshot().bonus.l, 1);
+  a.setFlag = setFlag;
+  assert.equal(await bar.activateDefense("fullDef"), true);
+  assert.equal(economy.getSnapshot().bonus.l, 0);
+  await economy.spend("l");
+  statuses.clear();
+  const count = calls.length;
+  assert.equal(await bar.activateDefense("partialDef"), false);
+  assert.equal(await bar.activateDefense("fullDef"), false);
+  assert.equal(calls.length, count);
+});
+
+test("Tokens visibility uses the saved Foundry user setting and defaults on", () => {
+  const { context, hooks } = setup();
+  const registrations = new Map();
+  let stored;
+  context.game.system = { id: "co2" };
+  context.game.settings = {
+    register: (module, key, data) => registrations.set(key, data),
+    get: (_module, key) => stored ?? registrations.get(key)?.default
+  };
+  hooks.get("init")();
+  assert.equal(registrations.get("visible").scope, "user");
+  assert.equal(registrations.get("visible").default, true);
+  const controls = { tokens: { tools: {} }, measure: { tools: {} } };
+  hooks.get("getSceneControlButtons")(controls);
+  assert.equal(controls.tokens.tools.co2prism.active, true);
+  assert.deepEqual(Object.keys(controls.measure.tools), []);
+  stored = false;
+  hooks.get("getSceneControlButtons")(controls);
+  assert.equal(controls.tokens.tools.co2prism.active, false);
 });

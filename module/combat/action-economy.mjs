@@ -72,8 +72,8 @@ export class ActionEconomy {
     return snapshot(readState(this.actor));
   }
 
-  spend(type) {
-    return this.#mutate(state => spendFromState(state, type));
+  spend(type, { validate, confirm, rollback } = {}) {
+    return this.#mutate(state => spendFromState(state, type), validate, { confirm, rollback });
   }
 
   getResetVersion() { return resetVersions.get(this.actor) ?? 0; }
@@ -103,17 +103,17 @@ export class ActionEconomy {
     });
   }
 
-  reset() {
+  reset({ beforeReset } = {}) {
     if (this.actor && typeof this.actor === "object") resetVersions.set(this.actor, this.getResetVersion() + 1);
     return this.#mutate(state => {
       const initial = initialState();
       const changed = JSON.stringify(state) !== JSON.stringify(initial);
       Object.assign(state, initial);
       return { success: true, changed };
-    });
+    }, undefined, { before: beforeReset });
   }
 
-  #mutate(operation, validate = () => true) {
+  #mutate(operation, validate = () => true, { before: prepare, confirm, rollback } = {}) {
     const actor = this.actor;
     if (!actor || typeof actor !== "object") return Promise.resolve({ success: false, changed: false,
       consumed: null, reason: "invalid-actor", state: this.getSnapshot() });
@@ -126,13 +126,16 @@ export class ActionEconomy {
       if (!user || typeof actor.setFlag !== "function" || typeof actor.getFlag !== "function"
         || !(user.isGM || actor.testUserPermission?.(user, "OWNER"))) return result(false, "forbidden");
       if (!validate()) return result(false, "context-changed");
+      if (prepare) await prepare();
       const next = structuredClone(before);
       const outcome = operation(next);
       if (!outcome.success || !outcome.changed) return result(outcome.success, outcome.reason ?? null, outcome);
+      if (confirm && !await confirm()) return result(false, "unconfirmed");
       try {
         await actor.setFlag(MODULE, FLAG, next);
         return result(true, null, outcome, next);
       } catch {
+        if (rollback) await rollback();
         return result(false, "persistence-failed", outcome.requiredCount === undefined ? {} : { consumedCount: 0, requiredCount: outcome.requiredCount });
       }
     });

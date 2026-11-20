@@ -4,9 +4,9 @@
       <span
         class="co2prism-combat-number"
         data-co2prism-combat-value="def"
-        data-tooltip-text="{{localize 'CO2PRISM.Combat.Defense'}}"
+        data-co2prism-tooltip-text="{{localize 'CO2PRISM.Combat.Defense'}}"
       >{{localize 'CO2PRISM.Unavailable'}}</span>
-      <span class="co2prism-defense-reduction" data-tooltip-text="{{localize 'CO2PRISM.Combat.Reduction'}}">
+      <span class="co2prism-defense-reduction" data-co2prism-tooltip-text="{{localize 'CO2PRISM.Combat.Reduction'}}">
         <i class="fa-solid fa-universal-access" aria-hidden="true"></i>
         <span
           class="co2prism-combat-number co2prism-dr"
@@ -14,25 +14,33 @@
         >{{localize 'CO2PRISM.Unavailable'}}</span>
       </span>
       <div class="co2prism-defense-states">
-        <span
+        <button
+          type="button"
           class="co2prism-icon co2prism-defense-control co2prism-defense-partial"
-          aria-disabled="true"
-          data-tooltip-text="{{localize 'CO2PRISM.Combat.PartialDefense'}}"
+          disabled
+          aria-pressed="false"
+          aria-label="{{localize 'CO2PRISM.Combat.PartialDefense'}}"
+          data-co2prism-defense="partialDef"
+          data-co2prism-tooltip-text="{{localize 'CO2PRISM.Combat.PartialDefense'}}"
         >
           <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
           class="co2prism-icon co2prism-defense-control co2prism-defense-full"
-          aria-disabled="true"
-          data-tooltip-text="{{localize 'CO2PRISM.Combat.FullDefense'}}"
+          disabled
+          aria-pressed="false"
+          aria-label="{{localize 'CO2PRISM.Combat.FullDefense'}}"
+          data-co2prism-defense="fullDef"
+          data-co2prism-tooltip-text="{{localize 'CO2PRISM.Combat.FullDefense'}}"
         >
           <i class="fa-solid fa-shield" aria-hidden="true"></i>
-        </span>
+        </button>
       </div>
     </div>
     <div
       class="co2prism-combat-stat co2prism-movement"
-      data-tooltip-text="{{localize 'CO2PRISM.Combat.RemainingMovement'}}"
+      data-co2prism-tooltip-text="{{localize 'CO2PRISM.Combat.RemainingMovement'}}"
     >
       <span class="co2prism-movement-label">{{localize 'CO2PRISM.Combat.Meters'}}</span>
       <span

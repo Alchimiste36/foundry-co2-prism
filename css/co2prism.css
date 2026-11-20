@@ -120,6 +120,8 @@
   --skills: 0px;
   --hands: 0px;
   --frame-end: 4;
+  --shortcut-row-height: calc((var(--portrait) - 2 * var(--gap)) / 3);
+  --shortcut-size: calc(var(--shortcut-row-height) - var(--budget-scrollbar-size));
   --tactical-width: calc(212 * var(--unit));
   --card: calc(126 * var(--unit));
   --gap: calc(8 * var(--unit));
@@ -172,7 +174,7 @@
 .co2prism-art > .co2prism-combat > *,
 .co2prism-art > .co2prism-combat-slots { z-index: 3; }
 .co2prism-art > .co2prism-core > *, .co2prism-identity { z-index: 4; }
-.co2prism-art [hidden] { display: none !important; }
+#co2prism-bar[hidden], .co2prism-art [hidden] { display: none !important; }
 .co2prism-art button { transition: none; }
 @media (prefers-reduced-motion: no-preference) {
   #co2prism-bar .co2prism-corner button,
@@ -243,13 +245,13 @@
 .co2prism-resource {
   display: grid;
   grid-template-columns: calc(30 * var(--unit)) max-content minmax(0, 1fr) auto;
+  padding-inline: calc(3 * var(--unit));
   gap: calc(4 * var(--unit));
   grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
   position: relative;
   min-width: 0;
 }
-.co2prism-resource .co2prism-gauge { grid-area: 1 / 3; pointer-events: auto; }
 .co2prism-bar .co2prism-resource .co2prism-value {
   grid-area: 1 / 2;
   z-index: 1;
@@ -290,6 +292,7 @@
   top: 0;
   height: 100%;
   width: var(--fill, 0%);
+  pointer-events: none;
   background:
     linear-gradient(90deg, transparent 30%, #12141b36 78%, #12141b75),
     linear-gradient(180deg, color-mix(in srgb, var(--co2prism-gauge-color) 63%, var(--prism-text)),
@@ -308,10 +311,10 @@
 .co2prism-gauge-health {
   --co2prism-gauge-color: var(--prism-health);
 }
-.co2prism-resource:has(.co2prism-gauge-orange) { --prism-resource-icon: var(--prism-recovery); }
-.co2prism-resource:has(.co2prism-gauge-resource) { --prism-resource-icon: var(--prism-fortune); }
-.co2prism-resource:has(.co2prism-gauge-purple) { --prism-resource-icon: var(--prism-mana); }
-.co2prism-resource:has(.co2prism-gauge-health) { --prism-resource-icon: var(--prism-health); }
+.co2prism-resource.co2prism-gauge-orange { --prism-resource-icon: var(--prism-recovery); }
+.co2prism-resource.co2prism-gauge-resource { --prism-resource-icon: var(--prism-fortune); }
+.co2prism-resource.co2prism-gauge-purple { --prism-resource-icon: var(--prism-mana); }
+.co2prism-resource.co2prism-gauge-health { --prism-resource-icon: var(--prism-health); }
 .co2prism-bar .co2prism-resource > .co2prism-icon {
   color: color-mix(in srgb, var(--prism-resource-icon) 25%, var(--prism-text));
   font-size: calc(19 * var(--unit));
@@ -501,11 +504,6 @@
 .co2prism-path-group[data-collapsed="false"] > .co2prism-path-header { grid-row: 1 / 3; }
 .co2prism-path-group[data-collapsed="false"] > :is(.co2prism-path-label, .co2prism-path-items) { grid-column: 2; }
 .co2prism-path-group[data-path-key="off-paths"][data-collapsed="false"] > .co2prism-path-header { grid-row: 1; }
-.co2prism-path-group[data-collapsed="false"] > .co2prism-path-tile.co2prism-path-header:not(.co2prism-path-off) {
-  width: var(--path-header-width);
-  height: 100%;
-  min-height: var(--inventory-tile);
-}
 .co2prism-equipment-items, .co2prism-path-items {
   display: grid;
   gap: var(--inventory-tile-gap);
@@ -514,10 +512,11 @@
   grid-template-columns: repeat(auto-fill, var(--inventory-tile));
 }
 .co2prism-bar .co2prism-path-off.co2prism-path-header {
-  width: var(--inventory-tile);
-  height: var(--inventory-tile);
+  display: grid;
+  place-items: center;
+  font-size: var(--inventory-tile);
+  color: var(--prism-command);
 }
-.co2prism-path-off img { width: 100%; height: 100%; object-fit: contain; }
 .co2prism-bar :is(.co2prism-equipment-category, .co2prism-path-off)[aria-expanded="true"] { color: var(--prism-accent); }
 .co2prism-bar :is(.co2prism-equipment-category, .co2prism-path-off):disabled { opacity: .66; cursor: default; }
 .co2prism-bar :is(.co2prism-equipment-category, .co2prism-path-off):focus-visible { outline: 1px solid var(--prism-focus); }
@@ -573,6 +572,8 @@
 }
 .co2prism-path-tile:focus-visible { outline: 2px solid var(--prism-focus); }
 .co2prism-bar .co2prism-path-tile.co2prism-path-header {
+  width: var(--path-header-width);
+  height: var(--path-header-width);
   border-color: var(--prism-muted);
   flex: none;
 }
@@ -725,7 +726,20 @@
   gap: calc(5 * var(--unit));
 }
 .co2prism-defense-reduction { color: var(--prism-defense); font-size: calc(14 * var(--unit)); pointer-events: auto; }
-.co2prism-defense-states, .co2prism-movement-total { grid-column: 1 / -1; }
+.co2prism-movement-total { grid-column: 1 / -1; }
+.co2prism-combat-stat.co2prism-defense {
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  justify-items: stretch;
+}
+.co2prism-defense .co2prism-defense-states {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(3 * var(--unit));
+}
+.co2prism-combat-stat.co2prism-movement {
+  background: color-mix(in srgb, var(--prism-defense) 24%, var(--prism-nucleus));
+}
+.co2prism-movement [data-co2prism-combat-value='meters'] { margin-bottom: var(--gap); }
 .co2prism-movement-label { text-align: center; white-space: normal; }
 .co2prism-movement-label, .co2prism-combat-number, .co2prism-time {
   font-family: var(--prism-font); line-height: 1;
@@ -745,7 +759,7 @@
   gap: calc(4 * var(--co2prism-unit)); line-height: 1;
   font: 650 calc(24 * var(--co2prism-unit)) / 1 var(--prism-font);
 }
-.co2prism-movement :is(.co2prism-stats-steps, .co2prism-combat-number) { color: var(--prism-move); }
+.co2prism-movement :is(.co2prism-stats-steps, .co2prism-combat-number) { color: var(--prism-text); }
 .co2prism-stats-steps { font-size: calc(19 * var(--unit)); }
 .co2prism-defense :is(.co2prism-icon, .co2prism-combat-number) { color: var(--prism-defense); }
 .co2prism-combat-number {
@@ -755,17 +769,32 @@
   font-weight: 700;
 }
 .co2prism-defense .co2prism-defense-control {
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 1;
+  border: 1px solid var(--prism-edge);
+  padding: 0;
+  margin: 0;
+  background: var(--defense-color);
   color: var(--prism-text);
   font-size: calc(17 * var(--unit));
-  padding: calc(3 * var(--unit));
   pointer-events: auto;
-  cursor: default;
 }
-.co2prism-defense-full { background: var(--prism-limited); }
-.co2prism-defense-partial { background: var(--prism-attack); }
+.co2prism-defense-full { --defense-color: var(--prism-limited); }
+.co2prism-defense-partial { --defense-color: var(--prism-attack); }
+.co2prism-defense .co2prism-defense-control:enabled { box-shadow: 0 0 calc(7 * var(--unit)) var(--defense-color); }
+.co2prism-defense .co2prism-defense-control:disabled:not([aria-pressed='true']) { filter: grayscale(1); opacity: .55; }
+.co2prism-defense .co2prism-defense-control[aria-pressed='true'] { border-color: var(--prism-selected); opacity: 1; }
+.co2prism-defense .co2prism-defense-control:focus-visible { outline: 2px solid var(--prism-focus); outline-offset: -2px; }
 .co2prism-combat-stat .co2prism-combat-number { font-size: calc(min(26, var(--co2prism-combat-size, 26)) * var(--unit)); }
+.co2prism-defense > [data-co2prism-combat-value='def'] {
+  font-size: calc(min(42, var(--co2prism-combat-size, 42)) * var(--unit));
+}
 .co2prism-combat-stat .co2prism-dr { font-size: calc(min(16, var(--co2prism-combat-size, 16)) * var(--unit)); }
 .co2prism-combat-slot {
+  --badge-unit: var(--unit);
   position: relative; box-sizing: border-box; flex: 0 0 var(--card);
   width: var(--card); height: var(--card);
   border: max(1px, calc(3 * var(--co2prism-unit))) solid transparent;
@@ -795,7 +824,7 @@
 .co2prism-shortcut-preview {
   position: fixed;
   inset: 0 auto auto 0;
-  width: var(--card);
+  width: var(--shortcut-size);
   margin: 0;
   padding: 0;
   border: 0;
@@ -803,16 +832,6 @@
   overflow: visible;
 }
 .co2prism-shortcut-preview, .co2prism-shortcut-preview * { pointer-events: none; }
-.co2prism-shortcut-preview-title {
-  padding: calc(6 * var(--co2prism-unit));
-  background: var(--prism-tooltip-surface);
-  color: var(--prism-selected);
-  border-radius: calc(6 * var(--co2prism-unit));
-  box-shadow: 0 3px 10px var(--prism-shadow);
-  font: 650 max(11px, calc(21 * var(--co2prism-unit))) / 1.2 var(--prism-font);
-  text-align: center;
-  overflow-wrap: anywhere;
-}
 .co2prism-slot-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .co2prism-slot-type { position: absolute; top: 0; left: 0; }
 .co2prism-slot-time { position: absolute; top: 0; right: 0; }
@@ -822,9 +841,9 @@
   left: 50%;
   translate: -50% 0;
   z-index: 3;
-  padding: calc(4 * var(--co2prism-unit));
+  padding: calc(4 * var(--badge-unit));
   text-shadow: var(--prism-text-shadow), 0 0 1px var(--prism-ink);
-  font-size: calc(26 * var(--co2prism-unit));
+  font-size: calc(26 * var(--badge-unit));
   line-height: 1;
   pointer-events: none;
 }
@@ -1031,7 +1050,7 @@
   min-width: 0;
   gap: var(--gap);
   padding-inline-start: var(--gap);
-  grid-template-columns: minmax(0, 1fr);
+  grid-template: repeat(3, var(--shortcut-row-height)) / minmax(0, 1fr);
 }
 .co2prism-combat-row {
   z-index: 1;
@@ -1040,14 +1059,25 @@
   background: transparent;
   border-radius: calc(8 * var(--co2prism-unit));
 }
+.co2prism-combat-row:empty { pointer-events: none; }
+.co2prism-combat-row {
+  scrollbar-width: auto;
+}
+.co2prism-combat-row > .co2prism-combat-slot,
+.co2prism-shortcut-preview > .co2prism-combat-slot {
+  --badge-unit: calc(.62 * var(--unit));
+  flex-basis: var(--shortcut-size);
+  width: var(--shortcut-size);
+  height: var(--shortcut-size);
+}
 .co2prism-conditional-zone {
   --row-gap: calc(8 * var(--co2prism-unit));
   position: absolute;
   left: var(--gap);
   bottom: calc(100% + var(--row-gap) + var(--upper-clearance));
   z-index: 2;
-  width: calc(100% - var(--gap));
-  max-height: max(0px, calc(var(--conditional-room, 0px) - var(--upper-clearance) - var(--row-gap) - 4px));
+  width: max(0px, calc(var(--prism-upper-right, 100vw) - var(--portrait) - var(--resources) - var(--hands) - var(--gap)));
+  max-height: max(0px, calc(var(--conditional-room, 0px) - var(--upper-clearance) - var(--row-gap)));
   display: flex;
   flex-direction: column-reverse;
   align-items: flex-start;
@@ -1056,17 +1086,11 @@
   scrollbar-width: thin;
   pointer-events: none;
 }
-.co2prism-conditional-zone[data-placement="below"] {
-  top: calc(100% + var(--row-gap));
-  bottom: auto;
-  max-height: max(0px, calc(var(--conditional-room, 0px) - var(--row-gap) - 4px));
-  flex-direction: column;
-}
 .co2prism-conditional-row {
   flex: none;
   width: max-content;
   max-width: 100%;
-  min-height: var(--card);
+  min-height: var(--shortcut-size);
 }
 .co2prism-conditional-halo { --prism-card-halo: var(--prism-conditional); }
 :is(.co2prism-conditional-halo, .co2prism-linked-origin)::before {
@@ -1081,6 +1105,7 @@
     inset 0 0 calc(18 * var(--co2prism-unit)) color-mix(in srgb, var(--prism-card-halo) 75%, transparent);
 }
 .co2prism-upper-line {
+  column-gap: var(--gap);
   grid-area: 2 / 3;
   align-self: end;
   justify-self: start;
@@ -1113,8 +1138,8 @@
 .co2prism-combat-row::-webkit-scrollbar, .co2prism-budget-scroll::-webkit-scrollbar { height: var(--budget-scrollbar-size); }
 .co2prism-combat-row::-webkit-scrollbar-thumb, .co2prism-budget-scroll::-webkit-scrollbar-thumb { background: var(--prism-scroll); }
 .co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost {
-  z-index: 3; color: var(--prism-text); padding: calc(4 * var(--co2prism-unit));
-  font-size: calc(26 * var(--co2prism-unit));
+  z-index: 3; color: var(--prism-text); padding: calc(4 * var(--badge-unit));
+  font-size: calc(26 * var(--badge-unit));
   line-height: 1;
   text-shadow: var(--prism-text-shadow);
   pointer-events: none;
@@ -1122,7 +1147,7 @@
 .co2prism-slot-time, .co2prism-slot-uses, .co2prism-slot-cost { font-family: var(--prism-font); font-weight: 700; }
 .co2prism-slot-time {
   display: grid; place-items: center; box-sizing: border-box;
-  width: calc(38 * var(--co2prism-unit)); height: calc(38 * var(--co2prism-unit));
+  width: calc(38 * var(--badge-unit)); height: calc(38 * var(--badge-unit));
   border-radius: 0 0 0 calc(6 * var(--co2prism-unit));
   box-shadow: inset 0 1px 0 var(--prism-glint);
   text-shadow: none;
