@@ -128,6 +128,7 @@
     "OpenSkills": "Expand the Skills panel",
     "CloseSkills": "Collapse the Skills panel",
     "SkillBonuses": "Skill bonuses",
+    "SkillBase": "Base: {value}",
     "Abilities": {
       "for": "STR",
       "agi": "AGI",

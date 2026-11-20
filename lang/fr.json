@@ -128,6 +128,7 @@
     "OpenSkills": "Déployer le volet Compétences",
     "CloseSkills": "Replier le volet Compétences",
     "SkillBonuses": "Bonus de compétence",
+    "SkillBase": "Base : {value}",
     "Abilities": {
       "for": "FOR",
       "agi": "AGI",

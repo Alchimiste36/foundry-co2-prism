@@ -1,14 +1,53 @@
-<div id="co2prism-bar" class="co2prism-bar" data-tooltip-class="co2prism-tooltip" aria-label="{{localize 'CO2PRISM.Title'}}">
+<div
+  id="co2prism-bar"
+  class="co2prism-bar"
+  data-tooltip-class="co2prism-tooltip"
+  aria-label="{{localize 'CO2PRISM.Title'}}"
+>
   <div class="co2prism-art" role="group" aria-label="{{localize 'CO2PRISM.NoActor'}}">
     {{{inventory}}}
-    {{{movement}}}
+    <div class="co2prism-upper-line" hidden>
+      {{{movement}}}
+      <div class="co2prism-budget-band" hidden>
+        <div
+          class="co2prism-budget-scroll"
+          tabindex="0"
+          role="region"
+          aria-label="{{localize 'CO2PRISM.Combat.ActionBudget'}}"
+        >
+          <div class="co2prism-time-bar"></div>
+        </div>
+        <button
+          type="button"
+          disabled
+          class="co2prism-budget-reset"
+          data-tooltip-text="{{localize 'CO2PRISM.Combat.ResetBudget'}}"
+          aria-label="{{localize 'CO2PRISM.Combat.ResetBudget'}}"
+        >
+          <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
     {{{skills}}}
     {{{core}}}
-    {{{effects}}}
+    <div class="co2prism-identity">
+      <span class="co2prism-name"></span>
+      {{{effects}}}
+    </div>
     {{{combat}}}
     {{{combatActions}}}
     <div popover="manual" class="co2prism-shortcut-preview"></div>
   </div>
-  <div popover="auto" class="co2prism-equipment-menu" role="group" aria-label="{{localize 'CO2PRISM.Equipment.Operations.Title'}}"></div>
-  <div popover="auto" class="co2prism-preset-action-menu" role="group" aria-label="{{localize 'CO2PRISM.PresetAction.Title'}}"></div>
+  <div
+    popover="auto"
+    class="co2prism-equipment-menu"
+    role="group"
+    aria-label="{{localize 'CO2PRISM.Equipment.Operations.Title'}}"
+  ></div>
+  <div
+    popover="auto"
+    class="co2prism-preset-action-menu"
+    role="group"
+    aria-label="{{localize 'CO2PRISM.PresetAction.Title'}}"
+  ></div>
 </div>

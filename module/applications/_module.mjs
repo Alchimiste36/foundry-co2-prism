@@ -1,4 +1,4 @@
-﻿import { ActionEconomy } from "../combat/action-economy.mjs";
+import { ActionEconomy } from "../combat/action-economy.mjs";
 
 import { MovementTracker, roundMovementCells } from "../movement/movement-tracker.mjs";
 import { MovementNotifications } from "../movement/movement-notifications.mjs";
@@ -99,6 +99,7 @@ class PrismBar {
     this.portrait = this.element.querySelector(".co2prism-portrait");
     this.name = this.element.querySelector(".co2prism-name");
     this.combatPanel = this.element.querySelector(".co2prism-combat");
+    this.budgetBand = this.element.querySelector(".co2prism-budget-band");
     this.combatToggle = this.element.querySelector(".co2prism-combat-toggle");
     this.combatToggle.addEventListener("click", event => {
       event.preventDefault();
@@ -108,13 +109,7 @@ class PrismBar {
     this.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key =>
       [key, this.element.querySelector(`[data-co2prism-combat-value="${key}"]`)]));
     this.combatEffects = this.element.querySelector(".co2prism-effects");
-    this.combatEffects.addEventListener("focusin", event => {
-      const effect = event.target.closest(".co2prism-effect");
-      if (effect) game.tooltip?.activate?.(effect);
-    });
-    this.combatEffects.addEventListener("focusout", event => {
-      if (game.tooltip?.element === event.target) game.tooltip.deactivate();
-    });
+    this.bindDescriptiveTooltips();
     this.combatEffects.addEventListener("wheel", event => {
       if (event.ctrlKey || event.shiftKey || event.deltaX || !event.deltaY) return;
       const band = this.combatEffects;
@@ -139,7 +134,7 @@ class PrismBar {
     this.budgetBar = this.element.querySelector(".co2prism-time-bar");
     this.budgetCommands = [...this.element.querySelectorAll("[data-co2prism-time]")];
     this.budgetReset = this.element.querySelector(".co2prism-budget-reset");
-    this.movementToggle = this.element.querySelector(".co2prism-movement-toggle");
+    this.upperLine = this.element.querySelector(".co2prism-upper-line");
     this.movementPanel = this.element.querySelector(".co2prism-movement-panel");
     this.movementValidate = this.movementPanel.querySelector(".co2prism-movement-validate");
     this.movementValidate.addEventListener("click", event => {
@@ -158,16 +153,14 @@ class PrismBar {
         this.movementZones.clear();
         this.movementZonesObserver.disconnect();
         this.presentationObserver?.disconnect();
+        this.tooltipListeners?.abort();
+        this.tooltipObserver?.disconnect();
+        this.clearDescriptiveTooltip();
         if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
       }
     });
     this.movementZonesObserver.observe(document.body, { childList: true });
     this.movementZonesObserver.observe(this.element, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
-    this.movementToggle.addEventListener("click", event => {
-      event.preventDefault(); event.stopPropagation();
-      if (event.detail > 1) return;
-      void this.toggleMovement();
-    });
     this.movementReset.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation(); void this.resetMovement();
     });
@@ -352,7 +345,11 @@ class PrismBar {
     const candidate = token?.actor;
     // Comme les feuilles CO2, réserver les statistiques aux observateurs autorisés.
     const actor = candidate?.testUserPermission(game.user, "OBSERVER") ? candidate : null;
-    if (actor !== this.actor || token !== this.token) this.shortcutVisibilityCache = null;
+    if (actor !== this.actor || token !== this.token) {
+      this.shortcutVisibilityCache = null;
+      this.clearDescriptiveTooltip();
+      this.tooltipHover = null;
+    }
     this.token = token;
     this.actor = actor;
     if (this.slotDrag && (this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
@@ -368,6 +365,7 @@ class PrismBar {
         ? Math.max(0, Math.min(100, current / maximum * 100)) : 0;
       if (nodes.text.textContent !== text) nodes.text.textContent = text;
       nodes.fill.style.setProperty("--fill", `${fill}%`);
+
       const label = `${game.i18n.localize(`CO2PRISM.Gauges.${key}`)} : ${text}`;
       nodes.fill.dataset.tooltipText = label;
       summaries.push(label);
@@ -453,10 +451,10 @@ class PrismBar {
     });
     this.pathsPanel.addEventListener("click", event => {
       if (event.button !== 0 || this.pathsPanel.hidden) return;
-      const disclosure = event.target.closest(".co2prism-path-disclosure");
-      if (disclosure) {
+      const header = event.target.closest(".co2prism-path-header");
+      if (header && this.canConfigure(this.actor) && !event.ctrlKey && !event.metaKey) {
         event.stopPropagation();
-        void this.togglePathGroups(disclosure.closest(".co2prism-path-group").dataset.pathKey);
+        void this.togglePathGroups(header.closest(".co2prism-path-group").dataset.pathKey);
         return;
       }
       const tile = event.target.closest(".co2prism-path-tile[data-item-id]");
@@ -466,7 +464,7 @@ class PrismBar {
       if (item?.uuid === tile.dataset.itemUuid && ["path", "capacity"].includes(item.type)) void this.openItemSheet(item);
     });
     this.pathsPanel.addEventListener("contextmenu", event => {
-      const header = event.target.closest(".co2prism-path-heading");
+      const header = event.target.closest(".co2prism-path-header");
       if (!header || this.pathsPanel.hidden) return;
       event.preventDefault();
       event.stopPropagation();
@@ -504,7 +502,7 @@ class PrismBar {
     this.pathsToggle.dataset.tooltipText = this.pathsToggle.disabled ? label
       : `${label}\n${game.i18n.localize("CO2PRISM.Paths.ToggleAllHint")}`;
     const dismissTooltip = () => {
-      if (game.tooltip?.element && this.pathsPanel.contains(game.tooltip.element)) game.tooltip.deactivate();
+      if (game.tooltip?.element && this.pathsPanel.contains(game.tooltip.element)) this.clearDescriptiveTooltip();
     };
     if (!open) {
       dismissTooltip();
@@ -523,7 +521,7 @@ class PrismBar {
     dismissTooltip();
     const scroll = this.pathsPanel.scrollTop;
     const active = this.pathsPanel.contains(document.activeElement) ? document.activeElement : null;
-    const disclosureKey = active?.classList.contains("co2prism-path-disclosure")
+    const disclosureKey = active?.classList.contains("co2prism-path-header")
       ? active.closest(".co2prism-path-group").dataset.pathKey : null;
     let nextFocus;
     this.pathsPanel.replaceChildren(...groups.map(({ path, capacities }, index) => {
@@ -551,32 +549,31 @@ class PrismBar {
         void this.prepareItemTooltip(node, item, this.itemTooltipDescription(item));
         return node;
       };
-      const header = path ? tile(path) : document.createElement("span");
+      const header = path ? tile(path) : document.createElement("button");
       header.classList.add("co2prism-path-header");
       if (!path) {
-        header.classList.add("co2prism-path-off");
-        header.dataset.tooltipText = title.textContent;
-        const icon = document.createElement("i");
-        icon.className = "fa-solid fa-circle-star";
-        icon.setAttribute("aria-hidden", "true");
+        header.type = "button";
+        header.classList.add("co2prism-path-off", "co2prism-path-tile");
+        const icon = document.createElement("img");
+        icon.src = "icons/svg/combat.svg";
+        icon.alt = "";
+        icon.draggable = false;
         header.append(icon);
+        header.setAttribute("aria-label", title.textContent);
+        header.dataset.tooltipText = title.textContent;
+        header.disabled = !canConfigure;
       }
-      const heading = document.createElement("header");
-      heading.className = "co2prism-path-heading";
-      const disclosure = document.createElement("button");
-      disclosure.type = "button";
-      disclosure.className = "co2prism-path-disclosure";
-      disclosure.disabled = !canConfigure;
-      disclosure.setAttribute("aria-expanded", String(!collapsed));
+      if (canConfigure) header.setAttribute("aria-expanded", String(!collapsed));
       const items = document.createElement("div");
       items.className = "co2prism-path-items";
       items.id = `co2prism-path-items-${index}`;
       items.hidden = collapsed;
-      disclosure.setAttribute("aria-controls", items.id);
-      disclosure.append(title);
-      if (key === disclosureKey) nextFocus = disclosure;
-      heading.append(header, disclosure);
-      group.append(heading, items);
+      if (canConfigure) header.setAttribute("aria-controls", items.id);
+      if (key === disclosureKey) nextFocus = header;
+      title.hidden = collapsed;
+      group.append(header);
+      if (path) group.append(title);
+      group.append(items);
       if (!collapsed) capacities.forEach(capacity => {
         const node = tile(capacity);
         node.dataset.learned = String(capacity.system.learned === true);
@@ -634,7 +631,7 @@ class PrismBar {
         return true;
       });
     });
-    this.equipmentGroups = EQUIPMENT_GROUPS.map(([key, glyph, subtypes]) => {
+    this.equipmentGroups = [...EQUIPMENT_GROUPS].reverse().map(([key, glyph, subtypes]) => {
       const group = document.createElement("section");
       group.className = "co2prism-equipment-group";
       const button = document.createElement("button");
@@ -643,8 +640,7 @@ class PrismBar {
       const icon = document.createElement("i");
       icon.className = `fa-solid ${glyph}`;
       icon.setAttribute("aria-hidden", "true");
-      const title = document.createElement("span");
-      button.append(icon, title);
+      button.append(icon);
       const items = document.createElement("div");
       items.className = "co2prism-equipment-items";
       items.id = `co2prism-equipment-${key}`;
@@ -656,7 +652,7 @@ class PrismBar {
       });
       group.append(button, items);
       this.equipmentPanel.append(group);
-      return { key, subtypes, group, button, title, items };
+      return { key, subtypes, group, button, items };
     });
   }
 
@@ -774,19 +770,70 @@ class PrismBar {
     }
   }
 
+  bindDescriptiveTooltips() {
+    this.tooltipListeners = new AbortController();
+    const { signal } = this.tooltipListeners;
+    const hover = event => {
+      this.tooltipHover = event.target instanceof Element ? event.target : null;
+      this.syncDescriptiveTooltip(event.shiftKey);
+    };
+    this.element.addEventListener("pointerover", hover, { signal });
+    this.element.addEventListener("pointermove", hover, { signal });
+    this.element.addEventListener("pointerout", event => {
+      if (this.element.contains(event.relatedTarget)) return;
+      this.tooltipHover = null;
+      this.clearDescriptiveTooltip();
+    }, { signal });
+    for (const type of ["keydown", "keyup"]) window.addEventListener(type, event => {
+      if (event.key === "Shift") this.syncDescriptiveTooltip(event.shiftKey);
+    }, { capture: true, signal });
+    window.addEventListener("blur", () => this.syncDescriptiveTooltip(false), { signal });
+    this.tooltipObserver = new MutationObserver(() => this.syncDescriptiveTooltip());
+    this.tooltipObserver.observe(this.element, {
+      subtree: true, childList: true, attributes: true,
+      attributeFilter: ["hidden", "data-co2prism-description", "data-co2prism-description-html"]
+    });
+  }
+
+  clearDescriptiveTooltip() {
+    const manager = globalThis.game?.tooltip;
+    if (this.descriptiveTooltip && manager?.element === this.descriptiveTooltip.node) manager.deactivate();
+    this.descriptiveTooltip = null;
+    for (const tooltip of globalThis.document?.querySelectorAll?.(".locked-tooltip.co2prism-description") ?? []) {
+      manager?.dismissLockedTooltip?.(tooltip);
+    }
+  }
+
+  syncDescriptiveTooltip(shift = this.tooltipShift) {
+    this.tooltipShift = shift;
+    const node = this.tooltipHover?.closest("[data-co2prism-description], [data-co2prism-description-html]");
+    const manager = game.tooltip;
+    if (!shift || !node?.isConnected || !this.element.contains(node) || !node.getClientRects().length) {
+      if (this.descriptiveTooltip) this.clearDescriptiveTooltip();
+      return;
+    }
+    if (!manager) return;
+    const text = node.dataset.co2prismDescription;
+    const html = node.dataset.co2prismDescriptionHtml;
+    const previous = this.descriptiveTooltip;
+    if (previous?.node === node && previous.text === text && previous.html === html && manager.element === node) return;
+    if (previous?.node !== node) this.clearDescriptiveTooltip();
+    manager.activate(node, { ...(html ? { html } : { text }), cssClass: "co2prism-tooltip co2prism-description" });
+    this.descriptiveTooltip = { node, text, html };
+  }
+
   itemTooltipDescription(item) {
     return item.testUserPermission(game.user, "OBSERVER") ? item.system.description : "";
   }
 
-  async prepareItemTooltip(tile, item, description) {
-    const name = `<strong>${foundry.utils.escapeHTML(item.name)}</strong>`;
-    tile.dataset.tooltipHtml = name;
+  async prepareItemTooltip(tile, item, description, label = item.name) {
+    const name = `<strong>${foundry.utils.escapeHTML(label)}</strong>`;
+    tile.dataset.co2prismDescriptionHtml = name;
     if (!description) return;
     try {
       const editor = foundry.applications.ux.TextEditor.implementation;
       const html = await editor.enrichHTML(description, { relativeTo: item, secrets: item.isOwner });
-      tile.dataset.tooltipHtml = `${name}${foundry.utils.cleanHTML(html)}`;
-      if (game.tooltip?.element === tile) game.tooltip.activate(tile);
+      tile.dataset.co2prismDescriptionHtml = `${name}${foundry.utils.cleanHTML(html)}`;
     } catch (error) {
       console.warn("co2prism | Item tooltip", item.uuid, error);
     }
@@ -811,10 +858,10 @@ class PrismBar {
     const locked = game.settings.get(MODULE, "locked");
     const { hiddenEquipment } = this.configuration;
     for (const entry of this.equipmentGroups) {
-      const { key, subtypes, button, title, items } = entry;
+      const { key, subtypes, group, button, items } = entry;
       const expanded = !this.configuration.equipmentCollapsed[key];
+      group.dataset.collapsed = String(!expanded);
       const label = game.i18n.localize(`CO2PRISM.Equipment.Groups.${key}`);
-      title.textContent = label;
       button.disabled = !canConfigure;
       button.setAttribute("aria-expanded", String(expanded));
       button.setAttribute("aria-label", label);
@@ -834,13 +881,6 @@ class PrismBar {
         [item.uuid, item.name, item.img, hiddenEquipment.has(item.id), descriptions[index], item.isOwner]));
       if (signature === entry.signature) continue;
       entry.signature = signature;
-      if (!displayed.length) {
-        const empty = document.createElement("span");
-        empty.className = "co2prism-inventory-empty";
-        empty.textContent = game.i18n.localize("CO2PRISM.Equipment.Empty");
-        items.replaceChildren(empty);
-        continue;
-      }
       items.replaceChildren(...displayed.map((item, index) => {
         const tile = document.createElement("button");
         tile.type = "button";
@@ -936,16 +976,19 @@ class PrismBar {
       this.movementErrors.delete(token);
       this.refreshActor(); return true;
     }
+    const success = this.startMovement(token, !economyEnabled() || new ActionEconomy(token.actor).getSnapshot().movementsRemaining > 0);
+    this.refreshActor();
+    return success;
+  }
+
+  startMovement(token, available) {
     this.movementOpenToken = token;
     this.movementOpenActor = token.actor;
-    if (economyEnabled() && new ActionEconomy(token.actor).getSnapshot().movementsRemaining <= 0) {
-      this.refreshActor(); return true;
-    }
+    if (!available) return true;
     this.movementResults.delete(token);
     const result = this.movementTracker.start(token);
     if (result.success) this.movementErrors.delete(token);
     else this.movementErrors.set(token, result.reason);
-    this.refreshActor();
     return result.success;
   }
 
@@ -1059,9 +1102,13 @@ class PrismBar {
       this.movementErrors.delete(previous);
       this.movementZones.clear();
     }
-    const view = token ? this.movementView(token) : null;
+    const open = Boolean(this.actor && this.configuration.panels.combat);
     const available = token ? (economyEnabled() ? new ActionEconomy(token.actor).getSnapshot().movementsRemaining : 2) : 0;
-    const open = Boolean(token && (this.movementOpenToken === token || view) && this.configuration.panels.combat);
+    if (open && token && !this.movementDestroyed && !this.movementValidations.has(token) && !this.movementClosures.has(token)
+      && (!this.movementOpenToken || (available > 0 && !this.movementErrors.has(token) && !this.movementTracker.getSnapshot(token).state))) {
+      this.startMovement(token, available > 0);
+    }
+    const view = token ? this.movementView(token) : null;
     this.movementZones.sync(token, view?.state, open && available > 0);
     const validating = Boolean(token && this.movementValidations.has(token));
     const settled = Boolean(token && this.movementResults.get(token)?.success && this.movementResults.get(token).sessionId === view?.state.sessionId);
@@ -1074,20 +1121,31 @@ class PrismBar {
     this.movementSignature = signature;
     const localize = key => game.i18n.localize(`CO2PRISM.Movement.${key}`);
     const format = (key, data) => game.i18n.format(`CO2PRISM.Movement.${key}`, data);
+    this.upperLine.hidden = !open;
     this.movementPanel.hidden = !open;
-    this.movementToggle.disabled = !token || !combatOpen || busy;
-    this.movementToggle.classList.toggle("co2prism-movement-unavailable", available <= 0);
-    this.movementToggle.setAttribute("aria-pressed", String(open));
-    this.movementToggle.setAttribute("aria-expanded", String(open));
-    this.movementToggle.dataset.tooltipText = localize(available <= 0 ? "NoActionAvailable" : open ? "Close" : "Start");
     if (!open) return true;
     const query = selector => this.movementPanel.querySelector(".co2prism-movement-" + selector);
-    query("empty").hidden = available > 0;
+    query("empty").hidden = !token || available > 0;
     query("empty").textContent = localize("NoActionAvailable");
-    query("content").hidden = available <= 0;
     this.movementReset.disabled = busy || settled || !view?.state.segmentCount || available <= 0;
     if (this.movementValidate) this.movementValidate.disabled = busy || !view?.state.segmentCount || (available <= 0 && !settled);
-    if (available <= 0 || !view) return true;
+    if (available <= 0 || !view) {
+      this.movementZonesButton.disabled = true;
+      this.movementZonesButton.setAttribute("aria-pressed", "false");
+      this.movementZonesButton.dataset.tooltipText = localize(token && available <= 0 ? "NoActionAvailable" : "Unavailable");
+      const summary = query("summary");
+      summary.textContent = token && available <= 0 ? "0" : game.i18n.localize("CO2PRISM.Unavailable");
+      summary.dataset.tooltipText = this.movementZonesButton.dataset.tooltipText;
+      summary.setAttribute("aria-label", summary.dataset.tooltipText);
+      delete summary.dataset.negative;
+      const blocks = query("blocks");
+      blocks.replaceChildren();
+      blocks.tabIndex = -1;
+      blocks.removeAttribute("aria-label");
+      query("message").textContent = "";
+      query("error").hidden = true;
+      return true;
+    }
     const { state, valid, remaining, excess } = view;
     if (this.movementZonesButton) {
       const unsupported = this.movementZones.supported(token, state.start);
@@ -1097,10 +1155,12 @@ class PrismBar {
       this.movementZonesButton.dataset.tooltipText = localize(diagnostic || unsupported ? `Zones${diagnostic ?? unsupported}` : this.movementZones.visible ? "ZonesHide" : "ZonesShow");
       this.movementZonesButton.setAttribute("aria-label", this.movementZonesButton.dataset.tooltipText);
     }
-    query("summary").hidden = !view.budgetActive;
-    query("summary").textContent = valid
-      ? format(remaining <= 1 ? "CellsAvailableOne" : "CellsAvailable", { cells: remaining })
-      : localize("SpeedUnavailable");
+    const summary = query("summary");
+    summary.textContent = valid ? String(remaining - excess) : game.i18n.localize("CO2PRISM.Unavailable");
+    summary.dataset.negative = String(valid && excess > 0);
+    summary.setAttribute("aria-label", valid
+      ? format(remaining === 1 && !excess ? "CellsAvailableOne" : "CellsAvailable", { cells: remaining - excess })
+      : localize("SpeedUnavailable"));
     const message = query("message");
     message.textContent = !valid ? localize("Unavailable") : !state.segmentCount ? localize("NoMovement")
       : excess > 0 ? format(excess === 1 ? "ExcessOne" : "Excess", { excess }) : localize("Normal");
@@ -1108,6 +1168,7 @@ class PrismBar {
     query("error").hidden = !error;
     const errorKey = { "movement-in-progress": "Busy", "invalid-measurement": "InvalidValidation", "context-changed": "ContextChanged", "validation-failed": "ValidationFailed", "closure-pending": "ClosurePending" }[error] ?? "ReturnFailed";
     query("error").textContent = error ? format(errorKey, { consumed: this.movementResults.get(token)?.consumedCount ?? 0 }) : "";
+    summary.dataset.tooltipText = error ? query("error").textContent : message.textContent;
     const blocks = query("blocks");
     const nodes = [];
     blocks.tabIndex = valid && state.cellsPerAction > 0 ? 0 : -1;
@@ -1121,7 +1182,6 @@ class PrismBar {
       const block = document.createElement("div"); block.className = "co2prism-movement-block";
       block.setAttribute("aria-hidden", String(size > 0));
       block.dataset.cells = String(size);
-      if (size === 0) block.textContent = localize("ZeroBlock");
       for (let index = 0; index < size; index += stride) {
         const count = Math.min(stride, size - index);
         const used = Math.max(0, Math.min(count, state.cellsUsed - index));
@@ -1148,6 +1208,9 @@ class PrismBar {
   }
 
   destroy() {
+    this.tooltipListeners?.abort();
+    this.tooltipObserver?.disconnect();
+    this.clearDescriptiveTooltip();
     this.conditionRender = null;
     this.conditionalActionGroups = [];
     this.renderConditionalRows([]);
@@ -1186,14 +1249,15 @@ class PrismBar {
       const list = Array.isArray(bonuses) ? bonuses : null;
       count.textContent = `(${list ? list.length : unavailable})`;
       count.style.setProperty("--co2prism-skill-count-size", Math.min(18, 60 / (count.textContent.length * 0.6)));
-      const label = game.i18n.localize(`CO2PRISM.Abilities.${key}`);
+      const label = game.i18n.localize(`CO.abilities.long.${key}`);
       const lines = list?.map(bonus => {
         const number = Number.isFinite(bonus?.value) ? `${bonus.value >= 0 ? "+" : ""}${bonus.value}` : unavailable;
-        return [this.plainText(bonus?.name), number, this.plainText(bonus?.description), this.plainText(bonus?.additionalInfos)].filter(Boolean).join(" — ");
+        return [this.plainText(bonus?.name), this.plainText(bonus?.pathName), number, this.plainText(bonus?.additionalInfos)].filter(Boolean).join(" — ");
       });
-      button.dataset.tooltipText = `${label} : ${value.textContent}\n${game.i18n.localize("CO2PRISM.SkillBonuses")} ${count.textContent}`
-        + (lines?.length ? `\n${lines.join("\n")}` : "");
-      button.setAttribute("aria-label", button.dataset.tooltipText);
+      const base = game.i18n.format("CO2PRISM.SkillBase", { value: value.textContent });
+      button.dataset.co2prismDescription = `${label}\n${base}`
+        + (lines?.length ? `\n${lines.map(line => `• ${line}`).join("\n")}` : "");
+      button.setAttribute("aria-label", `${label}, ${base}`);
       button.disabled = Boolean(this.busyAction) || !this.canUseAction(`skill:${key}`);
     }
     return changed;
@@ -1282,6 +1346,7 @@ class PrismBar {
     const open = Boolean(this.actor && this.configuration.panels.combat);
     const changed = this.combatPanel.hidden === open;
     this.combatPanel.hidden = !open;
+    if (this.budgetBand) this.budgetBand.hidden = !open;
     if (this.combatSlots) this.combatSlots.hidden = !open;
     if (this.combatToggle) {
       this.combatToggle.disabled = !this.canConfigure();
@@ -1351,10 +1416,7 @@ class PrismBar {
           node.replaceChildren(image);
         }
       } else if (node.firstElementChild || node.textContent !== name) node.textContent = name;
-      if (node.dataset.tooltipHtml !== tooltip) {
-        node.dataset.tooltipHtml = tooltip;
-        if (game.tooltip?.element === node) game.tooltip.activate(node);
-      }
+      if (node.dataset.co2prismDescriptionHtml !== tooltip) node.dataset.co2prismDescriptionHtml = tooltip;
       if (node !== band.children[index]) band.insertBefore(node, band.children[index] ?? null);
     }
     for (const node of existing) if (!retained.has(node)) {
@@ -1425,7 +1487,9 @@ class PrismBar {
     state.normalAlternatives.forEach((branch, index) => {
       if (index) {
         const separator = document.createElement("span"); separator.className = "co2prism-time-separator";
-        separator.textContent = game.i18n.localize("CO2PRISM.Combat.TimeOr"); nodes.push(separator);
+        separator.setAttribute("aria-label", game.i18n.localize("CO2PRISM.Combat.TimeOr"));
+        separator.setAttribute("role", "separator");
+        nodes.push(separator);
       }
       branch.forEach(type => add(type));
     });
@@ -2046,7 +2110,11 @@ class PrismBar {
   }
 
   describeShortcut(node, { action, item }, name, unequipped = false) {
-    node.dataset.tooltipText = [name, this.plainText(item?.system?.description)].filter(Boolean).join("\n");
+    node.dataset.tooltipText = name;
+    if (item?.testUserPermission?.(game.user, "OBSERVER")) {
+      const description = this.itemTooltipDescription(item);
+      if (description) void this.prepareItemTooltip(node, item, description, name);
+    }
     node.dataset.tooltipText += `\n${game.i18n.localize("CO2PRISM.Combat.ShortcutControls")}`;
     if (unequipped) {
       node.classList.add("co2prism-hand-unequipped");
@@ -2998,7 +3066,7 @@ class PrismBar {
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
     const nominal = (WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M) / 724;
-    const unit = Math.max(0.01, Math.min(nominal, (window.innerWidth - 8) / 1020, (window.innerHeight - 8) / 530));
+    const unit = Math.max(0.01, Math.min(nominal, (window.innerWidth - 8) / 1060, (window.innerHeight - 8) / 530));
     const scaleChanged = unit !== this.presentationScale;
     if (scaleChanged) {
       this.presentationScale = unit;
@@ -3024,7 +3092,7 @@ class PrismBar {
   place(x, y, clamp = true, bounds = this.element.getBoundingClientRect()) {
     const left = clamp ? Math.max(0, Math.min(x, window.innerWidth - bounds.width)) : x;
     this.element.style.left = `${left}px`;
-    this.combatEffects?.style.setProperty("--prism-effects-right", `${window.innerWidth - left - (this.panelOffset?.x ?? 0) - 8}px`);
+    this.element.style.setProperty("--prism-upper-right", `${window.innerWidth - left - (this.panelOffset?.x ?? 0) - 8}px`);
     const top = clamp ? Math.max(0, Math.min(y, window.innerHeight - bounds.height)) : y;
     this.element.style.top = `${top}px`;
     if (this.conditionalZone) {

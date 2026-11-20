@@ -1,16 +1,41 @@
-<section id="co2prism-movement-panel" class="co2prism-movement-panel" hidden aria-label="{{localize 'CO2PRISM.Combat.Movement'}}">
+<section
+  id="co2prism-movement-panel"
+  class="co2prism-movement-panel"
+  hidden
+  aria-label="{{localize 'CO2PRISM.Combat.Movement'}}"
+>
   <p class="co2prism-movement-empty" role="status" hidden></p>
   <div class="co2prism-movement-content">
-    <button type="button" class="co2prism-movement-zones-toggle" disabled aria-pressed="false" aria-label="{{localize 'CO2PRISM.Movement.ZonesShow'}}"><i class="fa-solid fa-border-all" aria-hidden="true"></i></button>
-    <div class="co2prism-movement-info">
-      <p class="co2prism-movement-summary" aria-live="polite"></p>
-      <div class="co2prism-movement-blocks" role="group"></div>
-      <p class="co2prism-movement-message" role="status"></p>
-      <p class="co2prism-movement-error" role="alert" hidden></p>
-    </div>
-    <div class="co2prism-movement-commands">
-      <button type="button" class="co2prism-movement-reset" disabled data-tooltip-text="{{localize 'CO2PRISM.Movement.Reset'}}" aria-label="{{localize 'CO2PRISM.Movement.Reset'}}"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button>
-      <button type="button" class="co2prism-movement-validate" disabled data-tooltip-text="{{localize 'CO2PRISM.Movement.Finish'}}" aria-label="{{localize 'CO2PRISM.Movement.Validate'}}"><i class="fa-solid fa-check" aria-hidden="true"></i></button>
-    </div>
+    <button
+      type="button"
+      class="co2prism-movement-zones-toggle"
+      disabled
+      aria-pressed="false"
+      aria-label="{{localize 'CO2PRISM.Movement.ZonesShow'}}"
+    >
+      <i class="fa-solid fa-border-all" aria-hidden="true"></i>
+    </button>
+    <p class="co2prism-movement-summary" aria-live="polite"></p>
+    <div class="co2prism-movement-blocks" role="group"></div>
+    <button
+      type="button"
+      class="co2prism-movement-reset"
+      disabled
+      data-tooltip-text="{{localize 'CO2PRISM.Movement.Reset'}}"
+      aria-label="{{localize 'CO2PRISM.Movement.Reset'}}"
+    >
+      <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
+    </button>
+    <button
+      type="button"
+      class="co2prism-movement-validate"
+      disabled
+      data-tooltip-text="{{localize 'CO2PRISM.Movement.Finish'}}"
+      aria-label="{{localize 'CO2PRISM.Movement.Validate'}}"
+    >
+      <i class="fa-solid fa-check" aria-hidden="true"></i>
+    </button>
+    <p class="co2prism-movement-message" role="status"></p>
+    <p class="co2prism-movement-error" role="alert" hidden></p>
   </div>
 </section>

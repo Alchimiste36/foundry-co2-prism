@@ -1053,6 +1053,7 @@ function setupSkills() {
   context.game.settings = { get: () => "M", set() {} };
   bar.anchor = bar.element;
   bar.layout();
+  context.game.i18n.format = (_, { value }) => "Base : " + value;
   bar.skillsPanel = { hidden: true };
   bar.skillsToggle = { dataset: {}, setAttribute(key, value) { this[key] = value; } };
   const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
@@ -1107,7 +1108,7 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
 
 test("Compétences : valeurs signées, compte des bonus et actualisations natives", async () => {
   const { bar, a, bonuses, hooks } = setupSkills();
-  bonuses.for = [{ name: "Métier", value: 4, description: "Force", additionalInfos: "Seulement en montagne" },
+  bonuses.for = [{ name: "Métier", value: 4, description: "Long description", pathName: "Voie du métier", additionalInfos: "Seulement en montagne" },
     { name: "Bonus général", value: 2 }];
   await bar.setPanelState("competences", true);
   assert.equal(bar.skillNodes[0].value.textContent, "+3");
@@ -1115,8 +1116,11 @@ test("Compétences : valeurs signées, compte des bonus et actualisations native
   assert.equal(bar.skillNodes[5].value.textContent, "+0");
   assert.equal(bar.skillNodes[0].count.textContent, "(2)");
   assert.equal(bar.skillNodes[1].count.textContent, "(0)");
-  assert.match(bar.skillNodes[0].button.dataset.tooltipText, /Métier — \+4/);
-  assert.match(bar.skillNodes[0].button.dataset.tooltipText, /Seulement en montagne/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Métier — Voie du métier — \+4/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Seulement en montagne/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Base : \+3/);
+  assert.doesNotMatch(bar.skillNodes[0].button.dataset.co2prismDescription, /Long description/);
+  assert.equal(bar.skillNodes[1].button.dataset.co2prismDescription, "CO.abilities.long.agi\nBase : -1");
   a.system.abilities.for.value = -2;
   bonuses.for.push({ name: "Nouvelle capacité", value: 9 });
   hooks.get("updateActiveEffect")({ parent: a });
