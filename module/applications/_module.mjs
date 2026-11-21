@@ -1715,8 +1715,10 @@ class PrismBar {
     const primary = hands.find(slot => this.handItem(actor, slot.reference)?.system.usage?.twoHand);
     if (primary) {
       const other = hands[1 - primary.order];
-      if (!other.reference || other.reference.itemId === primary.reference.itemId) {
+      const replaceable = this.isVersatileHandAction(this.handItem(actor, primary.reference), primary.reference);
+      if (!other.reference || (!replaceable && other.reference.itemId === primary.reference.itemId)) {
         other.mirror = primary.reference;
+        other.mirrorLocked = !replaceable;
         other.reference = undefined;
       }
     }
@@ -1792,6 +1794,11 @@ class PrismBar {
       && model?.properties?.equipable && typeof model.equipped === "boolean";
   }
 
+  isVersatileHandAction(item, reference) {
+    const usage = item?.system.usage;
+    return reference?.kind !== "equipment" && item?.system.isWeapon && usage?.oneHand === true && usage.twoHand === true;
+  }
+
   async updateHands(actor, config, number, key, reference, bypassChecks = false) {
     const warn = code => { ui.notifications.warn(game.i18n.localize(`CO2PRISM.Combat.${code}`)); return false; };
     if (this.busyAction || this.changingHands.has(actor)) return false;
@@ -1799,8 +1806,9 @@ class PrismBar {
     const incoming = { "left-hand": null, "right-hand": null, ...config.handPresets[number], ...(key ? { [key]: reference } : {}) };
     if (key) {
       const other = key === "left-hand" ? "right-hand" : "left-hand";
-      if (this.slotRows(actor)[0].find(slot => slot.key === key)?.mirror) return warn("HandsConflict");
-      if (this.handItem(actor, previous[key])?.system.usage?.twoHand
+      if (this.slotRows(actor)[0].find(slot => slot.key === key)?.mirrorLocked) return warn("HandsConflict");
+      const previousItem = this.handItem(actor, previous[key]);
+      if (previousItem?.system.usage?.twoHand && !this.isVersatileHandAction(previousItem, previous[key])
         && incoming[other]?.itemId === previous[key]?.itemId) incoming[other] = null;
     }
     const references = Object.entries(incoming).filter(([hand, ref]) => this.handKey(hand) && ref != null).map(([, ref]) => ref);
@@ -1808,9 +1816,10 @@ class PrismBar {
     const items = references.filter(ref => !attacks.includes(ref)).map(ref => this.handItem(actor, ref));
     if (items.includes(null)) return warn("HandsInvalidItem");
     const required = new Set(items);
+    const versatile = item => references.filter(ref => ref.itemId === item.id).every(ref => this.isVersatileHandAction(item, ref));
     const hands = item => item.system.usage?.twoHand ? 2 : 1;
     if (items.length !== required.size && [...required].some(item => hands(item) === 1)) return warn("HandsConflict");
-    if ([...required].reduce((used, item) => used + hands(item), 0) > 2) return warn("HandsConflict");
+    if ([...required].reduce((used, item) => used + (versatile(item) ? 1 : hands(item)), 0) > 2) return warn("HandsConflict");
     const outgoing = new Set(Object.entries(previous).filter(([hand]) => this.handKey(hand))
       .map(([, ref]) => actor.items?.get(ref?.itemId))
       .filter(item => this.isHandEquipment(actor, item) && !required.has(item)));
@@ -2048,6 +2057,12 @@ class PrismBar {
           if (text !== undefined) child.textContent = text;
           node.append(child); return child;
         };
+        const bindDrop = () => {
+          node.addEventListener("dragenter", event => this.hoverSlot(event, slot, node));
+          node.addEventListener("dragover", event => this.hoverSlot(event, slot, node));
+          node.addEventListener("dragleave", () => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
+          node.addEventListener("drop", event => { void this.dropSlot(event, slot, node); });
+        };
         node.dataset.co2prismTooltipText = label;
         if (slot.hand) {
           const icon = add("i", "co2prism-slot-hand fa-solid fa-hand");
@@ -2064,8 +2079,10 @@ class PrismBar {
           if (image) {
             const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = ""; img.draggable = false;
           }
-          node.addEventListener("dragover", event => event.stopPropagation());
-          node.addEventListener("drop", event => { event.preventDefault(); event.stopPropagation(); });
+          if (slot.mirrorLocked) {
+            node.addEventListener("dragover", event => event.stopPropagation());
+            node.addEventListener("drop", event => { event.preventDefault(); event.stopPropagation(); });
+          } else bindDrop();
           this.combatHands[slot.hand].replaceChildren(node);
           return [];
         }
@@ -2190,10 +2207,7 @@ class PrismBar {
         }
         node.setAttribute("aria-label", slot.hand ? `${label}\n${node.dataset.co2prismTooltipText}` : node.dataset.co2prismTooltipText);
         if (group) node.removeAttribute("title");
-        node.addEventListener("dragenter", event => this.hoverSlot(event, slot, node));
-        node.addEventListener("dragover", event => this.hoverSlot(event, slot, node));
-        node.addEventListener("dragleave", () => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
-        node.addEventListener("drop", event => { void this.dropSlot(event, slot, node); });
+        bindDrop();
         if (!slot.hand) return [node];
         this.combatHands[slot.hand].replaceChildren(node);
         return [];

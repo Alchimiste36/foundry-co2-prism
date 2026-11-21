@@ -687,10 +687,42 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               && Number(getComputedStyle(illustration).opacity) < 1 && mirror.children.length === 2
               && mirror.querySelector(".co2prism-slot-hand"), "Miroir avec repère de main et sans commandes");
           };
+          const secondAction = { ...nativeAction, indice: 1, actionName: "Seconde action" };
+          item.actions.push(secondAction);
+          const secondPayload = { ...payload, indice: 1 };
+          item.system.usage.oneHand = true;
+          for (const primary of [0, 1]) {
+            const secondary = 1 - primary;
+            const hands = ["left-hand", "right-hand"];
+            const saved = () => bar.configuration.handPresets[1];
+            await dropAt(1, primary);
+            checkMirror(secondary);
+            check(!saved()[hands[secondary]], "Versatile mirror is derived from an empty slot");
+            await dropAt(1, secondary, shieldPayload);
+            check(saved()[hands[primary]]?.indice === 0 && saved()[hands[secondary]]?.itemId === shield.id &&
+              item.system.equipped && shield.system.equipped, "Versatile mirror accepts a shield and keeps the first action");
+            await dropAt(1, secondary, secondPayload);
+            await bar.setPanelState("combat", false);
+            await bar.setPanelState("combat", true);
+            check(saved()[hands[primary]]?.indice === 0 && saved()[hands[secondary]]?.indice === 1 &&
+              [0, 1].every(index => cards(0)[index].classList.contains("co2prism-slot-executable")),
+              "Reopening preserves two explicit actions from the same versatile weapon");
+            await removeHand(primary);
+            check(saved()[hands[secondary]]?.indice === 1, "Removing one explicit action preserves the other");
+            await removeHand(secondary);
+          }
+          item.actions.pop();
+          item.system.usage.oneHand = false;
           await dropAt(1, 1); checkMirror(0);
           await dropAt(1, 0, shieldPayload);
           check(!shield.system.equipped && !bar.configuration.handPresets[1]["left-hand"], "Dépôt refusé sur le miroir");
           await removeHand(1);
+          item.system.usage = { oneHand: true, twoHand: false };
+          await dropAt(1, 0);
+          check(cards(0)[0].classList.contains("co2prism-slot-executable") &&
+            !cards(0)[1].classList.contains("co2prism-hand-mirror"), "A one-handed weapon action occupies one square");
+          await removeHand(0);
+          item.system.usage = { oneHand: false, twoHand: true };
           await dropAt(1, 0); checkMirror(1);
           settings.locked = true; bar.updateLock();
           check(bar.presetButtons.map(button => button.hidden).join() === "false,true,true", "Presets vides masqués");
