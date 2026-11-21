@@ -393,6 +393,10 @@ class PrismBar {
     this.token = token;
     this.actor = actor;
     this.actorWithoutToken = Boolean(actor && !token);
+    const encounter = actor?.type === "encounter";
+    const isCompanion = encounter && actor.system?.companion?.isCompanion === true;
+    this.element?.classList?.toggle("co2prism-encounter", encounter);
+    this.element?.classList?.toggle("co2prism-companion", isCompanion);
     const rendered = this.element?.nodeType === 1;
     const visible = Boolean(actor && (!rendered || prismVisible()));
     if (this.slotDrag && (!visible || this.slotDrag.actor !== actor || this.slotDrag.token !== token)) this.slotDrag.cancelled = true;
@@ -414,8 +418,6 @@ class PrismBar {
       }
     }
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
-    const encounter = actor?.type === "encounter";
-    this.element?.classList?.toggle("co2prism-encounter", encounter);
     const details = actor?.system?.details;
     const localizeDetail = (prefix, value) => {
       if (typeof value !== "string" || !value) return unavailable;

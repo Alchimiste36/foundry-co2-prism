@@ -130,6 +130,10 @@
   --prism-glass-light: #ff9aa9;
   --prism-electric-glass: #ff344a;
 }
+#co2prism-bar.co2prism-companion {
+  --prism-glass-light: #ffe197;
+  --prism-electric-glass: #ffdc36;
+}
 .co2prism-bar :is(.co2prism-encounter-icon, .co2prism-encounter-value),
 .co2prism-encounter .co2prism-rest-actions,
 .co2prism-encounter

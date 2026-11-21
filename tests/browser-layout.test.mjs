@@ -2742,6 +2742,10 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           });
           const encounterToken = canvas.tokens.controlled;
           const portraitFrame = () => getComputedStyle(bar.portrait.parentElement, "::before");
+          const setCompanion = isCompanion => {
+            other.system.companion = { isCompanion };
+            hooks.get("updateActor")(other, { "system.companion.isCompanion": isCompanion });
+          };
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.layout();
             const encounterRows = JSON.stringify(resources());
@@ -2749,17 +2753,38 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const red = actorLight();
             check(red === "#ff344a" && portraitFrame().boxShadow.includes(palette("electric-glass")) &&
               portraitFrame().pointerEvents === "none", size + " encounter rim is red and leaves the portrait clickable");
+            const healthFill = getComputedStyle(bar.gauges.hp.fill, "::before").backgroundImage;
+            const timeFills = () => bar.budgetCommands.map(button => {
+              const style = getComputedStyle(button);
+              return [style.backgroundColor, style.backgroundImage];
+            }).join();
+            const redTimeFills = timeFills();
+            setCompanion(true);
+            check(actorLight() === "#ffdc36" && root.classList.contains("co2prism-encounter") &&
+              root.classList.contains("co2prism-companion") && portraitFrame().boxShadow.includes(palette("electric-glass")) &&
+              JSON.stringify(resources()) === encounterRows && bar.pathsPanel.hidden &&
+              !root.querySelector(".co2prism-rest-actions").getClientRects().length &&
+              getComputedStyle(bar.gauges.hp.fill, "::before").backgroundImage === healthFill && timeFills() === redTimeFills,
+              size + " companion without a master is yellow and keeps encounter geometry and functional colors");
             canvas.tokens.controlled = selected; bar.refreshActor();
             check(actorLight() === "#318dff" && portraitFrame().boxShadow.includes(palette("electric-glass")) &&
               Number(portraitFrame().zIndex) > 0, size + " character rim is blue in front of the vignette");
-            check(!root.classList.contains('co2prism-encounter') && bar.name.textContent === actor.name &&
+            check(!root.classList.contains('co2prism-encounter') && !root.classList.contains('co2prism-companion') &&
+              bar.name.textContent === actor.name &&
               root.querySelector('.co2prism-rest-actions').getClientRects().length && !detailsRow.dataset.co2prismImmediateHtml &&
               palette('nucleus') !== encounterSurface && palette('health') === healthColor &&
               encounterRows === JSON.stringify(resources()), size + ' encounter and character share all four resource coordinates and functional colors');
             canvas.tokens.controlled = encounterToken; bar.refreshActor();
+            check(actorLight() === "#ffdc36", size + " selecting a companion applies yellow immediately");
+            setCompanion(false);
+            check(actorLight() === red && !root.classList.contains("co2prism-companion"), size + " clearing the native flag restores red");
           }
 
+          setCompanion(true);
           await togglePaths();
+          check(prism(pathHeader('encounter-path'), 'rim') === actorLight() && actorLight() === "#ffdc36",
+            "The companion palette reaches the open Paths panel");
+          setCompanion(false);
           check(pathCapacities('encounter-path').length === 3 && pathCapacities('off-paths').length === 6, 'Encounter Paths and off-path inventory');
           other.capacities = other.capacities.filter(capacity => capacity.system.path);
           hooks.get('deleteItem')({ parent: other });
