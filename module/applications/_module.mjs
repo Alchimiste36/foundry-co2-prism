@@ -1382,7 +1382,7 @@ class PrismBar {
       button.dataset.co2prismDescription = `${label}\n${base}`
         + (lines?.length ? `\n${lines.map(line => `• ${line}`).join("\n")}` : "");
       button.setAttribute("aria-label", `${label}, ${base}`);
-      button.disabled = Boolean(this.busyAction) || !this.canUseAction(`skill:${key}`);
+      button.disabled = !this.canUseAction(`skill:${key}`);
     }
     return changed;
   }
@@ -1575,7 +1575,7 @@ class PrismBar {
       const active = this.actor?.hasEffect?.(id) === true;
       button.setAttribute("aria-pressed", String(active));
       const available = active ? this.canControlDefense(this.actor, id, stances) : this.canUseDefense(this.actor, id, state, stances);
-      button.disabled = Boolean(this.busyAction) || !available;
+      button.disabled = !available;
     }
   }
 
@@ -1646,7 +1646,7 @@ class PrismBar {
       const type = button.dataset.co2prismTime;
       button.disabled = !canEdit;
       button.setAttribute("aria-disabled", String(!canEdit));
-      button.parentElement.classList.toggle("co2prism-time-available", type !== "am" && canEdit && !this.busyAction && state.canSpend[type]);
+      button.parentElement.classList.toggle("co2prism-time-available", type !== "am" && canEdit && state.canSpend[type]);
       button.dataset.co2prismTooltipText = `${type.toUpperCase()} — ${game.i18n.localize(type === "am" ? "CO2PRISM.Combat.MixedTimeControls" : "CO2PRISM.Combat.TimeControls")}`
         + (type !== "am" && !state.canSpend[type] ? `\n${game.i18n.localize("CO2PRISM.Combat.TimeUnavailable")}` : "");
       button.setAttribute("aria-label", button.dataset.co2prismTooltipText);
@@ -3193,7 +3193,7 @@ class PrismBar {
       node.tabIndex = disabled ? -1 : 0;
     }
     for (const { key, button } of this.skillNodes ?? []) {
-      button.disabled = Boolean(this.busyAction) || !this.canUseAction(`skill:${key}`);
+      button.disabled = !this.canUseAction(`skill:${key}`);
     }
     for (const button of this.actions) {
       const action = button.dataset.co2prismAction;

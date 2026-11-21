@@ -1148,6 +1148,42 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(!partial.disabled && !full.disabled && Math.abs(partialBox.width - partialBox.height) < 1 &&
             Math.abs(fullBox.width - fullBox.height) < 1 && partialBox.right < fullBox.left,
             "DEF renders two available square buttons side by side");
+          const availableTimes = () => bar.budgetCommands
+            .filter(button => button.parentElement.classList.contains("co2prism-time-available"))
+            .map(button => button.dataset.co2prismTime).join(",");
+          const skillAvailability = () => bar.skillNodes.map(({ button }) => button.disabled).join(",");
+          const skillsWereOpen = actor.flags.co2prism.panels.competences;
+          actor.flags.co2prism.panels.competences = true;
+          bar.refreshActor();
+          const initialTimes = availableTimes();
+          const initialSkills = skillAvailability();
+          const initialBudget = JSON.stringify(economy.getSnapshot());
+          const rollSkill = actor.rollSkill;
+          let finishRoll;
+          let rollCount = 0;
+          const pendingRoll = new Promise(resolve => { finishRoll = resolve; });
+          actor.rollSkill = () => { rollCount++; return pendingRoll; };
+          const rolling = bar.performAction("skill:agi");
+          check(bar.busyAction === "skill:agi" && initialSkills.includes("false"), "Skill dialog is pending with available skills");
+          const checkAvailabilityDuringRoll = () => {
+            check(availableTimes() === initialTimes && !availableTimes().includes("am") &&
+              skillAvailability() === initialSkills && !partial.disabled && !full.disabled,
+              "Time, skill and defense availability stays visible during the skill dialog");
+          };
+          checkAvailabilityDuringRoll();
+          bar.refreshActor();
+          checkAvailabilityDuringRoll();
+          bar.skillNodes[0].button.click();
+          bar.budgetCommands.find(button => button.dataset.co2prismTime === "a").click();
+          partial.click(); full.click();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          check(rollCount === 1 && statuses.size === 0 && JSON.stringify(economy.getSnapshot()) === initialBudget,
+            "Concurrent clicks during the skill dialog cannot roll twice, change defense or spend time");
+          finishRoll();
+          await rolling;
+          actor.rollSkill = rollSkill;
+          actor.flags.co2prism.panels.competences = skillsWereOpen;
+          bar.refreshActor();
           partial.click(); await new Promise(resolve => setTimeout(resolve, 0));
           check(statuses.has("partialDef") && partial.getAttribute("aria-pressed") === "true" && full.disabled &&
             economy.getSnapshot().bonus.l === 1 && !economy.getSnapshot().canSpend.a,
@@ -1275,7 +1311,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           nativeAction.properties.temporary = false; nativeAction.properties.activable = true;
           let nativeOutcome = true, nativeExecutions = 0;
           const activateTimed = async options => {
-            check(halos() === '', 'Spending halo during native execution');
+            const { canSpend } = economy.getSnapshot();
+            check(halos() === ['a', 'l', 'm'].filter(type => canSpend[type]).join(','),
+              'Time highlights reflect the actual budget during native execution');
             const guards = [];
             const details = { item, ...options, guard: promise => guards.push(Promise.resolve(promise)) };
             hooks.get('co2.preActivateAction')?.(actor, details);
