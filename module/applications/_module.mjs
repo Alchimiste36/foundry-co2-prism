@@ -51,8 +51,10 @@ Hooks.once("init", () => {
     }, onChange: () => bar?.refreshActor()
   });
   game.settings.register(MODULE, "size", {
-    name: "CO2PRISM.Size", hint: "CO2PRISM.SizeHint", scope: "user", config: true,
-    type: String, default: "M", choices: { S: "S", M: "M", L: "L", XL: "XL" },
+    scope: "user", config: false, type: String, default: "M"
+  });
+  game.settings.register(MODULE, "sizeWidth", {
+    scope: "user", config: false, type: Number, default: 0,
     onChange: () => bar?.layout()
   });
   game.settings.register(MODULE, "visible", {
@@ -123,6 +125,9 @@ class PrismBar {
     this.handle = this.element.querySelector(".co2prism-portrait");
     this.anchor = this.element.querySelector(".co2prism-portrait-zone");
     this.lock = this.element.querySelector(".co2prism-lock");
+    this.sizeSlider = this.element.querySelector(".co2prism-size-slider");
+    this.sizeSlider.min = WIDTHS.S;
+    this.sizeSlider.max = WIDTHS.XL;
     this.art = this.element.querySelector(".co2prism-art");
     this.portrait = this.element.querySelector(".co2prism-portrait");
     this.name = this.element.querySelector(".co2prism-name");
@@ -262,8 +267,11 @@ class PrismBar {
       encounterText: this.element.querySelector(`[data-co2prism-gauge="${key}"] > .co2prism-encounter-value`)
     }]));
     this.position = game.settings.get(MODULE, "position");
-    this.lock.addEventListener("click", () => {
-      void game.settings.set(MODULE, "locked", !game.settings.get(MODULE, "locked"));
+    this.lock.addEventListener("click", () => { void this.toggleLock(); });
+    this.sizeSlider.addEventListener("input", () => {
+      if (this.lockChangePending || game.settings.get(MODULE, "locked")) return;
+      this.previewWidth = this.sizeSlider.valueAsNumber;
+      this.layout();
     });
     this.handle.addEventListener("pointerdown", event => {
       if (event.button === 0) this.portraitMoved = false;
@@ -3301,8 +3309,48 @@ class PrismBar {
     await actor.update({ [path]: number });
   }
 
+  savedWidth() {
+    const width = game.settings.get(MODULE, "sizeWidth");
+    if (Number.isFinite(width) && width >= WIDTHS.S && width <= WIDTHS.XL) return width;
+    const legacy = game.settings.get(MODULE, "size");
+    return Object.hasOwn(WIDTHS, legacy) ? WIDTHS[legacy] : WIDTHS.M;
+  }
+
+  async toggleLock() {
+    if (this.lockChangePending) return;
+    this.lockChangePending = true;
+    this.sizeSlider.disabled = true;
+    const locked = game.settings.get(MODULE, "locked");
+    const previousWidth = game.settings.get(MODULE, "sizeWidth");
+    const width = this.previewWidth;
+    let saved = false;
+    try {
+      if (!locked && width !== undefined && width !== this.savedWidth()) {
+        await game.settings.set(MODULE, "sizeWidth", width);
+        saved = true;
+      }
+      await game.settings.set(MODULE, "locked", !locked);
+    } catch (error) {
+      if (saved) {
+        try { await game.settings.set(MODULE, "sizeWidth", previousWidth); }
+        catch (restoreError) { console.error("co2prism | Restauration de la taille", restoreError); }
+      }
+      console.error("co2prism | Verrouillage de Prism", error);
+      ui.notifications.error(game.i18n.localize("CO2PRISM.ConfigError"));
+    } finally {
+      this.lockChangePending = false;
+      this.sizeSlider.disabled = game.settings.get(MODULE, "locked");
+    }
+  }
+
   updateLock() {
     const locked = game.settings.get(MODULE, "locked");
+    if (locked) this.previewWidth = undefined;
+    const sliderChanged = this.sizeSlider && this.sizeSlider.hidden !== locked;
+    if (this.sizeSlider) {
+      this.sizeSlider.hidden = locked;
+      this.sizeSlider.disabled = locked || Boolean(this.lockChangePending);
+    }
     this.endDrag();
     this.handle.classList.toggle("co2prism-draggable", !locked);
     this.handle.dataset.co2prismTooltipText = game.i18n.localize(locked ? "CO2PRISM.Locked" : "CO2PRISM.Move");
@@ -3312,15 +3360,18 @@ class PrismBar {
     this.lock.setAttribute("aria-label", label);
     if (this.slotDrag) this.slotDrag.cancelled = true;
     if (this.actor && this.combatRows) this.refreshActor();
+    if (sliderChanged) this.layout({ preserveAnchor: true, persistPosition: false });
   }
 
-  layout({ preserveAnchor = false } = {}) {
+  layout({ preserveAnchor = false, persistPosition = true } = {}) {
     if (!this.element || this.element.hidden) return;
     const previous = this.element.getBoundingClientRect();
     const offset = this.panelOffset ?? { x: 0, y: 0 };
     const saved = this.position;
     const valid = Number.isFinite(saved?.x) && Number.isFinite(saved?.y);
-    const nominal = (WIDTHS[game.settings.get(MODULE, "size")] ?? WIDTHS.M) / 724;
+    const width = this.previewWidth ?? this.savedWidth();
+    if (this.sizeSlider && Number(this.sizeSlider.value) !== width) this.sizeSlider.value = width;
+    const nominal = width / 724;
     const unit = Math.max(0.01, Math.min(nominal, (window.innerWidth - 8) / 1060, (window.innerHeight - 8) / 530));
     const scaleChanged = unit !== this.presentationScale;
     if (scaleChanged) {
@@ -3337,7 +3388,8 @@ class PrismBar {
     const y = preserveAnchor ? previous.top + offset.y : valid ? saved.y
       : window.innerHeight - bounds.height - 40 + this.panelOffset.y;
     const placed = this.place(x - this.panelOffset.x, y - this.panelOffset.y, true, bounds);
-    if ((valid || preserveAnchor) && (Math.abs(placed.left + this.panelOffset.x - x) > 0.5
+    if (persistPosition && this.previewWidth === undefined && (valid || preserveAnchor) &&
+      (Math.abs(placed.left + this.panelOffset.x - x) > 0.5
       || Math.abs(placed.top + this.panelOffset.y - y) > 0.5)) {
       this.position = { x: placed.left + this.panelOffset.x, y: placed.top + this.panelOffset.y };
       void game.settings.set(MODULE, "position", this.position);

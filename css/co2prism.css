@@ -275,6 +275,17 @@
 .co2prism-identity {
   z-index: 4;
 }
+.co2prism-art > .co2prism-size-slider {
+  grid-area: 6 / 2 / 7 / 3;
+  justify-self: start;
+  width: min(100%, 96px);
+  margin: 0;
+  accent-color: var(--prism-electric-glass);
+  pointer-events: auto;
+}
+.co2prism-size-slider:focus-visible {
+  outline: 1px solid var(--prism-focus);
+}
 #co2prism-bar[hidden],
 .co2prism-art [hidden] {
   display: none !important;

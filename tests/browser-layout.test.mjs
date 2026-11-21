@@ -131,6 +131,43 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           ] };
           canvas.tokens.controlled = [{ actor, document: { baseActor: actor } }];
           bar.refreshActor();
+          const sizeSlider = bar.sizeSlider;
+          for (const [legacy, width] of Object.entries({ S: 300, M: 430, L: 600, XL: 780 })) {
+            settings.size = legacy;
+            bar.layout();
+            check(sizeSlider.valueAsNumber === width, "Legacy size retains its exact nominal width");
+          }
+          settings.size = "M"; bar.layout();
+          const settingWrites = [];
+          const writeSetting = game.settings.set;
+          game.settings.set = async (...args) => {
+            settingWrites.push(args[1]);
+            const result = writeSetting(...args);
+            if (args[1] === "locked") bar.updateLock();
+            return result;
+          };
+          const previewSize = width => {
+            sizeSlider.value = width;
+            sizeSlider.dispatchEvent(new Event("input", { bubbles: true }));
+            sizeSlider.dispatchEvent(new Event("change", { bubbles: true }));
+          };
+          check(!sizeSlider.hidden && !sizeSlider.disabled, "Unlocked Prism exposes the slider");
+          const initialScale = bar.presentationScale;
+          previewSize(501);
+          bar.refreshActor();
+          check(bar.presentationScale > initialScale && sizeSlider.valueAsNumber === 501 &&
+            !settingWrites.length && new PrismBar().savedWidth() === 430,
+            "Resize and release preview locally while a fresh bar reads the saved width");
+          await bar.toggleLock();
+          check(settingWrites.join(",") === "sizeWidth,locked" && settings.sizeWidth === 501 &&
+            sizeSlider.hidden && sizeSlider.disabled && new PrismBar().savedWidth() === 501,
+            "Lock stores the local width before hiding the slider");
+          await bar.toggleLock();
+          check(settingWrites.join(",") === "sizeWidth,locked,locked" && sizeSlider.valueAsNumber === 501 &&
+            !sizeSlider.hidden, "Unlock shows the saved size without another width write");
+          game.settings.set = writeSetting;
+          delete settings.sizeWidth;
+          bar.layout();
           const portraitEvent = (type, options) => bar.portrait.dispatchEvent(new MouseEvent(type, { bubbles: true, ...options }));
           const portraitDoubleClick = () => {
             portraitEvent('click', { detail: 1 });
@@ -578,8 +615,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               const b = node.getBoundingClientRect();
               check(node.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)), size + " collision de volets " + node.className + " à " + b.x + "," + b.y);
             }
-            check(getComputedStyle(bar.art).gridTemplateRows.split(" ").length === 5,
-              size + " no dedicated preset track");
+            check(getComputedStyle(bar.art).gridTemplateRows.split(" ").length === (sizeSlider.hidden ? 5 : 6) &&
+              (sizeSlider.hidden || sizeSlider.getBoundingClientRect().top >= bar.name.parentElement.getBoundingClientRect().bottom - 1),
+              size + " only the unlocked slider adds a track below the core");
             const nucleus = () => [bar.anchor, bar.portrait, root.querySelector(".co2prism-resources"), bar.name.parentElement]
               .flatMap(node => { const rect = node.getBoundingClientRect(); return [rect.left, rect.top, rect.height]; });
             for (const skillsOpen of [true, false]) {

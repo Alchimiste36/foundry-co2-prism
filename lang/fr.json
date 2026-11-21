@@ -41,7 +41,7 @@
     },
     "Title": "CO2 Prism",
     "Size": "Taille de la barre",
-    "SizeHint": "Choisir S, M, L ou XL. La modification est appliquée immédiatement.",
+    "SizeHint": "Ajuster la taille de Prism. Verrouiller Prism pour enregistrer la taille.",
     "Locked": "Verrouiller la position de la barre",
     "LockedHint": "Déverrouiller pour déplacer la barre depuis son portrait.",
     "Lock": "Verrouiller la position",
