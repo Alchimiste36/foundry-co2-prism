@@ -842,12 +842,15 @@ test("repos : handlers du registre, absence, ambiguïté et garde des doubles cl
 });
 
 test("action en cours : aucune exécution concurrente, même si le token change", async () => {
-  const { bar, context, a, calls, token, actor } = setupActions();
+  const { bar, context, a, calls, token, actor, button } = setupActions();
   let release;
   a.system.rollFortune = () => new Promise(resolve => { release = resolve; calls.push("start"); });
   const pending = bar.performAction("fortune");
-  assert.ok(bar.actions.every(node => node.disabled));
+  assert.equal(button("fortune").disabled, false);
+  assert.ok(bar.actions.filter(node => node !== button("fortune")).every(node => node.disabled));
   context.canvas.tokens.controlled = [token(actor("b"))];
+  bar.refreshActor();
+  assert.equal(button("fortune").disabled, true);
   await bar.performAction("fortune");
   assert.equal(calls.length, 1);
   release(); await pending;

@@ -3197,9 +3197,11 @@ class PrismBar {
     }
     for (const button of this.actions) {
       const action = button.dataset.co2prismAction;
-      button.disabled = Boolean(this.busyAction) || !this.canUseAction(action);
+      const isRest = action === "fastRest" || action === "fullRest";
+      const disableWhileBusy = action !== "fortune" && !isRest;
+      button.disabled = (disableWhileBusy && Boolean(this.busyAction)) || !this.canUseAction(action);
       button.setAttribute("aria-disabled", String(button.disabled));
-      const missingRest = ["fastRest", "fullRest"].includes(action) && !this.getRest(action);
+      const missingRest = isRest && !this.getRest(action);
       const label = game.i18n.localize(`CO2PRISM.Actions.${action}`);
       button.setAttribute("aria-label", label);
       button.dataset.co2prismTooltipText = missingRest ? game.i18n.localize("CO2PRISM.RestUnavailable")
