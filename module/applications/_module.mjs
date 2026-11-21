@@ -1572,8 +1572,8 @@ class PrismBar {
   }
 
   canUseDefense(actor, id, state, stances = defenseStances()) {
-    return this.canControlDefense(actor, id, stances) && economyEnabled()
-      && typeof actor.canActivateDefenseStance === "function" && state.canSpend[DEFENSE_COSTS[id]]
+    return this.canControlDefense(actor, id, stances)
+      && typeof actor.canActivateDefenseStance === "function" && (!economyEnabled() || state?.canSpend[DEFENSE_COSTS[id]])
       && !stances.some(stance => actor.hasEffect(stance.id));
   }
 
@@ -1595,10 +1595,12 @@ class PrismBar {
     const { actor, token } = this;
     if (!this.canControlDefense(actor, id)) return false;
     const active = actor.hasEffect(id);
-    const economy = new ActionEconomy(actor);
-    const version = economy.getResetVersion();
-    const validate = () => this.token === token && economy.getResetVersion() === version
-      && this.canUseDefense(actor, id, economy.getSnapshot());
+    const economy = !active && economyEnabled() ? new ActionEconomy(actor) : null;
+    const version = economy?.getResetVersion();
+    const sameContext = () => this.token === token && this.canControlDefense(actor, id)
+      && economyEnabled() === Boolean(economy);
+    const validate = () => sameContext() && economy?.getResetVersion() === version
+      && this.canUseDefense(actor, id, economy?.getSnapshot());
     if (!active && !validate()) return false;
     const remove = () => actor.toggleStatusEffect(id, { active: false });
     this.busyAction = "defense";
@@ -1608,7 +1610,7 @@ class PrismBar {
         await remove();
         return !actor.hasEffect(id);
       }
-      const result = await economy.spend(DEFENSE_COSTS[id], { validate, rollback: remove, confirm: async () => {
+      const confirm = async () => {
         if (!actor.canActivateDefenseStance(id)) return false;
         let applied;
         try { applied = await actor.toggleStatusEffect(id, { active: true }); }
@@ -1617,10 +1619,13 @@ class PrismBar {
           throw error;
         }
         if (!actor.hasEffect(id)) return false;
-        if (applied !== false && !defenseStances().some(stance => stance.id !== id && actor.hasEffect(stance.id))) return true;
+        if (applied !== false && (economy || sameContext())
+          && !defenseStances().some(stance => stance.id !== id && actor.hasEffect(stance.id))) return true;
         await remove();
         return false;
-      } });
+      };
+      if (!economy) return validate() && await confirm();
+      const result = await economy.spend(DEFENSE_COSTS[id], { validate, rollback: remove, confirm });
       if (result.reason === "persistence-failed") ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.EconomyError"));
       return result.success;
     } catch (error) {
