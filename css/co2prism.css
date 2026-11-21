@@ -37,8 +37,13 @@
   --prism-turquoise: #27f1d2;
   --prism-glass-light: #9ebaff;
   --prism-electric-glass: #318dff;
-  --prism-actor-gloss: radial-gradient(ellipse at 28% 0%, color-mix(in srgb, var(--prism-electric-glass) 30%, white), transparent 67%),
-    linear-gradient(155deg, var(--prism-electric-glass) 46%, color-mix(in srgb, var(--prism-electric-glass) 76%, var(--prism-ink)));
+  --prism-actor-gloss:
+    radial-gradient(ellipse at 28% 0%, color-mix(in srgb, var(--prism-electric-glass) 30%, white), transparent 67%),
+    linear-gradient(
+      155deg,
+      var(--prism-electric-glass) 46%,
+      color-mix(in srgb, var(--prism-electric-glass) 76%, var(--prism-ink))
+    );
   --prism-positive: #7be4ae;
   --prism-negative: #ff929a;
   --prism-daily: #ffdc93;
@@ -351,6 +356,38 @@
   border: 0;
   border-radius: 0;
   pointer-events: auto;
+}
+.co2prism-targets {
+  --target-gap: max(2px, calc(4 * var(--unit)));
+  position: absolute;
+  inset: auto calc(8 * var(--unit)) calc(44 * var(--unit));
+  z-index: 2;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: var(--target-gap);
+  color: var(--prism-text);
+  font-size: max(10px, calc(17 * var(--unit)));
+  text-align: center;
+  text-shadow: var(--prism-text-shadow);
+  pointer-events: none;
+}
+.co2prism-target-row {
+  display: flex;
+  justify-content: center;
+  gap: var(--target-gap);
+  width: 100%;
+}
+.co2prism-target-row > img {
+  box-sizing: border-box;
+  width: var(--path-header-width);
+  max-width: calc((100% - 4 * var(--target-gap)) / 5);
+  aspect-ratio: 1;
+  object-fit: cover;
+  border: 1px solid var(--prism-electric-glass);
+  border-radius: calc(5 * var(--co2prism-unit));
+  pointer-events: auto;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--prism-raised) 70%, transparent), var(--prism-panel) 75%);
 }
 .co2prism-corner {
   display: flex;
@@ -1942,9 +1979,12 @@
   cursor: pointer;
 }
 .co2prism-combat-slot.co2prism-slot-executable[aria-disabled="false"]:hover:not(
-  .co2prism-action-exhausted, .co2prism-time-insufficient, .co2prism-condition-unavailable,
-  .co2prism-condition-pending, .co2prism-hand-unequipped
-) {
+    .co2prism-action-exhausted,
+    .co2prism-time-insufficient,
+    .co2prism-condition-unavailable,
+    .co2prism-condition-pending,
+    .co2prism-hand-unequipped
+  ) {
   background: linear-gradient(145deg, var(--prism-raised), var(--prism-panel));
   border-color: var(--prism-rim-color);
 }
@@ -2253,21 +2293,27 @@ button.co2prism-time {
 }
 
 /* Retour de survol distinct du halo d'état et du focus clavier. */
-#co2prism-bar :where(
-  button:enabled:not([aria-disabled="true"], .co2prism-corner button, .co2prism-time),
-  .co2prism-time-available > button:enabled,
-  .co2prism-slot-executable[aria-disabled="false"]:not(
-    .co2prism-action-exhausted, .co2prism-time-insufficient, .co2prism-condition-unavailable,
-    .co2prism-condition-pending, .co2prism-hand-unequipped
-  )
-):hover:not(:focus-visible) {
-  outline: 1px solid color-mix(in srgb, var(--prism-command-dye, var(--prism-rim, var(--prism-electric-glass))) 69%, white);
+#co2prism-bar
+  :where(
+    button:enabled:not([aria-disabled="true"], .co2prism-corner button, .co2prism-time),
+    .co2prism-time-available > button:enabled,
+    .co2prism-slot-executable[aria-disabled="false"]:not(
+        .co2prism-action-exhausted,
+        .co2prism-time-insufficient,
+        .co2prism-condition-unavailable,
+        .co2prism-condition-pending,
+        .co2prism-hand-unequipped
+      )
+  ):hover:not(:focus-visible) {
+  outline: 1px solid
+    color-mix(in srgb, var(--prism-command-dye, var(--prism-rim, var(--prism-electric-glass))) 69%, white);
   outline-offset: -3px;
 }
-.co2prism-bar :where(
-  button:enabled:not([aria-disabled="true"]):focus-visible,
-  [role="button"][aria-disabled="false"]:focus-visible
-) {
+.co2prism-bar
+  :where(
+    button:enabled:not([aria-disabled="true"]):focus-visible,
+    [role="button"][aria-disabled="false"]:focus-visible
+  ) {
   outline: 1px solid var(--prism-focus);
   outline-offset: 1px;
 }

@@ -128,6 +128,7 @@ class PrismBar {
     this.element = document.getElementById("co2prism-bar");
     this.handle = this.element.querySelector(".co2prism-portrait");
     this.anchor = this.element.querySelector(".co2prism-portrait-zone");
+    this.targetStrip = this.anchor.querySelector(".co2prism-targets");
     this.lock = this.element.querySelector(".co2prism-lock");
     this.sizeSlider = this.element.querySelector(".co2prism-size-slider");
     this.sizeSlider.min = WIDTHS.S;
@@ -301,6 +302,50 @@ class PrismBar {
     this.updateLock();
     this.layout();
     this.connectActor();
+    this.targetScene = globalThis.canvas?.ready ? canvas.scene : null;
+    this.renderTargets();
+  }
+
+  renderTargets(excluded = null) {
+    if (!this.targetStrip) return;
+    const scene = this.targetScene;
+    const targets = scene ? Array.from(game.user.targets ?? []).filter(({ document: token }) =>
+      token && token !== excluded && token.parent === scene && scene.tokens?.get(token.id) === token) : [];
+    this.targetStrip.hidden = targets.length === 0;
+    if (targets.length > 10) {
+      this.targetStrip.textContent = game.i18n.localize("CO2PRISM.ManyTargets");
+      return;
+    }
+    const rows = [];
+    for (let start = 0; start < targets.length; start += 5) {
+      const row = document.createElement("div");
+      row.className = "co2prism-target-row";
+      for (const token of targets.slice(start, start + 5)) {
+        const image = document.createElement("img");
+        image.alt = "";
+        image.draggable = false;
+        image.src = token.document.texture?.src || "icons/svg/mystery-man.svg";
+        image.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (this.targetScene === token.document.parent && game.user.targets?.has(token)) {
+            token.setTarget(false, { releaseOthers: false });
+          }
+        });
+        image.addEventListener("pointerenter", () => {
+          const modes = globalThis.CONST?.TOKEN_DISPLAY_MODES;
+          const { displayName, isSecret, name } = token.document;
+          if (!modes || isSecret !== false || token.isVisible !== true) return;
+          const visible = displayName === modes.HOVER || (displayName === modes.OWNER_HOVER && token.isOwner)
+            || token._canViewMode?.(displayName) === true;
+          if (visible && name) image.title = name;
+        });
+        image.addEventListener("pointerleave", () => image.removeAttribute("title"));
+        row.append(image);
+      }
+      rows.push(row);
+    }
+    this.targetStrip.replaceChildren(...rows);
   }
 
   connectActor() {
@@ -319,12 +364,24 @@ class PrismBar {
       });
     }
     // L'instance vit avec le monde ; ces hooks ne sont installés qu'au premier rendu.
-    Hooks.on("controlToken", () => this.refreshActor());
+    Hooks.on("controlToken", () => {
+      this.renderTargets();
+      this.refreshActor();
+    });
     Hooks.on("updateUser", (user, changes) => {
       if (user.id === game.user.id && "character" in changes) this.refreshActor();
+      if (user.id === game.user.id && "role" in changes) this.renderTargets();
     });
-    Hooks.on("canvasReady", () => this.refreshActor());
+    this.onTargetToken = user => { if (user === game.user) this.renderTargets(); };
+    Hooks.on("targetToken", this.onTargetToken);
+    Hooks.on("canvasReady", () => {
+      this.targetScene = globalThis.canvas?.scene;
+      this.renderTargets();
+      this.refreshActor();
+    });
     Hooks.on("canvasTearDown", canvas => {
+      this.targetScene = null;
+      this.renderTargets();
       this.movementZones.clear();
       this.movementTracker.closeScene(canvas?.scene ?? globalThis.canvas?.scene);
       this.refreshActor(false);
@@ -348,6 +405,8 @@ class PrismBar {
       }
     });
     Hooks.on("updateActor", (actor, changed) => {
+      if (Object.keys(changed).some(key => key === "ownership" || key.startsWith("ownership."))
+        && Array.from(game.user.targets ?? []).some(token => token.actor === actor)) this.renderTargets();
       if (Object.keys(changed).some(key => key === "flags" || key.startsWith("flags.co2prism"))) {
         const budget = new ActionEconomy(actor).getSnapshot();
         if (budget.branch === "undecided" && Object.values(budget.granted).every(value => value === 0)) this.movementContextVersion++;
@@ -364,6 +423,7 @@ class PrismBar {
       if (this.concernsActor(actor)) this.refreshActor(false);
     });
     Hooks.on("updateToken", (token, changed) => {
+      if (game.user.targets?.has(token.object)) this.renderTargets();
       const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta", "ownership"].includes(key)
         || key.startsWith("delta."));
       if (relevant && token === this.token?.document) {
@@ -372,6 +432,7 @@ class PrismBar {
       }
     });
     Hooks.on("deleteToken", token => {
+      if (token.parent === this.targetScene) this.renderTargets(token);
       if (token === this.movementZones.token) this.movementZones.clear();
       this.movementTracker.deleteToken(token);
       if (token === this.token?.document) this.refreshActor(false);
@@ -1370,6 +1431,10 @@ class PrismBar {
   }
 
   destroy() {
+    if (this.onTargetToken) Hooks.off("targetToken", this.onTargetToken);
+    this.targetScene = null;
+    this.renderTargets();
+    this.targetStrip = null;
     this.disconnectInventoryScroll();
     this.tooltipListeners?.abort();
     this.tooltipObserver?.disconnect();

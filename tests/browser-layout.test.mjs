@@ -3059,6 +3059,95 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(shades(false, false), panel.id + " hidden frame clears both fades");
             panel.replaceChildren(...original); panel.style.removeProperty("max-height"); panel.hidden = wasHidden;
           }
+          {
+            const modes = { NONE: 0, CONTROL: 1, OWNER_HOVER: 2, HOVER: 3, OWNER: 4, ALWAYS: 5 };
+            globalThis.CONST = { ...globalThis.CONST, TOKEN_DISPLAY_MODES: modes };
+            budgetTranslations["CO2PRISM.ManyTargets"] = "De nombreux tokens sont ciblés";
+            const scene = canvas.scene;
+            const targetHook = hooks.get("targetToken");
+            const targets = Array.from({ length: 11 }, (_, index) => {
+              const document = { id: "prism-target-" + index, parent: scene, name: "Target " + index,
+                displayName: modes.HOVER, isSecret: false, texture: { src: "icons/svg/target.svg#" + index } };
+              const token = { document, isOwner: false, isVisible: true, _canViewMode: mode => mode === modes.ALWAYS,
+                setTarget(active, { releaseOthers }) {
+                  check(!active && !releaseOthers, "Decibler uniquement la miniature");
+                  game.user.targets.delete(token);
+                  targetHook(game.user, token, false);
+                } };
+              document.object = token;
+              scene.tokens.set(document.id, document);
+              return token;
+            });
+            game.user.targets = new Set();
+            hooks.get("canvasReady")();
+            const strip = bar.targetStrip;
+            const images = () => [...strip.querySelectorAll("img")];
+            for (const count of [0, 1, 5, 6, 7, 10, 11]) {
+              game.user.targets = new Set(targets.slice(0, count));
+              targetHook(game.user, targets[0], true);
+              check(strip.hidden === (count === 0) && images().length === (count > 10 ? 0 : count) &&
+                (count <= 10 || strip.textContent === budgetTranslations["CO2PRISM.ManyTargets"]), "Target count " + count);
+              if (count > 5 && count <= 10) {
+                const [lower, upper] = [...strip.children];
+                check(lower.children.length === 5 && upper.children.length === count - 5 &&
+                  upper.getBoundingClientRect().bottom <= lower.getBoundingClientRect().top, "Lower row fills first");
+              }
+            }
+            game.user.targets = new Set(targets.slice(0, 7));
+            targetHook(game.user, targets[0], true);
+            const first = images()[0];
+            targetHook({}, targets[0], true);
+            check(images()[0] === first, "Other user targeting is ignored");
+            const menu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+            first.dispatchEvent(menu);
+            check(menu.defaultPrevented && game.user.targets.size === 6 && !game.user.targets.has(targets[0]) &&
+              images()[0].getAttribute("src") === targets[1].document.texture.src, "Right click releases one native target");
+            const target = targets[1];
+            const hoverTarget = () => {
+              const image = images()[0];
+              image.dispatchEvent(new PointerEvent("pointerenter"));
+              return image;
+            };
+            for (const isGM of [false, true]) {
+              game.user.isGM = isGM;
+              for (const mode of [modes.HOVER, modes.NONE, modes.OWNER_HOVER, modes.ALWAYS]) {
+                target.document.displayName = mode;
+                target.isOwner = isGM;
+                hooks.get("updateToken")(target.document, { displayName: mode });
+                const image = hoverTarget();
+                const expected = mode === modes.HOVER || mode === modes.ALWAYS || (mode === modes.OWNER_HOVER && isGM);
+                check(image.title === (expected ? target.document.name : "") && image.alt === "" &&
+                  !image.hasAttribute("aria-label"), "Native name visibility for player and GM");
+              }
+            }
+            target.document.isSecret = true;
+            hooks.get("updateToken")(target.document, { disposition: -2 });
+            check(!hoverTarget().title, "Secret token name stays private");
+            target.document.isSecret = false;
+            target.document.name = "Updated target";
+            target.document.texture.src = "";
+            hooks.get("updateToken")(target.document, { name: target.document.name, texture: {} });
+            check(hoverTarget().title === "Updated target" && images()[0].getAttribute("src") === "icons/svg/mystery-man.svg",
+              "Updated name and safe image fallback");
+            for (const size of ["S", "XL"]) {
+              settings.size = size; bar.layout();
+              const tile = images()[0].getBoundingClientRect();
+              const lower = strip.firstElementChild.getBoundingClientRect();
+              const portrait = bar.anchor.getBoundingClientRect();
+              const command = bar.lock.getBoundingClientRect();
+              check(Math.abs(tile.width - tile.height) < 1 && tile.width > 0 &&
+                Math.abs(lower.left + lower.right - portrait.left - portrait.right) < 1 &&
+                lower.bottom <= command.top, size + " centered square miniatures clear the controls");
+            }
+            hooks.get("deleteToken")(target.document);
+            check(images().length === 5, "Deleted target thumbnail disappears immediately");
+            hooks.get("canvasTearDown")();
+            targetHook(game.user, target, true);
+            check(strip.hidden && !images().length, "Canvas teardown clears targets and ignores late events");
+            for (const token of targets) scene.tokens.delete(token.document.id);
+            game.user.targets.clear();
+            hooks.get("canvasReady")();
+          }
           const sceneControls = { tokens: { tools: { select: { name: "select", order: 0 } } } };
           const registerSceneControls = hooks.get("getSceneControlButtons");
           registerSceneControls(sceneControls);

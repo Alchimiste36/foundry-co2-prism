@@ -40,6 +40,7 @@
       }
     },
     "Title": "CO2 Prism",
+    "ManyTargets": "Many tokens are targeted",
     "Size": "Bar size",
     "SizeHint": "Adjust the size of Prism. Lock Prism to save the size.",
     "Locked": "Lock bar position",
