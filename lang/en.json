@@ -50,6 +50,11 @@
     "Unavailable": "—",
     "NoActor": "Select a single authorized token to display its actor.",
     "SceneVisibility": "Show CO2 Prism",
+    "Encounter": {
+      "Name": "{name} (CR {nc})",
+      "Properties": "Properties",
+      "NoProperties": "No properties"
+    },
     "Actions": {
       "sheet": "Open actor sheet",
       "fortune": "Fortune roll",

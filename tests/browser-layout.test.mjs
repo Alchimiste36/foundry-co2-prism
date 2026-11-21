@@ -12,7 +12,7 @@ const foundryCSS = process.env.CO2PRISM_FOUNDRY_CSS ?? "F:/FVTT_V14/public/css/f
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 
 test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
-  skip: !existsSync(edge) || !existsSync(foundryCSS), timeout: 30000
+  skip: !existsSync(edge) || !existsSync(foundryCSS), timeout: 65000
 }, () => {
   const directory = mkdtempSync(join(tmpdir(), "co2prism-browser-"));
   try {
@@ -2590,6 +2590,54 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await togglePaths();
           canvas.tokens.controlled = [{ actor: other, document: { baseActor: other } }]; bar.refreshActor();
           check(pathPanel.hidden, 'Different actor has its own Paths panel state');
+          const encounterText = key => bar.gauges[key].encounterText;
+          Object.assign(budgetTranslations, { 'CO.encounter.category.beast': 'Beast', 'CO.size.small': 'Small',
+            'CO2PRISM.Encounter.Name': '{name} (NC {nc})', 'CO2PRISM.Encounter.Properties': 'Propri\u00e9t\u00e9s',
+            'CO2PRISM.Encounter.NoProperties': 'Aucune propri\u00e9t\u00e9' });
+          other.system = { ...other.system, attributes: { ...other.system.attributes } };
+          other.system.attributes.nc = 2;
+          other.system.details = { category: 'beast', size: 'small', properties: '<p>&nbsp; </p>' };
+          bar.refreshActor();
+          check(root.classList.contains('co2prism-encounter') && bar.name.textContent === other.name + ' (NC 2)' &&
+            bar.name.dataset.co2prismTooltipText === bar.name.textContent && encounterText('recovery').textContent === 'Beast' &&
+            encounterText('fortune').textContent === 'Small' && encounterText('mana').textContent === 'Aucune propri\u00e9t\u00e9' &&
+            !bar.gauges.mana.fill.dataset.co2prismImmediateHtml && !root.querySelector('.co2prism-rest-actions').getClientRects().length,
+            'Encounter renders localized details, NC and the empty properties state');
+          for (const [key, icon] of [['recovery', 'paw-claws'], ['fortune', 'ruler-triangle'], ['mana', 'book']]) {
+            const row = bar.gauges[key].fill;
+            check(row.querySelector('.co2prism-encounter-icon .fa-' + icon)?.getClientRects().length &&
+              encounterText(key).getClientRects().length && getComputedStyle(row, '::before').display === 'none' &&
+              !bar.gauges[key].text.getClientRects().length, 'Encounter detail replaces gauge and controls for ' + key);
+          }
+          const detailsRow = bar.gauges.mana.fill;
+          other.system.details.properties = '<p><strong>B</strong> <em>I</em></p><ul><li>One</li></ul>';
+          hooks.get('updateActor')(other, { system: {} });
+          detailsRow.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+          check(encounterText('mana').textContent === 'Propri\u00e9t\u00e9s' && (!game.tooltip || (game.tooltip.element === detailsRow &&
+            game.tooltip.tooltip.querySelector('strong') && game.tooltip.tooltip.querySelector('em') && game.tooltip.tooltip.querySelector('li'))),
+            'Rich encounter properties appear immediately without Shift');
+          other.system.details.properties = '<p>X</p>'; other.system.attributes.nc = 3;
+          hooks.get('updateActor')(other, { system: {} });
+          await settled();
+          check(detailsRow.dataset.co2prismImmediateHtml === '<p>X</p>' && bar.name.textContent === other.name + ' (NC 3)' &&
+            (!game.tooltip || game.tooltip.tooltip.textContent === 'X'), 'An open tooltip updates for a single-character property');
+          const resources = () => Object.values(bar.gauges).map(({ fill }) => {
+            const r = fill.getBoundingClientRect(), anchor = bar.anchor.getBoundingClientRect();
+            return [r.x - anchor.x, r.y - anchor.y, r.width, r.height];
+          });
+          const encounterToken = canvas.tokens.controlled;
+          for (const size of ['S', 'M', 'L', 'XL']) {
+            settings.size = size; bar.layout();
+            const encounterRows = JSON.stringify(resources());
+            const encounterSurface = palette("nucleus"), healthColor = palette("health");
+            canvas.tokens.controlled = selected; bar.refreshActor();
+            check(!root.classList.contains('co2prism-encounter') && bar.name.textContent === actor.name &&
+              root.querySelector('.co2prism-rest-actions').getClientRects().length && !detailsRow.dataset.co2prismImmediateHtml &&
+              palette('nucleus') !== encounterSurface && palette('health') === healthColor &&
+              encounterRows === JSON.stringify(resources()), size + ' encounter and character share all four resource coordinates and functional colors');
+            canvas.tokens.controlled = encounterToken; bar.refreshActor();
+          }
+
           await togglePaths();
           check(pathCapacities('encounter-path').length === 3 && pathCapacities('off-paths').length === 6, 'Encounter Paths and off-path inventory');
           other.capacities = other.capacities.filter(capacity => capacity.system.path);
@@ -2796,7 +2844,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       "--window-size=2400,1400", "--virtual-time-budget=6000",
       ...(process.env.CO2PRISM_SCREENSHOT ? [`--screenshot=${process.env.CO2PRISM_SCREENSHOT}`] : []),
       "--dump-dom", pathToFileURL(fixture).href], {
-      encoding: "utf8", timeout: 25000, maxBuffer: 2000000, windowsHide: true
+      encoding: "utf8", timeout: 55000, maxBuffer: 2000000, windowsHide: true
     });
     assert.ifError(execution.error);
     assert.equal(execution.status, 0, execution.stderr);

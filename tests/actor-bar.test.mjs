@@ -2022,6 +2022,37 @@ test("attaques de rencontre : source commune, persistance et exécution par Item
   assert.equal(calls.length, 0);
 });
 
+test("Rencontre : dépôt, persistance et exécution des attaques des deux mains", async () => {
+  const { bar, a, item, action, calls, click, event, node, target, context } = await setupExecution();
+  a.type = "encounter"; item.type = "attack"; item.system = {};
+  const second = { ...item, id: "claw", uuid: a.uuid + ".Item.claw", actions: [{ ...action }] };
+  a.items.set(second.id, second);
+  a.flags.co2prism.hands.presets = {};
+  a.toggleEquipmentEquipped = () => assert.fail("Une attaque ne passe pas dans le circuit d’équipement.");
+  const left = () => bar.slotRows()[0][0];
+  const right = () => bar.slotRows()[0][1];
+  assert.equal(await bar.dropSlot(event({ type: "co.attack", uuid: item.uuid }), left(), node), true);
+  assert.equal(await bar.dropSlot(event({ type: "Item", uuid: second.uuid }), right(), node), true);
+  for (const [key, owned] of [["left-hand", item], ["right-hand", second]]) {
+    const saved = new context.PrismBar().readConfiguration(a).slots[key];
+    assert.equal(saved.source, owned.uuid);
+    assert.equal(saved.itemId, owned.id);
+    assert.equal(await bar.executeShortcut(click(), target(key)), true);
+    assert.deepEqual(calls.pop(), ["useAction", owned.uuid, 0, "attack"]);
+  }
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.equal(left().reference, undefined);
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.equal(right().reference.itemId, second.id);
+  assert.equal(await bar.manageShortcut(target("left-hand")), true);
+  assert.equal(left().reference, undefined);
+  assert.equal(right().reference.itemId, second.id);
+  assert.equal(await bar.dropSlot(event({ type: "co.attack", uuid: item.uuid }), right(), node), true);
+  assert.equal(right().reference.itemId, item.id);
+  a.type = "character";
+  assert.equal(await bar.dropSlot(event({ type: "co.attack", uuid: item.uuid }), left(), node), false);
+});
+
 test("attaques de rencontre : UUID synthétique, droits et dépôts étrangers refusés", () => {
   const { bar, a, item, create } = setupShortcuts();
   item.type = "attack";

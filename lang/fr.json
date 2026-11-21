@@ -50,6 +50,11 @@
     "Unavailable": "—",
     "NoActor": "Sélectionnez un seul token autorisé pour afficher son acteur.",
     "SceneVisibility": "Afficher CO2 Prism",
+    "Encounter": {
+      "Name": "{name} (NC {nc})",
+      "Properties": "Propriétés",
+      "NoProperties": "Aucune propriété"
+    },
     "Actions": {
       "sheet": "Ouvrir la feuille de l’acteur",
       "fortune": "Jet de chance",

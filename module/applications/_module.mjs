@@ -258,7 +258,8 @@ class PrismBar {
     }
     this.gauges = Object.fromEntries(["recovery", "fortune", "mana", "hp"].map(key => [key, {
       fill: this.element.querySelector(`[data-co2prism-gauge="${key}"]`),
-      text: this.element.querySelector(`[data-co2prism-value="${key}"]`)
+      text: this.element.querySelector(`[data-co2prism-value="${key}"]`),
+      encounterText: this.element.querySelector(`[data-co2prism-gauge="${key}"] > .co2prism-encounter-value`)
     }]));
     this.position = game.settings.get(MODULE, "position");
     this.lock.addEventListener("click", () => {
@@ -413,8 +414,34 @@ class PrismBar {
       }
     }
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
+    const encounter = actor?.type === "encounter";
+    this.element?.classList?.toggle("co2prism-encounter", encounter);
+    const details = actor?.system?.details;
+    const localizeDetail = (prefix, value) => {
+      if (typeof value !== "string" || !value) return unavailable;
+      const key = `${prefix}.${value}`;
+      const label = game.i18n.localize(key);
+      return label === key ? unavailable : label;
+    };
     const summaries = [];
     for (const [key, nodes] of Object.entries(this.gauges)) {
+      if (encounter && nodes.encounterText) {
+        delete nodes.fill.dataset.co2prismTooltipText;
+        let label;
+        if (key === "recovery") label = localizeDetail("CO.encounter.category", details?.category);
+        else if (key === "fortune") label = localizeDetail("CO.size", details?.size);
+        else {
+          const html = typeof details?.properties === "string" ? foundry.utils.cleanHTML(details.properties) : "";
+          const hasProperties = Boolean(html && this.plainText(html));
+          label = game.i18n.localize(hasProperties ? "CO2PRISM.Encounter.Properties" : "CO2PRISM.Encounter.NoProperties");
+          if (hasProperties && nodes.fill.dataset.co2prismImmediateHtml !== html) nodes.fill.dataset.co2prismImmediateHtml = html;
+          else if (!hasProperties) delete nodes.fill.dataset.co2prismImmediateHtml;
+        }
+        nodes.encounterText.textContent = label;
+        summaries.push(label);
+        continue;
+      }
+      if (nodes.fill.dataset.co2prismImmediateHtml) delete nodes.fill.dataset.co2prismImmediateHtml;
       const resource = this.getResource(actor, key);
       const current = Number.isFinite(resource?.value) ? resource.value : null;
       const maximum = Number.isFinite(resource?.max) && resource.max > 0 ? resource.max : null;
@@ -429,11 +456,13 @@ class PrismBar {
       nodes.fill.dataset.co2prismTooltipText = label;
       summaries.push(label);
     }
-    this.name.textContent = actor?.name || unavailable;
-    this.name.dataset.co2prismTooltipText = actor?.name || game.i18n.localize("CO2PRISM.NoActor");
+    const nc = actor?.system?.attributes?.nc;
+    const name = encounter && Number.isFinite(nc) ? game.i18n.format("CO2PRISM.Encounter.Name", { name: actor.name, nc }) : actor?.name;
+    this.name.textContent = name || unavailable;
+    this.name.dataset.co2prismTooltipText = name || game.i18n.localize("CO2PRISM.NoActor");
     const portrait = actor?.img || "icons/svg/mystery-man.svg";
     if (this.portrait.getAttribute("src") !== portrait) this.portrait.setAttribute("src", portrait);
-    this.art.setAttribute("aria-label", actor ? `${actor.name}. ${summaries.join(". ")}`
+    this.art.setAttribute("aria-label", actor ? `${name}. ${summaries.join(". ")}`
       : game.i18n.localize("CO2PRISM.NoActor"));
     this.updateActions();
     this.configuration = this.readConfiguration(actor);
@@ -879,7 +908,7 @@ class PrismBar {
     this.tooltipObserver.observe(this.element, {
       subtree: true, childList: true, attributes: true,
       attributeFilter: ["hidden", "data-co2prism-description", "data-co2prism-description-html",
-        "data-co2prism-tooltip-text", "data-co2prism-action-summary", "data-co2prism-action-summary-html"]
+        "data-co2prism-tooltip-text", "data-co2prism-action-summary", "data-co2prism-action-summary-html", "data-co2prism-immediate-html"]
     });
   }
 
@@ -895,11 +924,12 @@ class PrismBar {
   syncDescriptiveTooltip(shift = this.tooltipShift) {
     this.tooltipShift = shift;
     const node = this.tooltipHover?.closest("[data-co2prism-action-summary], [data-co2prism-description], "
-      + "[data-co2prism-description-html], [data-co2prism-tooltip-text]");
+      + "[data-co2prism-description-html], [data-co2prism-tooltip-text], [data-co2prism-immediate-html]");
     const manager = game.tooltip;
     const summary = node?.dataset.co2prismActionSummary;
     const text = shift ? (summary === undefined ? node?.dataset.co2prismDescription ?? node?.dataset.co2prismTooltipText : "") : summary;
-    const html = shift ? node?.dataset.co2prismDescriptionHtml : node?.dataset.co2prismActionSummaryHtml;
+    const html = node?.dataset.co2prismImmediateHtml
+      ?? (shift ? node?.dataset.co2prismDescriptionHtml : node?.dataset.co2prismActionSummaryHtml);
     if ((!text && !html) || !node?.isConnected || !this.element.contains(node) || !node.getClientRects().length) {
       if (this.descriptiveTooltip) this.clearDescriptiveTooltip();
       return;
@@ -1739,6 +1769,12 @@ class PrismBar {
     return key === "left-hand" || key === "right-hand";
   }
 
+  encounterHandAttack(actor, reference) {
+    if (actor?.type !== "encounter" || reference?.kind === "equipment" || !reference?.itemId) return null;
+    const resolved = this.resolveShortcut(actor, reference);
+    return resolved?.item?.type === "attack" && resolved.item.parent === actor && resolved.item.uuid === reference.source ? resolved : null;
+  }
+
   handItem(actor, reference) {
     if (!reference?.itemId) return null;
     const direct = reference.kind === "equipment";
@@ -1765,8 +1801,9 @@ class PrismBar {
       if (this.handItem(actor, previous[key])?.system.usage?.twoHand
         && incoming[other]?.itemId === previous[key]?.itemId) incoming[other] = null;
     }
-    const items = Object.entries(incoming).filter(([hand, ref]) => this.handKey(hand) && ref != null)
-      .map(([, ref]) => this.handItem(actor, ref));
+    const references = Object.entries(incoming).filter(([hand, ref]) => this.handKey(hand) && ref != null).map(([, ref]) => ref);
+    const attacks = references.filter(ref => this.encounterHandAttack(actor, ref));
+    const items = references.filter(ref => !attacks.includes(ref)).map(ref => this.handItem(actor, ref));
     if (items.includes(null)) return warn("HandsInvalidItem");
     const required = new Set(items);
     const hands = item => item.system.usage?.twoHand ? 2 : 1;
@@ -1793,6 +1830,7 @@ class PrismBar {
         await apply(item, value);
       }
       if (this.actor !== actor || this.token !== token || !this.canConfigure(actor)
+        || attacks.some(ref => !this.encounterHandAttack(actor, ref))
         || [...required].some(item => actor.items?.get(item.id) !== item || !item.system.equipped)
         || [...outgoing].some(item => item.system.equipped)) throw Error("Contexte d’équipement modifié");
       if (key) {
@@ -1845,6 +1883,7 @@ class PrismBar {
     if (!slot.hand || data?.type !== "Item") return this.shortcutFromDrop(actor, data);
     if (typeof data.uuid !== "string") return null;
     const item = [...(actor.items?.values() ?? [])].find(owned => owned.uuid === data.uuid);
+    if (actor.type === "encounter" && item?.type === "attack") return this.shortcutFromDrop(actor, { type: "co.attack", uuid: item.uuid });
     const reference = { kind: "equipment", itemId: item?.id };
     return this.handItem(actor, reference) ? reference : null;
   }
@@ -2114,7 +2153,7 @@ class PrismBar {
         } else if (resolved) {
           const { action, item } = resolved;
           const name = this.renderShortcutVisual(node, resolved, references[0]);
-          const unequipped = Boolean(slot.hand && !item?.system.equipped);
+          const unequipped = Boolean(slot.hand && !this.encounterHandAttack(this.actor, references[0]) && !item?.system.equipped);
           this.describeShortcut(node, resolved, name, unequipped);
           const context = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
             key: slot.key, reference: references[0] };
@@ -2599,7 +2638,7 @@ class PrismBar {
     if (raw) {
       try {
         const reference = this.slotReferenceFromDrop(context.actor, JSON.parse(raw), slot);
-        if (!reference || (slot.hand && !this.handItem(context.actor, reference))) return;
+        if (!reference || (slot.hand && !this.handItem(context.actor, reference) && !this.encounterHandAttack(context.actor, reference))) return;
       } catch { return; }
     } else if (!Array.from(event.dataTransfer?.types ?? []).includes("text/plain")) return;
     event.preventDefault(); event.stopPropagation();
@@ -2678,7 +2717,7 @@ class PrismBar {
     const { action, item } = resolved;
     if ((context.equipment && action !== context.action)
       || (context.conditionalSource && action !== context.expectedAction)) return warn("CO2PRISM.CommandUnavailable");
-    if (this.handKey(key) && ["use", "damage"].includes(mode) && !item?.system.equipped) {
+    if (this.handKey(key) && ["use", "damage"].includes(mode) && !this.encounterHandAttack(actor, current) && !item?.system.equipped) {
       return warn("CO2PRISM.Combat.HandUnequipped");
     }
     // Les API macros CO2 installées ciblent un Item, jamais un faux support acteur.
@@ -2938,7 +2977,7 @@ class PrismBar {
     }
     const token = this.token;
     return this.queueConfiguration(actor, async () => {
-      const resolved = slot.hand ? this.handItem(actor, reference) : this.resolveShortcut(actor, reference);
+      const resolved = slot.hand ? this.handItem(actor, reference) ?? this.encounterHandAttack(actor, reference) : this.resolveShortcut(actor, reference);
       if (game.settings.get(MODULE, "locked") || this.actor !== actor || this.token !== token || !this.canConfigure(actor) || !resolved) {
         ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
       }

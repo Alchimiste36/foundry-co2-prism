@@ -101,6 +101,27 @@
 :is(#tooltip, .locked-tooltip).co2prism-tooltip ol {
   list-style: decimal;
 }
+#co2prism-bar.co2prism-encounter {
+  --prism-nucleus: #35181e;
+  --prism-nucleus-light: #542831;
+  --prism-panel: #391c23ed;
+  --prism-popover: #3e1e26f7;
+  --prism-raised: #592c36;
+  --prism-panel-surface: linear-gradient(152deg, #4d252ef7, var(--prism-panel) 55%, #291318ed);
+}
+.co2prism-bar :is(.co2prism-encounter-icon, .co2prism-encounter-value),
+.co2prism-encounter .co2prism-rest-actions,
+.co2prism-encounter [data-co2prism-gauge]:not([data-co2prism-gauge="hp"]) > :not(.co2prism-encounter-icon, .co2prism-encounter-value),
+.co2prism-encounter [data-co2prism-gauge]:not([data-co2prism-gauge="hp"])::before { display: none; }
+.co2prism-encounter [data-co2prism-gauge]:not([data-co2prism-gauge="hp"]) { background: var(--prism-surface); }
+.co2prism-bar.co2prism-encounter .co2prism-resource > .co2prism-encounter-icon { display: flex; color: var(--prism-text); }
+.co2prism-bar.co2prism-encounter .co2prism-resource > .co2prism-encounter-value {
+  display: block;
+  grid-column: 2 / -1;
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 #co2prism-bar.co2prism-bar {
   --unit: var(--co2prism-unit, 0.6px);
   position: fixed;
