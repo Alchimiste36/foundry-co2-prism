@@ -842,12 +842,15 @@ test("repos : handlers du registre, absence, ambiguïté et garde des doubles cl
 });
 
 test("action en cours : aucune exécution concurrente, même si le token change", async () => {
-  const { bar, context, a, calls, token, actor } = setupActions();
+  const { bar, context, a, calls, token, actor, button } = setupActions();
   let release;
   a.system.rollFortune = () => new Promise(resolve => { release = resolve; calls.push("start"); });
   const pending = bar.performAction("fortune");
-  assert.ok(bar.actions.every(node => node.disabled));
+  assert.equal(button("fortune").disabled, false);
+  assert.ok(bar.actions.filter(node => node !== button("fortune")).every(node => node.disabled));
   context.canvas.tokens.controlled = [token(actor("b"))];
+  bar.refreshActor();
+  assert.equal(button("fortune").disabled, true);
   await bar.performAction("fortune");
   assert.equal(calls.length, 1);
   release(); await pending;
@@ -2818,6 +2821,70 @@ test("Defense CO2: confirmation, exclusive status and budget rollback", async ()
   assert.equal(await bar.toggleDefense("partialDef"), false);
   assert.equal(await bar.toggleDefense("fullDef"), false);
   assert.equal(calls.length, count);
+});
+
+test("défenses : coût uniquement quand le budget est actif et exclusion dans chaque mode", async () => {
+  for (const mode of ["off", "combat", "always"]) for (const started of [false, true]) {
+    const { a, bar, context, economy, writes } = await setupTimedExecution();
+    const get = context.game.settings.get;
+    context.game.settings.get = (module, key) => key === "economyMode" ? mode : get(module, key);
+    context.game.combats = started ? { active: { started: true } } : {};
+    const paid = mode === "always" || (mode === "combat" && started);
+    const ids = ["partialDef", "fullDef"];
+    context.game.system.CONST = { defenseStances: ids.map(id => ({ id })) };
+    const statuses = new Set();
+    a.hasEffect = id => statuses.has(id);
+    a.canActivateDefenseStance = id => [...statuses].every(status => status === id);
+    a.toggleStatusEffect = async (id, { active }) => active ? statuses.add(id) : statuses.delete(id);
+    bar.defenseButtons = ids.map(id => ({
+      dataset: { co2prismDefense: id }, setAttribute(key, value) { this[key] = value; }
+    }));
+    for (const [index, id] of ids.entries()) {
+      if (paid) await economy.reset();
+      const before = writes.length;
+      bar.updateDefenseButtons(paid ? economy.getSnapshot() : undefined);
+      assert.ok(bar.defenseButtons.every(button => !button.disabled));
+      assert.equal(await bar.toggleDefense(id), true);
+      bar.updateDefenseButtons(paid ? economy.getSnapshot() : undefined);
+      assert.equal(bar.defenseButtons[index]["aria-pressed"], "true");
+      assert.equal(bar.defenseButtons[1 - index].disabled, true);
+      assert.equal(await bar.toggleDefense(ids[1 - index]), false);
+      assert.deepEqual([...statuses], [id]);
+      assert.equal(await bar.toggleDefense(id), true);
+      assert.equal(statuses.size, 0);
+      assert.equal(writes.length - before, paid ? 1 : 0);
+      if (paid) assert.equal(await bar.toggleDefense(id), false);
+    }
+  }
+});
+
+test("défenses sans budget : refus natif et annulation si le contexte change pendant l’activation", async () => {
+  const { a, bar, context, writes } = await setupTimedExecution();
+  const get = context.game.settings.get;
+  context.game.settings.get = (module, key) => key === "economyMode" ? "off" : get(module, key);
+  context.game.system.CONST = { defenseStances: [{ id: "partialDef" }, { id: "fullDef" }] };
+  const statuses = new Set();
+  a.hasEffect = id => statuses.has(id);
+  a.canActivateDefenseStance = () => false;
+  let release, started = 0;
+  a.toggleStatusEffect = async (id, { active }) => {
+    if (!active) return statuses.delete(id);
+    started++;
+    await new Promise(resolve => { release = resolve; });
+    statuses.add(id);
+    return true;
+  };
+  const before = writes.length;
+  assert.equal(await bar.toggleDefense("partialDef"), false);
+  assert.equal(started, 0);
+  a.canActivateDefenseStance = () => true;
+  const pending = bar.toggleDefense("partialDef");
+  assert.equal(await bar.toggleDefense("fullDef"), false);
+  bar.token = null;
+  release();
+  assert.equal(await pending, false);
+  assert.equal(statuses.size, 0);
+  assert.equal(writes.length, before);
 });
 
 test("Tokens visibility uses the saved Foundry user setting and defaults on", () => {

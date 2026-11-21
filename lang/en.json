@@ -40,8 +40,9 @@
       }
     },
     "Title": "CO2 Prism",
+    "ManyTargets": "Many tokens are targeted",
     "Size": "Bar size",
-    "SizeHint": "Choose S, M, L or XL. Changes apply immediately.",
+    "SizeHint": "Adjust the size of Prism. Lock Prism to save the size.",
     "Locked": "Lock bar position",
     "LockedHint": "Unlock to move the bar using its portrait.",
     "Lock": "Lock position",
@@ -218,8 +219,9 @@
     "MovementRoundingDown": "Round down",
     "EconomyMode": "Action budget",
     "EconomyModeHint": "Display and use of the budget; changing mode does not reset it.",
-    "EconomyAlways": "Always visible and active",
-    "EconomyCombat": "Visible and active only in combat",
-    "EconomyOff": "Hidden and inactive"
+    "MovementMode": "Movement tracking",
+    "ModeAlways": "Always",
+    "ModeInCombat": "Only in combat",
+    "ModeNever": "Never"
   }
 }
