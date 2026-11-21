@@ -15,7 +15,10 @@ function network() {
     const warnings = [], emits = [];
     const context = vm.createContext({
       game: { user, users, scenes, i18n: { format: (key, data) => `${key}:${data.token}:${data.excess}` },
-        socket: { on: (channel, fn) => listeners.push({ channel, fn }), emit: (channel, packet) => {
+        socket: { on: (channel, fn) => listeners.push({ channel, fn }), off: (channel, fn) => {
+          const index = listeners.findIndex(listener => listener.channel === channel && listener.fn === fn);
+          if (index !== -1) listeners.splice(index, 1);
+        }, emit: (channel, packet) => {
           emits.push(packet); for (const listener of listeners) if (listener.channel === channel) listener.fn(packet);
         } } },
       foundry: { utils: { randomID: () => `notification-${++serial}` } },
@@ -51,4 +54,19 @@ test("15D socket : messages invalides et émetteur sans droits refusés, aucune 
   for (const extra of [{ excess: 0 }, { excess: -1 }, { excess: Infinity }, { userId: "outsider" },
     { tokenId: "missing" }, { type: "spend" }]) assert.equal(receiver.notifications.receive({ ...packet, ...extra }), false);
   assert.equal(receiver.notifications.receive(packet), true); assert.equal(receiver.warnings.length, 1);
+});
+
+test("socket : le démontage retire uniquement son abonnement", () => {
+  const { clients, token, listeners } = network();
+  const gm = clients.get("gm");
+  gm.notifications.disconnect();
+  gm.notifications.disconnect();
+  assert.equal(listeners.length, 3);
+  clients.get("player").notifications.broadcast(token, 2);
+  assert.equal(gm.warnings.length, 0);
+  gm.notifications.connect();
+  gm.notifications.connect();
+  assert.equal(listeners.length, 4);
+  clients.get("player").notifications.broadcast(token, 2);
+  assert.equal(gm.warnings.length, 1);
 });

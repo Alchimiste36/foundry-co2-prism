@@ -136,7 +136,10 @@ function setupMovementValidation() {
   let mode = "always", serial = 0;
   context.game.settings = { get: (_, key) => key === "economyMode" ? mode : "nearest" };
   const warnings = [];
-  bar.movementNotifications = { broadcast: (token, excess) => { warnings.push({ token, excess }); return true; } };
+  bar.movementNotifications = {
+    broadcast: (token, excess) => { warnings.push({ token, excess }); return true; },
+    disconnect() {}
+  };
   const a = configuredActor("movement-budget", { co2prism: { panels: { combat: true } } });
   a.system.attributes.movement = { value: 10, unit: "m" };
   const create = (actor = a) => {

@@ -3196,6 +3196,38 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             "Reactivation reuses the same element, anchor and scale");
           await visibilityWrite;
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
+          {
+            const disposed = bar;
+            const before = new Map(hooks);
+            disposed.connectActor();
+            check([...before].every(([name, callback]) => hooks.get(name) === callback) && hooks.size === before.size,
+              "Connecting Prism again adds no hooks");
+            const observers = [disposed.movementZonesObserver, disposed.presentationObserver,
+              disposed.inventoryScrollResize, disposed.inventoryScrollContent, disposed.tooltipObserver];
+            const disconnected = new Set();
+            for (const observer of observers) {
+              const disconnect = observer.disconnect.bind(observer);
+              observer.disconnect = () => { disconnected.add(observer); disconnect(); };
+            }
+            let layouts = 0, refreshes = 0;
+            disposed.layout = () => { layouts++; };
+            disposed.refreshActor = () => { refreshes++; };
+            root.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            document.dispatchEvent(new DragEvent("dragstart"));
+            document.dispatchEvent(new DragEvent("dragend"));
+            window.dispatchEvent(new Event("resize"));
+            check(disconnected.size === observers.length && disposed.globalListeners.signal.aborted &&
+              !hooks.has("targetToken") && !hooks.has("controlToken") && hooks.has("getSceneControlButtons") &&
+              layouts === 0 && refreshes === 0, "Removing Prism tears down observers, hooks and global listeners");
+            const recreated = new PrismBar();
+            await Promise.all([recreated.render(), recreated.render()]);
+            check(document.querySelectorAll("#co2prism-bar").length === 1 &&
+              hooks.size === before.size && hooks.get("targetToken") !== before.get("targetToken"),
+              "Concurrent renders recreate one bar and one set of hooks");
+            recreated.element.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";
         output.textContent = JSON.stringify(result); document.body.append(output);

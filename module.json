@@ -1,7 +1,7 @@
 {
   "id": "co2prism",
   "title": "CO2 Prism",
-  "description": "Module pour Chroniques Oubliées 2, initialement pour Fantasy. Socle minimal sans fonctionnalité de jeu.",
+  "description": "Interface pour Chroniques Oubliées 2 dans Foundry VTT, avec ressources, raccourcis, équipement, suivi des déplacements et budget d’actions.",
   "version": "0.1.0",
   "socket": true,
   "compatibility": {

@@ -118,12 +118,13 @@ class PrismBar {
   }
 
   async render() {
-    if (document.getElementById("co2prism-bar")) return;
+    if (this.movementDestroyed || document.getElementById("co2prism-bar")) return;
     const { renderTemplate } = foundry.applications.handlebars;
     // Seuls les fragments statiques rendus par Handlebars sont insérés dans bar.hbs.
     const sections = await Promise.all(Object.entries(PARTIALS).map(async ([key, name]) =>
       [key, await renderTemplate(`${TEMPLATE_ROOT}/partials/${name}.hbs`, {})]));
     const markup = await renderTemplate(`${TEMPLATE_ROOT}/bar.hbs`, Object.fromEntries(sections));
+    if (this.movementDestroyed || document.getElementById("co2prism-bar")) return;
     document.body.insertAdjacentHTML("beforeend", markup);
     this.element = document.getElementById("co2prism-bar");
     this.handle = this.element.querySelector(".co2prism-portrait");
@@ -190,17 +191,11 @@ class PrismBar {
       event.preventDefault(); event.stopPropagation(); void this.toggleMovementZones();
     });
     this.movementZonesObserver = new MutationObserver(() => {
-      if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
       if (!this.element.isConnected) {
-        this.movementZones.clear();
-        this.movementZonesObserver.disconnect();
-        this.presentationObserver?.disconnect();
-        this.disconnectInventoryScroll();
-        this.tooltipListeners?.abort();
-        this.tooltipObserver?.disconnect();
-        this.clearDescriptiveTooltip();
-        if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
+        this.destroy();
+        return;
       }
+      if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
     });
     this.movementZonesObserver.observe(document.body, { childList: true });
     this.movementZonesObserver.observe(this.element, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
@@ -218,18 +213,20 @@ class PrismBar {
       event.preventDefault(); event.stopPropagation(); void this.changeEconomy("reset");
     });
     // Observer le début/la fin du drag, sans intercepter les dépôts hors Prism.
+    this.globalListeners = new AbortController();
+    const { signal } = this.globalListeners;
     document.addEventListener("dragstart", event => {
       this.clearShortcutPreview();
       if (this.combatSlots.contains(event.target)) return;
       this.refreshActor();
       this.slotDrag = { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
-    });
+    }, { signal });
     document.addEventListener("dragend", () => {
       this.slotDrag = null;
       setTimeout(() => { this.suppressShortcutClick = false; }, 0);
       this.combatSlots.querySelectorAll(".co2prism-drop-target, .co2prism-drop-candidate, .co2prism-drop-insert")
         .forEach(node => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
-    });
+    }, { signal });
     this.skillsPanel = this.element.querySelector(".co2prism-skills");
     this.skillsToggle = this.element.querySelector(".co2prism-skills-toggle");
     this.skillsToggle.addEventListener("click", event => {
@@ -295,8 +292,7 @@ class PrismBar {
       event.stopPropagation();
       if (!this.portraitFirstClickMoved && !this.portraitMoved) void this.performAction("sheet");
     });
-    this.onWindowResize = () => this.layout();
-    window.addEventListener("resize", this.onWindowResize);
+    window.addEventListener("resize", () => this.layout(), { signal });
     this.presentationObserver = new ResizeObserver(() => this.layout({ preserveAnchor: true }));
     this.presentationObserver.observe(this.art);
     this.updateLock();
@@ -349,62 +345,67 @@ class PrismBar {
   }
 
   connectActor() {
+    if (this.actorHooks || this.movementDestroyed) return;
+    this.actorHooks = [];
+    const on = (event, callback) => {
+      Hooks.on(event, callback);
+      this.actorHooks.push([event, callback]);
+    };
     this.movementNotifications.connect();
     for (const event of ["createCombat", "updateCombat", "deleteCombat", "combatTurnChange"]) {
-      Hooks.on(event, (combat, changed) => {
+      on(event, (combat, changed) => {
         if (event !== "createCombat" && (event !== "updateCombat" || ["round", "turn", "active"].some(key => key in (changed ?? {})))) this.movementContextVersion++;
         this.refreshActor();
       });
     }
     for (const event of ["createCombatant", "updateCombatant", "deleteCombatant"]) {
-      Hooks.on(event, combatant => {
+      on(event, combatant => {
         if (game.settings.get(MODULE, "movementMode") === "combat" && combatant.parent === game.combats?.active) {
           this.refreshActor();
         }
       });
     }
     // L'instance vit avec le monde ; ces hooks ne sont installés qu'au premier rendu.
-    Hooks.on("controlToken", () => {
+    on("controlToken", () => {
       this.renderTargets();
       this.refreshActor();
     });
-    Hooks.on("updateUser", (user, changes) => {
+    on("updateUser", (user, changes) => {
       if (user.id === game.user.id && "character" in changes) this.refreshActor();
       if (user.id === game.user.id && "role" in changes) this.renderTargets();
     });
-    this.onTargetToken = user => { if (user === game.user) this.renderTargets(); };
-    Hooks.on("targetToken", this.onTargetToken);
-    Hooks.on("canvasReady", () => {
+    on("targetToken", user => { if (user === game.user) this.renderTargets(); });
+    on("canvasReady", () => {
       this.targetScene = globalThis.canvas?.scene;
       this.renderTargets();
       this.refreshActor();
     });
-    Hooks.on("canvasTearDown", canvas => {
+    on("canvasTearDown", canvas => {
       this.targetScene = null;
       this.renderTargets();
       this.movementZones.clear();
       this.movementTracker.closeScene(canvas?.scene ?? globalThis.canvas?.scene);
       this.refreshActor(false);
     });
-    Hooks.on("moveToken", (token, movement) => {
+    on("moveToken", (token, movement) => {
       if (this.movementTrackingAllowed(token)) this.movementTracker.update(token, movement);
       if (token === this.token?.document) this.refreshActor();
     });
-    Hooks.on("recordToken", token => {
+    on("recordToken", token => {
       if (this.movementTrackingAllowed(token)) this.movementTracker.refresh(token);
       if (token === this.token?.document) this.refreshActor();
     });
-    Hooks.on("deleteScene", scene => {
+    on("deleteScene", scene => {
       if (scene === this.movementZones.token?.parent) this.movementZones.clear();
       this.movementTracker.closeScene(scene);
       if (scene === this.token?.document?.parent) this.refreshActor(false);
     });
-    Hooks.on("updateScene", (scene, changed) => {
+    on("updateScene", (scene, changed) => {
       if (scene === globalThis.canvas?.scene && Object.keys(changed).some(key => key === "grid" || key.startsWith("grid."))) {
         this.refreshActor();
       }
     });
-    Hooks.on("updateActor", (actor, changed) => {
+    on("updateActor", (actor, changed) => {
       if (Object.keys(changed).some(key => key === "ownership" || key.startsWith("ownership."))
         && Array.from(game.user.targets ?? []).some(token => token.actor === actor)) this.renderTargets();
       if (Object.keys(changed).some(key => key === "flags" || key.startsWith("flags.co2prism"))) {
@@ -419,10 +420,10 @@ class PrismBar {
         this.refreshActor();
       }
     });
-    Hooks.on("deleteActor", actor => {
+    on("deleteActor", actor => {
       if (this.concernsActor(actor)) this.refreshActor(false);
     });
-    Hooks.on("updateToken", (token, changed) => {
+    on("updateToken", (token, changed) => {
       if (game.user.targets?.has(token.object)) this.renderTargets();
       const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta", "ownership"].includes(key)
         || key.startsWith("delta."));
@@ -431,7 +432,7 @@ class PrismBar {
         this.refreshActor();
       }
     });
-    Hooks.on("deleteToken", token => {
+    on("deleteToken", token => {
       if (token.parent === this.targetScene) this.renderTargets(token);
       if (token === this.movementZones.token) this.movementZones.clear();
       this.movementTracker.deleteToken(token);
@@ -440,7 +441,7 @@ class PrismBar {
     // Les objets et effets peuvent modifier les valeurs préparées sans updateActor.
     for (const type of ["Item", "ActiveEffect"]) {
       for (const event of ["create", "update", "delete"]) {
-        Hooks.on(`${event}${type}`, document => {
+        on(`${event}${type}`, document => {
           const parent = document.parent?.documentName === "Item" ? document.parent.parent : document.parent;
           if (this.concernsActor(parent)) {
             this.invalidateShortcutVisibility();
@@ -459,6 +460,7 @@ class PrismBar {
   }
 
   refreshActor(useCanvas = true) {
+    if (this.movementDestroyed) return;
     const controlled = useCanvas && globalThis.canvas?.ready ? canvas.tokens?.controlled ?? [] : [];
     const token = controlled.length === 1 ? controlled[0] : null;
     const mainCharacter = controlled.length === 0 && !game.user.isGM ? game.user.character : null;
@@ -546,8 +548,8 @@ class PrismBar {
     if (this.portrait.getAttribute("src") !== portrait) this.portrait.setAttribute("src", portrait);
     this.art.setAttribute("aria-label", actor ? `${name}. ${summaries.join(". ")}`
       : game.i18n.localize("CO2PRISM.NoActor"));
-    this.updateActions();
     this.configuration = this.readConfiguration(actor);
+    this.updateActions();
     this.updatePresets();
     const panels = [this.skillsPanel, this.combatPanel, this.movementPanel, this.equipmentPanel, this.pathsPanel];
     const visibility = panels.map(panel => panel?.hidden);
@@ -1431,7 +1433,12 @@ class PrismBar {
   }
 
   destroy() {
-    if (this.onTargetToken) Hooks.off("targetToken", this.onTargetToken);
+    if (this.movementDestroyed) return;
+    this.movementDestroyed = true;
+    for (const [event, callback] of this.actorHooks ?? []) Hooks.off(event, callback);
+    this.actorHooks = null;
+    this.globalListeners?.abort();
+    this.movementNotifications.disconnect();
     this.targetScene = null;
     this.renderTargets();
     this.targetStrip = null;
@@ -1446,9 +1453,8 @@ class PrismBar {
     this.closePresetActionMenu();
     this.closeEquipmentMenu();
     this.presentationObserver?.disconnect();
-    if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
-    this.movementDestroyed = true;
     this.movementZones.clear(); this.movementZonesObserver?.disconnect();
+    if (bar === this) bar = undefined;
   }
 
   updateSkills() {
