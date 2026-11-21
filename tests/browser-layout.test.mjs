@@ -430,14 +430,24 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const upperStyle = getComputedStyle(bar.upperLine);
             const budgetStyle = getComputedStyle(bar.budgetBand);
             const movementStyle = getComputedStyle(bar.movementPanel);
-            check(budget.bottom <= controls.top + 1 && Math.abs(portrait.top - controls.top) <= 1 &&
+            check(budget.bottom <= controls.top + 1 && controls.top >= portrait.top &&
               bar.movementPanel.nextElementSibling === bar.budgetBand &&
               bar.movementPanel.getBoundingClientRect().right < bar.budgetBand.getBoundingClientRect().left &&
               upperStyle.boxShadow !== "none" && budgetStyle.boxShadow === "none" && movementStyle.boxShadow === "none" &&
               +getComputedStyle(bar.anchor).zIndex > +frame.zIndex && +frame.zIndex > +upperStyle.zIndex &&
               +upperStyle.zIndex > +getComputedStyle(bar.skillsPanel).zIndex &&
-              +getComputedStyle(bar.skillsPanel).zIndex > +getComputedStyle(bar.pathsPanel).zIndex,
+              +getComputedStyle(bar.skillsPanel).zIndex > +getComputedStyle(bar.pathsPanel.parentElement).zIndex,
               size + " single shared frame and correct surface layers");
+            const indicator = bar.budgetBar.querySelector(".co2prism-time-indicator");
+            const markerHeight = parseFloat(getComputedStyle(indicator, "::before").height);
+            check(markerHeight < indicator.getBoundingClientRect().height &&
+              Math.abs(bar.budgetBand.getBoundingClientRect().height - Math.max(22, 42 * bar.presentationScale)) < 1,
+              size + " budget markers have vertical room within the original height");
+            const nameIcon = bar.name.previousElementSibling;
+            check(nameIcon.matches(".fa-solid.fa-gem[aria-hidden=true]") && getComputedStyle(nameIcon).pointerEvents === "none" &&
+              nameIcon.getBoundingClientRect().left > bar.name.parentElement.getBoundingClientRect().left &&
+              nameIcon.getBoundingClientRect().right < bar.name.getBoundingClientRect().left,
+              size + " decorative gem leaves space before the actor name");
             const commandBoxes = bar.budgetCommands.map(button => button.getBoundingClientRect());
             check(commandBoxes.every(box => Math.abs(box.width - box.height) < 1 &&
               Math.abs(box.width - commandBoxes[0].width) < 1) &&
@@ -461,8 +471,28 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               Math.abs(identity.right - lowerColumn.right) < 1 && bar.lock.closest(".co2prism-corner-br") && bar.combatToggle.closest(".co2prism-corner-tr") &&
               !root.querySelector(".co2prism-movement-toggle"),
               size + " two lower columns with one continuous name bar");
-            check([triangle, moveBox, defBox, rightHand].every(box =>
-              Math.abs(box.top - portrait.top) < 1 && Math.abs(box.bottom - rightHand.bottom) < 1) &&
+            const centerY = box => (box.top + box.bottom) / 2;
+            const handCard = right.firstElementChild.getBoundingClientRect();
+            const rightCell = right.parentElement.getBoundingClientRect();
+            const margins = (outer, inner) => [inner.left - outer.left, outer.right - inner.right,
+              inner.top - outer.top, outer.bottom - inner.bottom];
+            const regular = gaps => gaps.every(gap => gap > 0 && Math.abs(gap - gaps[0]) < 1);
+            const commandArea = { left: commandBoxes[0].left, top: commandBoxes[0].top,
+              right: commandBoxes[3].right, bottom: commandBoxes[3].bottom };
+            const timeGap = commandBoxes[1].left - commandBoxes[0].right;
+            check(regular(margins(triangle, commandArea)) &&
+              Math.abs(2 * commandBoxes[0].width + timeGap + 2 * (commandArea.left - triangle.left) - rightCell.width) < 1 &&
+              Math.abs(triangle.height - rightCell.height) < 1,
+              size + " time grid has four equal insets and keeps the original outer square");
+            check(regular(margins(rightCell, rightHand)) &&
+              regular(margins({ ...lowerColumn.toJSON(), bottom: lowerColumn.top + rightCell.height }, leftHand)) &&
+              Math.abs(handCard.width - rightHand.width) < 1 && Math.abs(handCard.height - rightHand.height) < 1,
+              size + " hand squares fit their cells with equal margins on all sides");
+            check(bar.gauges.recovery.fill.getBoundingClientRect().top - defBox.bottom < 20 * bar.presentationScale &&
+              Math.abs(identity.height - 40 * bar.presentationScale) < 1,
+              size + " gauge spacing is reduced and the name line retains its height");
+            check([moveBox, defBox, handCard].every(box => Math.abs(centerY(box) - centerY(triangle)) < 1) &&
+              triangle.top > portrait.top && triangle.width - commandBoxes[0].width * 2 > 4 * bar.presentationScale &&
               Math.abs(triangle.width - triangle.height) < 1 && secondRow.top < leftHand.top &&
               Math.abs(thirdRow.bottom - left.parentElement.getBoundingClientRect().bottom) < 1 &&
               Math.abs(leftHand.height - rightHand.height) < 1 && Math.abs(rightHand.width - rightHand.height) < 1,
@@ -2646,6 +2676,48 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(bar.movementZones.getPalette().move === parseInt(prismColors.getPropertyValue('--prism-move').trim().slice(1), 16),
             'Tactical markers use the same movement palette as the HUD');
           paletteProbe.remove();
+          for (const panel of [bar.equipmentPanel, bar.pathsPanel]) {
+            const wasHidden = panel.hidden;
+            const frame = panel.parentElement;
+            const original = [...panel.childNodes];
+            panel.hidden = false;
+            panel.style.maxHeight = "120px";
+            const filler = document.createElement("div");
+            filler.style.flex = "0 0 100%"; filler.style.height = "300px";
+            panel.replaceChildren(filler);
+            await settled();
+            const shades = (above, below) => panel.hasAttribute("data-scroll-above") === above &&
+              panel.hasAttribute("data-scroll-below") === below &&
+              (getComputedStyle(frame, "::before").content !== "none") === above &&
+              (getComputedStyle(frame, "::after").content !== "none") === below;
+            const scroll = top => { panel.scrollTop = top; panel.dispatchEvent(new Event("scroll")); };
+            check(shades(false, true), panel.id + " bottom fade on opening");
+            scroll(50);
+            const topFade = getComputedStyle(frame, "::before"), bottomFade = getComputedStyle(frame, "::after");
+            check(shades(true, true) && panel.scrollTop === 50 && topFade.top === "0px" && bottomFade.bottom === "0px" &&
+              topFade.pointerEvents === "none" && bottomFade.pointerEvents === "none" &&
+              getComputedStyle(frame).overflow === "clip" && parseFloat(topFade.width) <= panel.clientWidth,
+              panel.id + " both fades stay clipped to the viewport without covering the scrollbar");
+            scroll(panel.scrollHeight);
+            check(shades(true, false), panel.id + " top fade at the end");
+            panel.style.maxHeight = "400px";
+            panel.getBoundingClientRect();
+            for (let attempt = 0; attempt < 8 && !shades(false, false); attempt++) {
+              await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            check(shades(false, false), panel.id + " no fades after increasing the viewport " +
+              JSON.stringify([panel.scrollTop, panel.clientHeight, panel.scrollHeight, panel.getAttributeNames()]));
+            panel.style.maxHeight = "120px";
+            panel.replaceChildren();
+            await settled();
+            check(shades(false, false), panel.id + " no fades after removing content");
+            panel.replaceChildren(filler);
+            await settled();
+            panel.hidden = true;
+            await settled();
+            check(shades(false, false), panel.id + " hidden frame clears both fades");
+            panel.replaceChildren(...original); panel.style.removeProperty("max-height"); panel.hidden = wasHidden;
+          }
           const sceneControls = { tokens: { tools: { select: { name: "select", order: 0 } } } };
           const registerSceneControls = hooks.get("getSceneControlButtons");
           registerSceneControls(sceneControls);

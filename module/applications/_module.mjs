@@ -185,6 +185,7 @@ class PrismBar {
         this.movementZones.clear();
         this.movementZonesObserver.disconnect();
         this.presentationObserver?.disconnect();
+        this.disconnectInventoryScroll();
         this.tooltipListeners?.abort();
         this.tooltipObserver?.disconnect();
         this.clearDescriptiveTooltip();
@@ -228,6 +229,7 @@ class PrismBar {
     });
     this.connectEquipment();
     this.connectPaths();
+    this.connectInventoryScroll();
     this.skillNodes = ABILITIES.map(key => {
       const button = this.element.querySelector(`[data-co2prism-ability="${key}"]`);
       button.addEventListener("click", event => {
@@ -492,6 +494,35 @@ class PrismBar {
     if (offPaths.capacities.length) result.push(offPaths);
     for (const group of result) group.capacities.sort((a, b) => a.system.rank - b.system.rank);
     return result;
+  }
+
+  connectInventoryScroll() {
+    const panels = [this.equipmentPanel, this.pathsPanel];
+    const update = panel => {
+      const { clientHeight, clientWidth, scrollHeight, scrollTop } = panel;
+      const overflow = clientHeight > 0 ? scrollHeight - clientHeight : 0;
+      panel.toggleAttribute("data-scroll-above", overflow > .5 && scrollTop > .5);
+      panel.toggleAttribute("data-scroll-below", overflow - scrollTop > .5);
+      panel.parentElement.style.setProperty("--inventory-scroll-width", clientWidth + "px");
+    };
+    const refresh = () => panels.forEach(update);
+    this.inventoryScrollListeners = new AbortController();
+    this.inventoryScrollResize = new ResizeObserver(refresh);
+    this.inventoryScrollContent = new MutationObserver(refresh);
+    for (const panel of panels) {
+      panel.addEventListener("scroll", () => update(panel), { passive: true, signal: this.inventoryScrollListeners.signal });
+      this.inventoryScrollResize.observe(panel);
+      this.inventoryScrollContent.observe(panel, {
+        subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["hidden", "data-collapsed", "style"]
+      });
+    }
+    refresh();
+  }
+
+  disconnectInventoryScroll() {
+    this.inventoryScrollListeners?.abort();
+    this.inventoryScrollResize?.disconnect();
+    this.inventoryScrollContent?.disconnect();
   }
 
   connectPaths() {
@@ -1267,6 +1298,7 @@ class PrismBar {
   }
 
   destroy() {
+    this.disconnectInventoryScroll();
     this.tooltipListeners?.abort();
     this.tooltipObserver?.disconnect();
     this.clearDescriptiveTooltip();
