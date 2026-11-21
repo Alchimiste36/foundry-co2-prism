@@ -347,7 +347,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(slots.length === 5, "Nombre de cases");
             check(slots[0].dataset.co2prismHand === "right" && slots[1].dataset.co2prismHand === "left", "Convention des mains");
             const [row1, row2, row3] = bar.combatRows.map(row => row.getBoundingClientRect());
-            check(row1.bottom < row2.top && row2.bottom < row3.top && row1.left === row2.left && row2.left === row3.left, "Three aligned shortcut rows");
+            check(row1.bottom <= row2.top && row2.bottom <= row3.top && row1.left === row2.left && row2.left === row3.left, "Three aligned shortcut rows");
             check(bar.combatEffects.children.length === 1 && bar.combatEffects.firstElementChild.dataset.co2prismDescriptionHtml === "<strong>Native effect</strong>", "Effets réels");
             if (typeof TooltipManager !== "undefined" && !game.tooltip) {
               const saved = { applied: actor.appliedEffects, custom: actor.system.currentEffects, position: bar.position };
@@ -494,7 +494,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check([moveBox, defBox, handCard].every(box => Math.abs(centerY(box) - centerY(triangle)) < 1) &&
               triangle.top > portrait.top && triangle.width - commandBoxes[0].width * 2 > 4 * bar.presentationScale &&
               Math.abs(triangle.width - triangle.height) < 1 && secondRow.top < leftHand.top &&
-              Math.abs(thirdRow.bottom - left.parentElement.getBoundingClientRect().bottom) < 1 &&
+              thirdRow.bottom <= lowerColumn.bottom + 1 &&
               Math.abs(leftHand.height - rightHand.height) < 1 && Math.abs(rightHand.width - rightHand.height) < 1,
               size + " four aligned upper blocks and matching shortcut rows");
             check(defBox.right <= moveBox.left && moveBox.right <= triangle.left &&
@@ -1138,7 +1138,11 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(statuses.has("partialDef") && partial.getAttribute("aria-pressed") === "true" && full.disabled &&
             economy.getSnapshot().bonus.l === 1 && !economy.getSnapshot().canSpend.a,
             "Click spends A, marks the defense active and blocks full defense even with L");
-          await actor.toggleStatusEffect("partialDef", { active: false });
+          check(!partial.disabled, "Active defense remains clickable without A");
+          const budgetAfterDefense = JSON.stringify(economy.getSnapshot());
+          partial.click(); await new Promise(resolve => setTimeout(resolve, 0));
+          check(!statuses.has("partialDef") && partial.getAttribute("aria-pressed") === "false" && partial.disabled && !full.disabled &&
+            JSON.stringify(economy.getSnapshot()) === budgetAfterDefense, "Second click removes only the posture without changing the budget");
           await economy.reset(); bar.refreshActor();
           const budgetTypes = () => [...bar.budgetBar.querySelectorAll('[data-co2prism-budget-type]')].map(node => node.dataset.co2prismBudgetType).join(',');
           const command = async (type, bonus = false) => {

@@ -1570,7 +1570,7 @@
   z-index: 2;
   display: grid;
   min-width: 0;
-  gap: var(--gap);
+  /*gap: var(--gap);*/
   padding-inline-start: var(--gap);
   grid-template: repeat(3, var(--shortcut-row-height)) / minmax(0, 1fr);
 }
@@ -1578,7 +1578,7 @@
   z-index: 1;
   display: flex;
   align-items: flex-start;
-  gap: calc(8 * var(--co2prism-unit));
+  gap: calc(5 * var(--co2prism-unit));
   overflow-x: auto;
   overflow-y: hidden;
   pointer-events: auto;

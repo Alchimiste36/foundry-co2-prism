@@ -130,7 +130,7 @@ class PrismBar {
     this.budgetBand = this.element.querySelector(".co2prism-budget-band");
     this.defenseButtons = [...this.combatPanel.querySelectorAll("[data-co2prism-defense]")];
     for (const button of this.defenseButtons) button.addEventListener("click", () => {
-      void this.activateDefense(button.dataset.co2prismDefense);
+      void this.toggleDefense(button.dataset.co2prismDefense);
     });
     this.combatToggle = this.element.querySelector(".co2prism-combat-toggle");
     this.combatToggle.addEventListener("click", event => {
@@ -1523,11 +1523,16 @@ class PrismBar {
     if (band.scrollLeft !== scroll) band.scrollLeft = scroll;
   }
 
+  canControlDefense(actor, id, stances = defenseStances()) {
+    return Boolean(actor === this.actor && this.canConfigure(actor) && this.configuration.panels.combat
+      && typeof actor.hasEffect === "function" && typeof actor.toggleStatusEffect === "function"
+      && stances.some(stance => stance.id === id));
+  }
+
   canUseDefense(actor, id, state, stances = defenseStances()) {
-    return Boolean(actor === this.actor && this.canConfigure(actor) && this.configuration.panels.combat && economyEnabled()
-      && typeof actor.hasEffect === "function" && typeof actor.canActivateDefenseStance === "function"
-      && typeof actor.toggleStatusEffect === "function" && stances.some(stance => stance.id === id)
-      && state.canSpend[DEFENSE_COSTS[id]] && !stances.some(stance => actor.hasEffect(stance.id)));
+    return this.canControlDefense(actor, id, stances) && economyEnabled()
+      && typeof actor.canActivateDefenseStance === "function" && state.canSpend[DEFENSE_COSTS[id]]
+      && !stances.some(stance => actor.hasEffect(stance.id));
   }
 
   updateDefenseButtons(state) {
@@ -1535,36 +1540,43 @@ class PrismBar {
     const stances = defenseStances();
     for (const button of this.defenseButtons) {
       const id = button.dataset.co2prismDefense;
-      button.setAttribute("aria-pressed", String(this.actor?.hasEffect?.(id) === true));
-      button.disabled = Boolean(this.busyAction) || !this.canUseDefense(this.actor, id, state, stances);
+      const active = this.actor?.hasEffect?.(id) === true;
+      button.setAttribute("aria-pressed", String(active));
+      const available = active ? this.canControlDefense(this.actor, id, stances) : this.canUseDefense(this.actor, id, state, stances);
+      button.disabled = Boolean(this.busyAction) || !available;
     }
   }
 
-  async activateDefense(id) {
+  async toggleDefense(id) {
     if (this.busyAction || !Object.hasOwn(DEFENSE_COSTS, id)) return false;
     this.refreshActor();
     const { actor, token } = this;
-    if (!actor) return false;
+    if (!this.canControlDefense(actor, id)) return false;
+    const active = actor.hasEffect(id);
     const economy = new ActionEconomy(actor);
     const version = economy.getResetVersion();
     const validate = () => this.token === token && economy.getResetVersion() === version
       && this.canUseDefense(actor, id, economy.getSnapshot());
-    if (!validate()) return false;
-    const rollback = () => actor.toggleStatusEffect(id, { active: false });
+    if (!active && !validate()) return false;
+    const remove = () => actor.toggleStatusEffect(id, { active: false });
     this.busyAction = "defense";
     this.updateActions();
     try {
-      const result = await economy.spend(DEFENSE_COSTS[id], { validate, rollback, confirm: async () => {
+      if (active) {
+        await remove();
+        return !actor.hasEffect(id);
+      }
+      const result = await economy.spend(DEFENSE_COSTS[id], { validate, rollback: remove, confirm: async () => {
         if (!actor.canActivateDefenseStance(id)) return false;
         let applied;
         try { applied = await actor.toggleStatusEffect(id, { active: true }); }
         catch (error) {
-          if (actor.hasEffect(id)) await rollback();
+          if (actor.hasEffect(id)) await remove();
           throw error;
         }
         if (!actor.hasEffect(id)) return false;
         if (applied !== false && !defenseStances().some(stance => stance.id !== id && actor.hasEffect(stance.id))) return true;
-        await rollback();
+        await remove();
         return false;
       } });
       if (result.reason === "persistence-failed") ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.EconomyError"));
