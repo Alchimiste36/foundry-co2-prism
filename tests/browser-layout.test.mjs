@@ -299,6 +299,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               && Math.abs(willpower.left + willpower.right - panel.left - panel.right) < 1,
               size + " ordre des compétences et VOL centrée");
 
+            const superiorButton = bar.skillNodes.find(skill => skill.key === "for").button;
+            const beforeHalo = superiorButton.getBoundingClientRect();
+            actor.system.abilities.for.superior = true;
+            hooks.get("updateActor")(actor, { system: {} });
+            const halos = tiles.filter(tile => getComputedStyle(tile).boxShadow !== "none");
+            check(halos.length === 1 && halos[0] === superiorButton &&
+              JSON.stringify(beforeHalo) === JSON.stringify(superiorButton.getBoundingClientRect()),
+              size + " superior ability alone glows without a geometry change");
+            superiorButton.disabled = true;
+            check(getComputedStyle(superiorButton).boxShadow !== "none", size + " halo persists when disabled");
+            bar.refreshActor();
             for (const { key, button, value, count } of bar.skillNodes) {
               const b = button.getBoundingClientRect();
               check(button === document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2), size + " losange inaccessible " + key);
@@ -315,6 +326,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
               button.click(); await new Promise(resolve => setTimeout(resolve, 0));
               check(calls.at(-1) === "skill:" + key, size + " mauvais jet");
             }
+            actor.system.abilities.for.superior = false;
+            hooks.get("updateActor")(actor, { system: {} });
+            check(getComputedStyle(superiorButton).boxShadow === "none", size + " losing superior removes the halo");
             const outer = bar.skillNodes.find(skill => skill.key === "con").button.getBoundingClientRect();
             bar.skillsToggle.click(); await bar.configWrites.get(actor);
             check(bar.skillsPanel.hidden, size + " fermeture");

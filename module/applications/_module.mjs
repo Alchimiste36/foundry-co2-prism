@@ -1327,7 +1327,9 @@ class PrismBar {
     if (!open) return changed;
     const unavailable = game.i18n.localize("CO2PRISM.Unavailable");
     for (const { key, button, value, count } of this.skillNodes) {
-      const modifier = this.actor.system?.abilities?.[key]?.value;
+      const ability = this.actor.system?.abilities?.[key];
+      button.classList.toggle("co2prism-skill-superior", ability?.superior === true);
+      const modifier = ability?.value;
       value.textContent = Number.isFinite(modifier) ? `${modifier >= 0 ? "+" : ""}${modifier}` : unavailable;
       value.style.setProperty("--co2prism-skill-size", Math.min(40, 82 / (value.textContent.length * 0.55)));
       // Le système inclut déjà les bonus généraux et conditionnels.

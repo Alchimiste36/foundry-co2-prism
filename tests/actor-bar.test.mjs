@@ -1059,7 +1059,8 @@ function setupSkills() {
   bar.skillsToggle = { dataset: {}, setAttribute(key, value) { this[key] = value; } };
   const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
   bar.skillNodes = ["for", "agi", "con", "cha", "int", "vol", "per"].map(key => ({ key,
-    value: node(), count: node(), button: { dataset: {}, setAttribute(key, value) { this[key] = value; } } }));
+    value: node(), count: node(), button: { dataset: {}, classList: { toggle(key, value) { this[key] = value; } },
+      setAttribute(key, value) { this[key] = value; } } }));
   // L'extraction HTML réelle est vérifiée dans Edge.
   context.document = { createElement: () => {
     const template = { innerHTML: "" };
@@ -1105,6 +1106,25 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   await Promise.all([bar.writeConfiguration("panels.competences", value => !value),
     bar.writeConfiguration("panels.competences", value => !value)]);
   assert.equal(bar.skillsPanel.hidden, true);
+});
+
+test("Compétences : le halo suit le booléen préparé et le changement d’acteur", async () => {
+  const { bar, a, hooks, configuredActor, select } = setupSkills();
+  const halos = () => bar.skillNodes.filter(({ button }) => button.classList["co2prism-skill-superior"]).map(({ key }) => key);
+  await bar.setPanelState("competences", true);
+  assert.deepEqual(halos(), []);
+  a.system.abilities.for.superior = true;
+  a.system.abilities.agi.superior = "true";
+  hooks.get("updateActor")(a, { system: {} });
+  assert.deepEqual(halos(), ["for"]);
+  a.system.abilities.for.superior = false;
+  hooks.get("updateActiveEffect")({ parent: a });
+  assert.deepEqual(halos(), []);
+  a.system.abilities.for.superior = true;
+  hooks.get("updateActor")(a, { system: {} });
+  assert.deepEqual(halos(), ["for"]);
+  select(configuredActor("other", { co2prism: { panels: { competences: true } } }));
+  assert.deepEqual(halos(), []);
 });
 
 test("Compétences : valeurs signées, compte des bonus et actualisations natives", async () => {

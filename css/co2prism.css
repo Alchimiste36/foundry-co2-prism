@@ -872,6 +872,11 @@
   color: var(--prism-muted);
   font-weight: 550;
 }
+.co2prism-bar .co2prism-skill.co2prism-skill-superior {
+  box-shadow:
+    inset 0 0 calc(5 * var(--unit)) var(--prism-accent),
+    inset 0 0 calc(13 * var(--unit)) color-mix(in srgb, var(--prism-accent) 50%, transparent);
+}
 .co2prism-bar .co2prism-skill:disabled {
   cursor: default;
   opacity: 0.6;
