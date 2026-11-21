@@ -11,7 +11,8 @@
       "Title": "Paths and Capacities",
       "Open": "Open the Paths and Capacities panel",
       "Close": "Close the Paths and Capacities panel",
-      "OffPaths": "Off-path"
+      "OffPaths": "Off-path",
+      "Empty": "No capacities."
     },
     "Equipment": {
       "ToggleAllHint": "Right-click to collapse or expand all categories",
@@ -29,6 +30,7 @@
       "Close": "Close the equipment panel",
       "Expand": "Expand {category}",
       "Collapse": "Collapse {category}",
+      "Empty": "No items.",
       "Groups": {
         "misc": "Miscellaneous",
         "containers": "Containers",
@@ -47,6 +49,12 @@
     "Move": "Move the bar (when unlocked)",
     "Unavailable": "—",
     "NoActor": "Select a single authorized token to display its actor.",
+    "SceneVisibility": "Show CO2 Prism",
+    "Encounter": {
+      "Name": "{name} (CR {nc})",
+      "Properties": "Properties",
+      "NoProperties": "No properties"
+    },
     "Actions": {
       "sheet": "Open actor sheet",
       "fortune": "Fortune roll",
@@ -90,6 +98,14 @@
       "Hand_right": "RH",
       "Row1": "First shortcut row — horizontal scrolling",
       "Row2": "Second shortcut row — horizontal scrolling",
+      "Row3": "Row 3",
+      "ActionTime_Limited": "Limited",
+      "ActionTime_Attack": "Attack",
+      "ActionTime_Move": "Movement",
+      "ActionTime_Free": "Free",
+      "ActionManaCost": "MP cost: {value}",
+      "ActionUses_daily": "Number of uses: {value} per day",
+      "ActionUses_combat": "Number of uses: {value} per combat",
       "UnavailableSlot": "Action unavailable",
       "ShortcutControls": "Click: use · Ctrl: chat · Alt: damage only when available · Shift: source sheet",
       "DamageUnavailable": "This action does not provide a damage-only roll.",
@@ -126,6 +142,7 @@
     "OpenSkills": "Expand the Skills panel",
     "CloseSkills": "Collapse the Skills panel",
     "SkillBonuses": "Skill bonuses",
+    "SkillBase": "Base: {value}",
     "Abilities": {
       "for": "STR",
       "agi": "AGI",
@@ -183,6 +200,7 @@
       "Close": "Close the Movement panel.",
       "CellsAvailable": "{cells} squares available",
       "CellsAvailableOne": "{cells} square available",
+      "CellsProgress": "Squares travelled: {used}. Capacity: {capacity}.",
       "NoMovement": "No movement",
       "Normal": "Normal and valid movement",
       "ExcessOne": "Movement exceeded by {excess} square!",

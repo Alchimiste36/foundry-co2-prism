@@ -1,14 +1,15 @@
 import { ActionEconomy } from "./action-economy.mjs";
+import { clearDefenseStances } from "./defense.mjs";
 
 const turns = new WeakMap();
 const ended = new WeakSet();
 const identity = state => JSON.stringify([state?.round, state?.turn, state?.combatantId]);
 
-async function resetActors(actors) {
+async function resetActors(actors, newTurn = false) {
   if (game.system.id !== "co2" || !game.user.isActiveGM) return;
   for (const actor of new Set(actors.filter(Boolean))) {
     try {
-      const result = await new ActionEconomy(actor).reset();
+      const result = await new ActionEconomy(actor).reset({ beforeReset: newTurn ? () => clearDefenseStances(actor) : undefined });
       if (!result.success) console.warn("co2prism | Combat reset refused", actor.uuid, result.reason);
     } catch (error) { console.error("co2prism | Combat reset", error); }
   }
@@ -23,7 +24,7 @@ Hooks.on("combatTurnChange", (combat, previous, current) => {
   if (!combat.started || !current?.combatantId || identity(previous) === key || turns.get(combat) === key) return;
   turns.set(combat, key);
   ended.delete(combat);
-  void resetActors([combat.combatants.get(current.combatantId)?.actor]);
+  void resetActors([combat.combatants.get(current.combatantId)?.actor], true);
 });
 
 function finish(combat) {

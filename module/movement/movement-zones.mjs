@@ -36,8 +36,9 @@ class MovementZoneQueue {
 export class MovementZones {
   constructor({ getCanvas = () => globalThis.canvas, getPIXI = () => globalThis.PIXI,
     getAction = action => globalThis.CONFIG?.Token?.movement?.actions?.[action],
+    getPalette,
     now = () => performance.now(), yieldFrame = () => new Promise(resolve => setTimeout(resolve, 0)) } = {}) {
-    Object.assign(this, { getCanvas, getPIXI, getAction, now, yieldFrame });
+    Object.assign(this, { getCanvas, getPIXI, getAction, getPalette, now, yieldFrame });
     this.generation = 0; this.visible = false; this.busy = false; this.diagnostic = null;
   }
 
@@ -204,16 +205,17 @@ export class MovementZones {
         }
       }
       if (!active()) return cancelled();
-      for (const { center, color } of [{ center: grid.getCenterPoint(origin), color: 0xd84b4b },
-        ...Array.from(bestCells.values(), cell => ({ ...cell, color: 0x357cbb }))]) {
+      const palette = this.getPalette?.() ?? { move: 0x357cbb, origin: 0xd84b4b };
+      for (const { center, destination } of [{ center: grid.getCenterPoint(origin), destination: false },
+        ...Array.from(bestCells.values(), cell => ({ ...cell, destination: true }))]) {
         const pause = cooperate(stats.examined + stats.marked);
         if (pause) await pause;
         if (!active()) return cancelled();
         const size = grid.size * 0.35;
         const marker = new PIXI.Graphics();
-        marker.beginFill(color, 0.4).drawRect(-size / 2, -size / 2, size, size).endFill();
+        marker.beginFill(destination ? palette.move : palette.origin, 0.4).drawRect(-size / 2, -size / 2, size, size).endFill();
         marker.position.set(center.x, center.y); marker.eventMode = "none";
-        container.addChild(marker); if (color === 0x357cbb) stats.marked++;
+        container.addChild(marker); if (destination) stats.marked++;
       }
       this.busy = false; container.visible = true; stats.elapsedMs = Math.round(this.now() - began); stats.stopReason = "Done"; this.diagnostic = "Done"; onUpdate();
       return { success: true, visible: true, stats: { ...stats } };

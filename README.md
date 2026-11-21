@@ -2,6 +2,20 @@
 
 Module pour Foundry VTT v14 et Chroniques Oubliées 2 (`co2`), initialement pour Fantasy.
 
+## Présentation rectangulaire · étape 1
+
+`templates/bar.hbs` assemble les fragments Handlebars de `templates/partials/`. `PrismBar.render()` rend chaque fragment avec le moteur Foundry, puis transmet leur HTML au gabarit principal. Les identifiants de volets et les attributs `data-co2prism-*` restent les points de liaison des commandes.
+
+La grille de `.co2prism-art` relie le portrait et les ressources aux volets. Le portrait sert d’ancre pour la position enregistrée. CSS dimensionne les zones et leurs défilements. JavaScript applique l’échelle utilisateur, observe l’emprise mesurée et borne la position à l’écran. Les coordonnées absolues restantes sont locales aux aperçus, badges, menus et lignes conditionnelles. Le facteur 724 sert uniquement à convertir les anciens réglages S/M/L/XL en échelle.
+
+**Étape 2.** `combat.hbs` regroupe les commandes de temps en grille 2 × 2, les deux mains, les presets et les deux rectangles DEF et déplacement. Le budget défile dans son emplacement et le bouton de remise à zéro reste visible. `combat-actions.hbs` porte les deux rangées ordinaires et les rangées conditionnelles, à droite du fond Combat.
+
+**Étape 3.** Équipements et Voies & Capacités partagent un emplacement à largeur stable avec défilement local. Dans une voie, l’image ouvre la fiche et le titre déplie ses capacités. Compétences présente les sept jets dans une grille. Mouvement garde ses cases distinctes et permet de parcourir les longues lignes au clavier.
+
+**Étape 4.** Les hooks Foundry actualisent la sélection et déclenchent les méthodes de rendu de `PrismBar`. Les effets réutilisent les nœuds de l’acteur courant et actualisent leur infobulle sur place. CSS conserve la responsabilité des grilles et du défilement local. Le placement JavaScript applique le bornage lorsque l’emprise, l’ancrage ou la fenêtre change. Les tests du compteur vérifient des diagonales successives avec le calcul natif v14.370. L’étape 5 est consacrée à la finition graphique.
+
+## Fonctionnement et historique
+
 Le panneau Mouvement gère **une action M par session**. Mouvement ouvre le suivi depuis la position actuelle ; Valider consomme une action entière si disponible, même sans déplacement, garde le token à destination et ferme la session. Les cases inutilisées sont perdues. La suivante se lance manuellement ; aucun déplacement hors session n’est repris.
 
 Le panneau affiche un bloc unique de `cellsPerAction` cases, quelle que soit la réserve M. Les actions disponibles restent un compteur distinct. Le coût utilisé vient de `Token#measureMovementPath(path, {preview: false})` sur les waypoints réellement passés de la session, converti par `scene.grid.distance` puis arrondi sur le total. Distance, espaces et coût restent séparés ; les terrains natifs sont conservés, sans formule de diagonales ou de région dans Prism. Les coûts déjà appliqués sont figés tout en conservant la continuité géométrique du trajet. Une mesure invalide est signalée sans repli sur les espaces géométriques. La remise à zéro revient uniquement au départ de la session active.

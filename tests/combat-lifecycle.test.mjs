@@ -13,9 +13,10 @@ function setup() {
   combat.combatants[Symbol.iterator] = function* () { yield* this.values(); };
   const context = vm.createContext({ console, game: { system: { id: "co2" }, user: { isActiveGM: true }, combats: [combat] },
     Hooks: { once: (name, fn) => hooks.set(name, fn), on: (name, fn) => hooks.set(name, fn) },
-    ActionEconomy: class { constructor(actor) { this.actor = actor; } async reset() { writes.push(this.actor); return { success: true }; } } });
+    ActionEconomy: class { constructor(actor) { this.actor = actor; } async reset({ beforeReset } = {}) { writes.push(this.actor); await beforeReset?.(); return { success: true }; } } });
+  vm.runInContext(readFileSync(new URL("../module/combat/defense.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/combat/combat-lifecycle.mjs", import.meta.url), "utf8")
-    .replace(/import[^;]+;/, ""), context);
+    .replace(/import[^;]+;/g, ""), context);
   hooks.get("ready")();
   const turn = (round, index, id) => {
     const previous = combat.current;
@@ -55,4 +56,27 @@ test("13 suppression directe sans interface et sans changement de tour", async (
   hooks.get("deleteCombat")(combat);
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(writes, [a, b, synthetic]);
+});
+
+test("Defense reset targets the incoming actor on the existing turn hook", async () => {
+  const { hooks, context, combat, a, b, turn } = setup();
+  context.game.settings = { get: () => false };
+  context.game.system.CONST = { defenseStances: [{ id: "partialDef" }, { id: "fullDef" }] };
+  const removed = [];
+  for (const [actor, id] of [[a, "partialDef"], [b, "fullDef"]]) {
+    const statuses = new Set([id]);
+    actor.hasEffect = status => statuses.has(status);
+    actor.toggleStatusEffect = async (status, options) => {
+      assert.equal(options.active, false);
+      removed.push([actor.uuid, status]); statuses.delete(status);
+      return false;
+    };
+  }
+  hooks.get("updateCombat")(combat, { name: "Edited" });
+  assert.deepEqual(removed, []);
+  turn(1, 0, "a"); turn(1, 0, "a");
+  assert.deepEqual(removed, [[a.uuid, "partialDef"]]);
+  assert.equal(b.hasEffect("fullDef"), true);
+  turn(1, 1, "b");
+  assert.deepEqual(removed, [[a.uuid, "partialDef"], [b.uuid, "fullDef"]]);
 });

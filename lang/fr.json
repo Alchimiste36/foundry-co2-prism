@@ -11,7 +11,8 @@
       "Title": "Voies et Capacités",
       "Open": "Ouvrir le volet Voies et Capacités",
       "Close": "Fermer le volet Voies et Capacités",
-      "OffPaths": "Hors-voies"
+      "OffPaths": "Hors-voies",
+      "Empty": "Aucune capacité."
     },
     "Equipment": {
       "ToggleAllHint": "Clic droit pour replier ou déplier toutes les catégories",
@@ -29,6 +30,7 @@
       "Close": "Fermer le volet Équipements",
       "Expand": "Déplier {category}",
       "Collapse": "Replier {category}",
+      "Empty": "Aucun objet.",
       "Groups": {
         "misc": "Divers",
         "containers": "Contenants",
@@ -47,6 +49,12 @@
     "Move": "Déplacer la barre (lorsqu’elle est déverrouillée)",
     "Unavailable": "—",
     "NoActor": "Sélectionnez un seul token autorisé pour afficher son acteur.",
+    "SceneVisibility": "Afficher CO2 Prism",
+    "Encounter": {
+      "Name": "{name} (NC {nc})",
+      "Properties": "Propriétés",
+      "NoProperties": "Aucune propriété"
+    },
     "Actions": {
       "sheet": "Ouvrir la feuille de l’acteur",
       "fortune": "Jet de chance",
@@ -90,6 +98,14 @@
       "Hand_right": "MD",
       "Row1": "Première ligne de raccourcis — défilement horizontal",
       "Row2": "Seconde ligne de raccourcis — défilement horizontal",
+      "Row3": "Rangée 3",
+      "ActionTime_Limited": "Limitée",
+      "ActionTime_Attack": "Attaque",
+      "ActionTime_Move": "Mouvement",
+      "ActionTime_Free": "Gratuite",
+      "ActionManaCost": "Coût en PM : {value}",
+      "ActionUses_daily": "Nombre d’utilisations : {value} par jour",
+      "ActionUses_combat": "Nombre d’utilisations : {value} par combat",
       "UnavailableSlot": "Action indisponible",
       "ShortcutControls": "Clic : utiliser · Ctrl : chat · Alt : dommages seuls si disponibles · Shift : feuille du support",
       "DamageUnavailable": "Cette action ne propose pas de jet de dommages seul.",
@@ -126,6 +142,7 @@
     "OpenSkills": "Déployer le volet Compétences",
     "CloseSkills": "Replier le volet Compétences",
     "SkillBonuses": "Bonus de compétence",
+    "SkillBase": "Base : {value}",
     "Abilities": {
       "for": "FOR",
       "agi": "AGI",
@@ -183,6 +200,7 @@
       "Close": "Fermer le panneau Mouvement.",
       "CellsAvailable": "{cells} cases disponibles",
       "CellsAvailableOne": "{cells} case disponible",
+      "CellsProgress": "Cases parcourues : {used}. Capacité : {capacity}.",
       "NoMovement": "Aucun mouvement",
       "Normal": "Mouvement normal et valide",
       "ExcessOne": "Dépassement de {excess} case !",

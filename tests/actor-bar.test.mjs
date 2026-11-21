@@ -20,10 +20,11 @@ function setup() {
   vm.runInContext(readFileSync(new URL("../module/movement/movement-tracker.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/import[^;]+;/g, "").replace(/export /g, ""), context);
+  vm.runInContext(readFileSync(new URL("../module/combat/defense.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
-  const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
+  const node = () => ({ textContent: "", dataset: {}, style: { setProperty(key, value) { this[key] = value; } } });
   bar.gauges = Object.fromEntries(["recovery", "fortune", "mana", "hp"].map(key => [key, { fill: node(), text: node() }]));
   bar.portrait = { getAttribute(key) { return this[key]; }, setAttribute(key, value) { this[key] = value; } };
   bar.art = { setAttribute(key, value) { this[key] = value; } };
@@ -636,9 +637,9 @@ test("déplacement depuis le portrait, verrouillage et position utilisateur", ()
   };
   context.window = { innerWidth: 1000, innerHeight: 800 };
   const capture = new Set();
-  bar.handle = { setPointerCapture: id => capture.add(id), hasPointerCapture: id => capture.has(id),
+  bar.handle = { dataset: {}, setPointerCapture: id => capture.add(id), hasPointerCapture: id => capture.has(id),
     releasePointerCapture: id => capture.delete(id), classList: { toggle() {} } };
-  bar.lock = { setAttribute() {} };
+  bar.lock = { dataset: {}, setAttribute() {} };
   bar.element = { style: { left: "40px", top: "400px", setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
     return { left: parseFloat(this.style.left), top: parseFloat(this.style.top), width: 430, height: 306 };
   } };
@@ -660,6 +661,7 @@ test("déplacement depuis le portrait, verrouillage et position utilisateur", ()
   assert.equal(saved[0].key, "position");
   assert.equal(saved[0].value.x, 90);
   assert.equal(capture.size, 0);
+  bar.anchor = bar.element;
   bar.layout();
   assert.equal(bar.element.style.left, "90px");
   locked = true; bar.updateLock(); bar.startDrag(event);
@@ -678,8 +680,9 @@ test("redimensionnement, bornage et restauration dans une petite fenêtre", () =
   bar.position = settings.position;
   bar.element = { style: { setProperty(key, value) { this[key] = value; } }, getBoundingClientRect() {
     return { left: parseFloat(this.style.left) || 0, top: parseFloat(this.style.top) || 0,
-      width: parseFloat(this.style.width), height: parseFloat(this.style.height) };
+      width: 508 * parseFloat(this.style["--co2prism-unit"]), height: 276 * parseFloat(this.style["--co2prism-unit"]) };
   } };
+  bar.anchor = bar.element;
   bar.layout();
   const rect = bar.element.getBoundingClientRect();
   assert.ok(rect.width <= 412 && rect.height <= 292);
@@ -690,12 +693,12 @@ test("redimensionnement, bornage et restauration dans une petite fenêtre", () =
   bar.position = settings.position;
   bar.layout();
   assert.equal(writes.length, 1);
-  context.window.innerWidth = 1000;
+  context.window.innerWidth = 1300;
   context.window.innerHeight = 800;
   bar.layout();
   const enlarged = bar.element.getBoundingClientRect();
-  assert.equal(enlarged.width, 780);
-  assert.ok(enlarged.left + enlarged.width <= 1000);
+  assert.ok(Math.abs(enlarged.width - 780 * 508 / 724) < 0.01);
+  assert.ok(enlarged.left + enlarged.width <= 1300);
   assert.ok(enlarged.top + enlarged.height <= 800);
 });
 
@@ -812,7 +815,7 @@ test("repos : handlers du registre, absence, ambiguïté et garde des doubles cl
   const { bar, context, a, calls, button } = setupActions();
   await bar.performAction("fastRest");
   assert.equal(button("fastRest").disabled, true);
-  assert.equal(button("fastRest").title, "CO2PRISM.RestUnavailable");
+  assert.equal(button("fastRest").dataset.co2prismTooltipText, "CO2PRISM.RestUnavailable");
   const rest = { id: "fastRest", handler: actor => calls.push({ rest: actor }) };
   context.game.system.CONST.restActions = [rest, { id: "fullRest", handler: actor => calls.push({ full: actor }) }];
   bar.refreshActor();
@@ -1049,12 +1052,15 @@ function setupSkills() {
       width: parseFloat(this.style.width) || 0, height: parseFloat(this.style.height) || 0 };
   } };
   context.game.settings = { get: () => "M", set() {} };
+  bar.anchor = bar.element;
   bar.layout();
+  context.game.i18n.format = (_, { value }) => "Base : " + value;
   bar.skillsPanel = { hidden: true };
-  bar.skillsToggle = { setAttribute(key, value) { this[key] = value; } };
+  bar.skillsToggle = { dataset: {}, setAttribute(key, value) { this[key] = value; } };
   const node = () => ({ textContent: "", style: { setProperty(key, value) { this[key] = value; } } });
   bar.skillNodes = ["for", "agi", "con", "cha", "int", "vol", "per"].map(key => ({ key,
-    value: node(), count: node(), button: { setAttribute(key, value) { this[key] = value; } } }));
+    value: node(), count: node(), button: { dataset: {}, classList: { toggle(key, value) { this[key] = value; } },
+      setAttribute(key, value) { this[key] = value; } } }));
   // L'extraction HTML réelle est vérifiée dans Edge.
   context.document = { createElement: () => {
     const template = { innerHTML: "" };
@@ -1087,7 +1093,6 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(a.flags.co2prism.panels.equipements, true);
   assert.deepEqual(base(), before);
   assert.ok(reads.length >= 7);
-  assert.ok(Math.abs(bar.element.getBoundingClientRect().width - 430 * 1318 / 724) < 0.01);
   await bar.setPanelState("equipements", false);
   assert.equal(bar.skillsPanel.hidden, false);
   await bar.setPanelState("equipements", true);
@@ -1103,18 +1108,40 @@ test("Compétences : état persistant, géométrie ancrée et aucun calcul du vo
   assert.equal(bar.skillsPanel.hidden, true);
 });
 
+test("Compétences : le halo suit le booléen préparé et le changement d’acteur", async () => {
+  const { bar, a, hooks, configuredActor, select } = setupSkills();
+  const halos = () => bar.skillNodes.filter(({ button }) => button.classList["co2prism-skill-superior"]).map(({ key }) => key);
+  await bar.setPanelState("competences", true);
+  assert.deepEqual(halos(), []);
+  a.system.abilities.for.superior = true;
+  a.system.abilities.agi.superior = "true";
+  hooks.get("updateActor")(a, { system: {} });
+  assert.deepEqual(halos(), ["for"]);
+  a.system.abilities.for.superior = false;
+  hooks.get("updateActiveEffect")({ parent: a });
+  assert.deepEqual(halos(), []);
+  a.system.abilities.for.superior = true;
+  hooks.get("updateActor")(a, { system: {} });
+  assert.deepEqual(halos(), ["for"]);
+  select(configuredActor("other", { co2prism: { panels: { competences: true } } }));
+  assert.deepEqual(halos(), []);
+});
+
 test("Compétences : valeurs signées, compte des bonus et actualisations natives", async () => {
   const { bar, a, bonuses, hooks } = setupSkills();
-  bonuses.for = [{ name: "Métier", value: 4, description: "Force", additionalInfos: "Seulement en montagne" },
-    { name: "Bonus général", value: 2 }];
+  bonuses.for = [{ name: "Métier", value: 4, description: "Long description", pathName: "Voie du métier", additionalInfos: "Seulement en montagne" },
+    { name: "Capacité libre", sourceType: "capacity", value: 2 }];
   await bar.setPanelState("competences", true);
   assert.equal(bar.skillNodes[0].value.textContent, "+3");
   assert.equal(bar.skillNodes[1].value.textContent, "-1");
   assert.equal(bar.skillNodes[5].value.textContent, "+0");
   assert.equal(bar.skillNodes[0].count.textContent, "(2)");
   assert.equal(bar.skillNodes[1].count.textContent, "(0)");
-  assert.match(bar.skillNodes[0].button.title, /Métier — \+4/);
-  assert.match(bar.skillNodes[0].button.title, /Seulement en montagne/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /\+4 — Seulement en montagne — Métier — Voie du métier/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /\+2 — Capacité libre — CO2PRISM.Paths.OffPaths/);
+  assert.match(bar.skillNodes[0].button.dataset.co2prismDescription, /Base : \+3/);
+  assert.doesNotMatch(bar.skillNodes[0].button.dataset.co2prismDescription, /Long description/);
+  assert.equal(bar.skillNodes[1].button.dataset.co2prismDescription, "CO.abilities.long.agi\nBase : -1");
   a.system.abilities.for.value = -2;
   bonuses.for.push({ name: "Nouvelle capacité", value: 9 });
   hooks.get("updateActiveEffect")({ parent: a });
@@ -1175,7 +1202,7 @@ function setupMovementDisplay() {
   bar.combatPanel = { hidden: false, dataset: {} };
   bar.combatValues = Object.fromEntries(["meters", "cells", "def", "dr"].map(key => [key,
     { textContent: "", style: { setProperty() {} } }]));
-  bar.combatEffects = { replaceChildren() {} };
+  bar.combatEffects = { children: [], scrollLeft: 0 };
   bar.readCombatEffects = () => [];
   bar.renderEconomy = bar.renderCombatSlots = () => false;
   bar.refreshActor = () => bar.updateCombat();
@@ -1593,16 +1620,16 @@ test("presets de mains : MAJ délègue la politique des mains libres à CO2", as
 test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante", async () => {
   const { bar, a, payload } = setupShortcuts();
   const ref = bar.shortcutFromDrop(a, payload());
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1, 1]);
   await bar.saveShortcut(a, 1, bar.slotRows()[0][0], ref);
   await bar.saveShortcut(a, 1, bar.slotRows()[0][1], ref);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1, 1]);
   const empty = bar.slotRows()[0].at(-1);
   await Promise.all([bar.saveShortcut(a, 1, empty, ref), bar.saveShortcut(a, 1, empty, ref)]);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 1, 1]);
   assert.deepEqual(Array.from(bar.slotRows()[0].filter(slot => !slot.hand && !slot.terminal), slot => slot.order), [0, 1]);
   await bar.saveShortcut(a, 1, bar.slotRows()[1].at(-1), ref);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 2]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [5, 2, 1]);
   assert.ok(bar.slotRows().every(row => row.filter(slot => slot.terminal).length === 1));
   assert.equal(bar.slotRows()[0][0].hand, "left");
   assert.equal(bar.slotRows()[0][1].hand, "right");
@@ -1883,9 +1910,9 @@ test("raccourcis : références natives seules, restauration, isolation et dispa
   assert.deepEqual(a.flags.co2prism.shortcuts, slots);
   a.items.set(item.id, item);
   await bar.setActivePreset(2);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [4, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [4, 1, 1]);
   const { actor: b } = create("other"); select(b);
-  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1]);
+  assert.deepEqual(Array.from(bar.slotRows(), row => row.length), [3, 1, 1]);
   select(a); await bar.setActivePreset(1);
   assert.equal(bar.slotRows()[0].length, 4);
   const reloaded = setupConfiguration();
@@ -1993,6 +2020,37 @@ test("attaques de rencontre : source commune, persistance et exécution par Item
   assert.equal(bar.resolveShortcut(a, stale.reference), null);
   assert.equal(await bar.executeShortcut(click(), stale), false);
   assert.equal(calls.length, 0);
+});
+
+test("Rencontre : dépôt, persistance et exécution des attaques des deux mains", async () => {
+  const { bar, a, item, action, calls, click, event, node, target, context } = await setupExecution();
+  a.type = "encounter"; item.type = "attack"; item.system = {};
+  const second = { ...item, id: "claw", uuid: a.uuid + ".Item.claw", actions: [{ ...action }] };
+  a.items.set(second.id, second);
+  a.flags.co2prism.hands.presets = {};
+  a.toggleEquipmentEquipped = () => assert.fail("Une attaque ne passe pas dans le circuit d’équipement.");
+  const left = () => bar.slotRows()[0][0];
+  const right = () => bar.slotRows()[0][1];
+  assert.equal(await bar.dropSlot(event({ type: "co.attack", uuid: item.uuid }), left(), node), true);
+  assert.equal(await bar.dropSlot(event({ type: "Item", uuid: second.uuid }), right(), node), true);
+  for (const [key, owned] of [["left-hand", item], ["right-hand", second]]) {
+    const saved = new context.PrismBar().readConfiguration(a).slots[key];
+    assert.equal(saved.source, owned.uuid);
+    assert.equal(saved.itemId, owned.id);
+    assert.equal(await bar.executeShortcut(click(), target(key)), true);
+    assert.deepEqual(calls.pop(), ["useAction", owned.uuid, 0, "attack"]);
+  }
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.equal(left().reference, undefined);
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.equal(right().reference.itemId, second.id);
+  assert.equal(await bar.manageShortcut(target("left-hand")), true);
+  assert.equal(left().reference, undefined);
+  assert.equal(right().reference.itemId, second.id);
+  assert.equal(await bar.dropSlot(event({ type: "co.attack", uuid: item.uuid }), right(), node), true);
+  assert.equal(right().reference.itemId, item.id);
+  a.type = "character";
+  assert.equal(await bar.dropSlot(event({ type: "co.attack", uuid: item.uuid }), left(), node), false);
 });
 
 test("attaques de rencontre : UUID synthétique, droits et dépôts étrangers refusés", () => {
@@ -2705,4 +2763,80 @@ test("12D commande AM : ajout permis, dépense UI refusée, moteur polyvalent pr
   assert.equal(await bar.changeEconomy("spend", "a"), true);
   assert.equal(a.flags.co2prism.actionEconomy.bonus.am, 0);
   assert.equal(a.flags.co2prism.actionEconomy.branch, "undecided");
+});
+
+test("Defense CO2: confirmation, exclusive status and budget rollback", async () => {
+  const { a, bar, context, economy } = await setupTimedExecution();
+  context.game.system.CONST = { defenseStances: [{ id: "partialDef" }, { id: "fullDef" }] };
+  const statuses = new Set(), calls = [];
+  let refuse = false, refuseRemoval = false;
+  a.hasEffect = id => statuses.has(id);
+  a.canActivateDefenseStance = id => [...statuses].every(status => status === id);
+  a.toggleStatusEffect = async (id, { active }) => {
+    calls.push([id, active]);
+    if (active ? refuse : refuseRemoval) return false;
+    if (active) statuses.add(id);
+    else statuses.delete(id);
+    return active;
+  };
+  await economy.grant("a"); await economy.grant("l");
+  refuse = true;
+  assert.equal(await bar.toggleDefense("partialDef"), false);
+  assert.equal(economy.getSnapshot().bonus.a, 1);
+  refuse = false;
+  const activating = bar.toggleDefense("partialDef");
+  assert.equal(await bar.toggleDefense("fullDef"), false);
+  assert.equal(await activating, true);
+  assert.equal(await bar.toggleDefense("fullDef"), false);
+  refuseRemoval = true;
+  assert.equal(await bar.toggleDefense("partialDef"), false);
+  assert.deepEqual([...statuses], ["partialDef"]);
+  refuseRemoval = false;
+  assert.equal(economy.getSnapshot().bonus.a, 0);
+  assert.equal(economy.getSnapshot().bonus.l, 1);
+  const spentPartial = JSON.stringify(economy.getSnapshot());
+  const removing = bar.toggleDefense("partialDef");
+  assert.equal(await bar.toggleDefense("partialDef"), false);
+  assert.equal(await removing, true);
+  assert.equal(statuses.size, 0);
+  assert.equal(JSON.stringify(economy.getSnapshot()), spentPartial);
+  const setFlag = a.setFlag;
+  a.setFlag = async () => { throw Error("write failed"); };
+  assert.equal(await bar.toggleDefense("fullDef"), false);
+  assert.deepEqual(calls.slice(-2), [["fullDef", true], ["fullDef", false]]);
+  assert.equal(statuses.size, 0);
+  assert.equal(economy.getSnapshot().bonus.l, 1);
+  a.setFlag = setFlag;
+  assert.equal(await bar.toggleDefense("fullDef"), true);
+  assert.equal(economy.getSnapshot().bonus.l, 0);
+  await economy.spend("l");
+  const spentFull = JSON.stringify(economy.getSnapshot());
+  assert.equal(await bar.toggleDefense("fullDef"), true);
+  assert.equal(statuses.size, 0);
+  assert.equal(JSON.stringify(economy.getSnapshot()), spentFull);
+  const count = calls.length;
+  assert.equal(await bar.toggleDefense("partialDef"), false);
+  assert.equal(await bar.toggleDefense("fullDef"), false);
+  assert.equal(calls.length, count);
+});
+
+test("Tokens visibility uses the saved Foundry user setting and defaults on", () => {
+  const { context, hooks } = setup();
+  const registrations = new Map();
+  let stored;
+  context.game.system = { id: "co2" };
+  context.game.settings = {
+    register: (module, key, data) => registrations.set(key, data),
+    get: (_module, key) => stored ?? registrations.get(key)?.default
+  };
+  hooks.get("init")();
+  assert.equal(registrations.get("visible").scope, "user");
+  assert.equal(registrations.get("visible").default, true);
+  const controls = { tokens: { tools: {} }, measure: { tools: {} } };
+  hooks.get("getSceneControlButtons")(controls);
+  assert.equal(controls.tokens.tools.co2prism.active, true);
+  assert.deepEqual(Object.keys(controls.measure.tools), []);
+  stored = false;
+  hooks.get("getSceneControlButtons")(controls);
+  assert.equal(controls.tokens.tools.co2prism.active, false);
 });
