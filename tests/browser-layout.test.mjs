@@ -727,6 +727,16 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await removeHand(index);
             check(!shield.system.equipped, "Retrait du bouclier direct");
           }
+          shield.system.usage = { oneHand: false, twoHand: true };
+          await dropAt(1, 0, shieldPayload);
+          const equipmentMirror = cards(0)[1];
+          const occupiedLabel = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
+          check(equipmentMirror.classList.contains("co2prism-hand-mirror") &&
+            equipmentMirror.dataset.co2prismActionSummary === [shield.name, occupiedLabel].join("\\n") &&
+            equipmentMirror.dataset.co2prismDescriptionHtml?.includes(shield.system.description) &&
+            !equipmentMirror.hasAttribute("aria-pressed"), "Direct equipment mirror keeps its identity and description without an action");
+          await removeHand(0);
+          shield.system.usage = { oneHand: true, twoHand: false };
           const checkMirror = index => {
             const mirror = cards(0)[index];
             const illustration = mirror.querySelector("img");
@@ -745,6 +755,15 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           item.actions.push(secondAction);
           const secondPayload = { ...payload, indice: 1 };
           item.system.usage.oneHand = true;
+          await dropAt(1, 0, { type: "Item", uuid: item.uuid });
+          check(cards(0)[1].classList.contains("co2prism-hand-mirror"), "A directly equipped versatile weapon still has a mirror");
+          await dropAt(1, 1, secondPayload);
+          check(bar.configuration.handPresets[1]["left-hand"]?.kind === "equipment" &&
+            bar.configuration.handPresets[1]["right-hand"]?.indice === 1 &&
+            cards(0)[1].classList.contains("co2prism-slot-executable"),
+            "An action can replace the mirror of a directly equipped versatile weapon");
+          if (bar.configuration.handPresets[1]["right-hand"]) await removeHand(1);
+          await removeHand(0);
           await dropAt(3, 0);
           const directSummary = node => [node.dataset.co2prismActionSummary, node.dataset.co2prismActionSummaryHtml].join("|");
           for (const primary of [0, 1]) {
