@@ -660,7 +660,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             "Third row accepts and persists shortcuts");
           cards(2)[0].querySelector(".co2prism-slot-remove").click(); await bar.configWrites.get(actor);
           const shield = { id: "shield", uuid: "Actor.test.Item.shield", name: "Shield", type: "equipment",
-            parent: actor, img: nativeAction.actionImg, actions: [], system: {
+            parent: actor, img: nativeAction.actionImg, actions: [], testUserPermission: () => true, system: {
+              description: "<p>Description du bouclier</p>",
               properties: { equipable: true }, equipped: false, usage: { oneHand: true, twoHand: false }
             } };
           actor.items.set(shield.id, shield);
@@ -675,8 +676,16 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await dropAt(1, index, shieldPayload);
             const direct = cards(0)[index];
             check(shield.system.equipped && direct.querySelector("img")?.src === shield.img
+              && direct.dataset.co2prismActionSummary === shield.name
+              && direct.dataset.co2prismDescriptionHtml?.includes(shield.system.description)
               && !direct.querySelector(".co2prism-slot-time, .co2prism-slot-type, .co2prism-slot-uses, .co2prism-slot-cost")
               && direct.querySelector(".co2prism-slot-remove"), "Bouclier direct sans action");
+            shield.system.description = "<p>Bouclier actualisé " + index + "</p>";
+            hooks.get("updateItem")(shield, { "system.description": shield.system.description });
+            await Promise.resolve();
+            await Promise.resolve();
+            check(cards(0)[index].dataset.co2prismDescriptionHtml?.includes(shield.system.description),
+              "Equipment-only hand refreshes its source description");
             await removeHand(index);
             check(!shield.system.equipped, "Retrait du bouclier direct");
           }
@@ -686,31 +695,56 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check(mirror.classList.contains("co2prism-hand-mirror") && illustration?.src === nativeAction.actionImg
               && Number(getComputedStyle(illustration).opacity) < 1 && mirror.children.length === 2
               && mirror.querySelector(".co2prism-slot-hand"), "Miroir avec repère de main et sans commandes");
+            const primary = cards(0)[1 - index];
+            const occupied = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
+            check(Boolean(primary.dataset.co2prismActionSummary) &&
+              mirror.dataset.co2prismActionSummary === [primary.dataset.co2prismActionSummary, occupied].join("\\n") &&
+              mirror.dataset.co2prismActionSummaryHtml ===
+                [primary.dataset.co2prismActionSummaryHtml, foundry.utils.escapeHTML(occupied)].join("\\n"),
+              "Automatic hand adds an occupation notice to the primary action tooltip");
           };
           const secondAction = { ...nativeAction, indice: 1, actionName: "Seconde action" };
           item.actions.push(secondAction);
           const secondPayload = { ...payload, indice: 1 };
           item.system.usage.oneHand = true;
+          await dropAt(3, 0);
+          const directSummary = node => [node.dataset.co2prismActionSummary, node.dataset.co2prismActionSummaryHtml].join("|");
           for (const primary of [0, 1]) {
             const secondary = 1 - primary;
             const hands = ["left-hand", "right-hand"];
             const saved = () => bar.configuration.handPresets[1];
             await dropAt(1, primary);
             checkMirror(secondary);
+            check(directSummary(cards(0)[primary]) === directSummary(cards(2)[0]) &&
+              cards(2)[0].dataset.co2prismActionSummary.startsWith(item.name) &&
+              cards(2)[0].dataset.co2prismActionSummaryHtml.includes("<em>" + nativeAction.actionName + "</em>"),
+              "Equipment source and italicized action are identical in a hand and a regular shortcut");
             check(!saved()[hands[secondary]], "Versatile mirror is derived from an empty slot");
             await dropAt(1, secondary, shieldPayload);
             check(saved()[hands[primary]]?.indice === 0 && saved()[hands[secondary]]?.itemId === shield.id &&
-              item.system.equipped && shield.system.equipped, "Versatile mirror accepts a shield and keeps the first action");
+              item.system.equipped && shield.system.equipped &&
+              cards(0)[secondary].dataset.co2prismActionSummary === shield.name, "Replacing a mirror shows the new equipment");
             await dropAt(1, secondary, secondPayload);
             await bar.setPanelState("combat", false);
             await bar.setPanelState("combat", true);
             check(saved()[hands[primary]]?.indice === 0 && saved()[hands[secondary]]?.indice === 1 &&
               [0, 1].every(index => cards(0)[index].classList.contains("co2prism-slot-executable")),
               "Reopening preserves two explicit actions from the same versatile weapon");
+            check(cards(0)[secondary].dataset.co2prismActionSummary.includes(secondAction.actionName) &&
+              !cards(0)[primary].dataset.co2prismActionSummary.includes(secondAction.actionName),
+              "Each hand describes its own explicitly assigned action");
+            secondAction.label = "Libellé actualisé";
+            hooks.get("updateItem")(item, { "system.actions": [] });
+            check(cards(0)[secondary].dataset.co2prismActionSummary.includes(secondAction.label),
+              "A label-only update refreshes the action tooltip");
+            delete secondAction.label;
             await removeHand(primary);
             check(saved()[hands[secondary]]?.indice === 1, "Removing one explicit action preserves the other");
             await removeHand(secondary);
+            check([0, 1].every(index => cards(0)[index].dataset.co2prismActionSummary === undefined),
+              "Empty hands retain no previous summary");
           }
+          cards(2)[0].querySelector(".co2prism-slot-remove").click(); await bar.configWrites.get(actor);
           item.actions.pop();
           item.system.usage.oneHand = false;
           await dropAt(1, 1); checkMirror(0);

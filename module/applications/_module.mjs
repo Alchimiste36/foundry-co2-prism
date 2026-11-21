@@ -2070,12 +2070,21 @@ class PrismBar {
         }
         if (slot.mirror) {
           const item = this.handItem(this.actor, slot.mirror);
-          const action = this.resolveShortcut(this.actor, slot.mirror)?.action;
+          const resolved = this.resolveShortcut(this.actor, slot.mirror);
+          const action = resolved?.action;
           const image = action?.actionImg || action?.img || item?.img;
           node.classList.add("co2prism-hand-mirror");
           const occupied = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
           node.dataset.co2prismTooltipText = occupied;
           node.setAttribute("aria-label", occupied);
+          if (resolved) {
+            this.describeShortcut(node, resolved, action.actionName || item?.name || occupied);
+            node.dataset.co2prismActionSummary = [node.dataset.co2prismActionSummary, occupied].filter(Boolean).join("\n");
+            if (node.dataset.co2prismActionSummaryHtml) {
+              node.dataset.co2prismActionSummaryHtml += `\n${foundry.utils.escapeHTML(occupied)}`;
+            }
+            node.removeAttribute("aria-pressed");
+          } else if (item) this.describeHandEquipment(node, item, occupied);
           if (image) {
             const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = ""; img.draggable = false;
           }
@@ -2160,10 +2169,9 @@ class PrismBar {
           if (equipment.img) {
             const img = add("img", "co2prism-slot-image"); img.src = equipment.img; img.alt = equipment.name; img.draggable = false;
           }
-          node.dataset.co2prismTooltipText = equipment.name;
+          this.describeHandEquipment(node, equipment);
           if (!equipment.system.equipped) {
             node.classList.add("co2prism-hand-unequipped");
-            node.dataset.co2prismTooltipText += `\n${game.i18n.localize("CO2PRISM.Combat.HandUnequipped")}`;
           }
         } else if (slot.reference !== undefined && !resolved) {
           node.classList.add("co2prism-slot-unavailable");
@@ -2221,13 +2229,18 @@ class PrismBar {
 
   combatSlotsSignature(rows, editable, disabled) {
     const state = new ActionEconomy(this.actor).getSnapshot().canSpend;
+    const equipmentVisual = reference => {
+      if (reference?.kind !== "equipment") return null;
+      const item = this.handItem(this.actor, reference);
+      return item && [item.name, item.img, item.system.equipped, item.system.description, item.isOwner];
+    };
     const visual = reference => {
       const resolved = this.resolveShortcut(this.actor, reference);
       if (!resolved) return null;
       const { action, item } = resolved;
       try {
-        return [this.shortcutImage(action, item), action.actionName, item?.name, item?.system?.description,
-          item?.system?.equipped, action.iconFA, action.actionTypeFinal, action.manaCost, this.shortcutUses(action, item),
+        return [this.shortcutImage(action, item), action.actionName, action.label, action.hasLabel, item?.name, item?.system?.description,
+          item?.isOwner, item?.system?.equipped, action.iconFA, action.actionTypeFinal, action.manaCost, this.shortcutUses(action, item),
           action.properties?.activable, action.properties?.temporary, action.properties?.enabled,
           this.shortcutCanToggle(action) ? this.presetActionIdentity(this.actor, reference)?.fingerprint : null];
       } catch { return null; }
@@ -2236,10 +2249,7 @@ class PrismBar {
       this.configuration.presetActionRules, economyEnabled(), state,
       rows.map(row => row.map(slot => [
         slot, this.shortcutReferences(slot.reference).map(visual), visual(slot.mirror),
-        slot.reference?.kind === "equipment" ? (() => {
-          const item = this.handItem(this.actor, slot.reference);
-          return [item?.name, item?.img, item?.system?.equipped];
-        })() : null
+        equipmentVisual(slot.reference), equipmentVisual(slot.mirror)
       ]))]);
   }
 
@@ -2329,6 +2339,16 @@ class PrismBar {
     });
   }
 
+  describeHandEquipment(node, item, occupied = "") {
+    const unequipped = !item.system.equipped && game.i18n.localize("CO2PRISM.Combat.HandUnequipped");
+    const summary = [item.name, unequipped, occupied].filter(Boolean).join("\n");
+    node.dataset.co2prismActionSummary = summary;
+    node.dataset.co2prismTooltipText = summary;
+    if (item.testUserPermission?.(game.user, "OBSERVER")) {
+      void this.prepareItemTooltip(node, item, this.itemTooltipDescription(item));
+    }
+  }
+
   describeShortcut(node, { action, item }, name, unequipped = false) {
     const localize = key => game.i18n.localize(`CO2PRISM.Combat.${key}`);
     const format = (key, value) => game.i18n.format(`CO2PRISM.Combat.${key}`, { value });
@@ -2336,17 +2356,19 @@ class PrismBar {
     const uses = this.shortcutUses(action, item);
     const cost = action.manaCost;
     const activable = this.shortcutCanToggle(action);
-    const actionName = action.hasLabel === false ? "" : action.label || (action.actionName !== item?.name ? action.actionName : "");
-    const summary = [item?.type === "capacity" ? item.name : "", actionName, time && localize(`ActionTime_${time}`),
+    const label = action.hasLabel === false ? "" : action.label || action.actionName;
+    const actionName = label !== item?.name ? label : "";
+    const details = [time && localize(`ActionTime_${time}`),
       Number.isFinite(cost) && cost > 0 ? format("ActionManaCost", cost) : "",
       uses && ["daily", "combat"].includes(uses.type) ? format(`ActionUses_${uses.type}`, uses.value) : "",
       activable ? localize(action.properties.enabled ? "Active" : "Inactive") : ""];
-    node.dataset.co2prismActionSummary = summary.filter(Boolean).join("\n");
+    node.dataset.co2prismActionSummary = [item?.name, actionName, ...details].filter(Boolean).join("\n");
     delete node.dataset.co2prismActionSummaryHtml;
-    if (actionName) node.dataset.co2prismActionSummaryHtml = summary.map((line, index) => {
-      const text = line && foundry.utils.escapeHTML(line);
-      return text && (index === 1 ? `<em>${text}</em>` : text);
-    }).filter(Boolean).join("\n");
+    if (actionName) {
+      const escape = line => line && foundry.utils.escapeHTML(line);
+      node.dataset.co2prismActionSummaryHtml = [escape(item?.name), `<em>${escape(actionName)}</em>`, ...details.map(escape)]
+        .filter(Boolean).join("\n");
+    }
     node.dataset.co2prismTooltipText = node.dataset.co2prismActionSummary || name;
     if (item?.testUserPermission?.(game.user, "OBSERVER")) {
       const description = this.itemTooltipDescription(item);
