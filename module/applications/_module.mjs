@@ -10,6 +10,7 @@ const TEMPLATE_ROOT = `modules/${MODULE}/templates`;
 const PARTIALS = { core: "core", inventory: "inventory", movement: "movement", skills: "skills",
   effects: "effects", combat: "combat", combatActions: "combat-actions" };
 const WIDTHS = { S: 300, M: 430, L: 600, XL: 780 };
+const MODE_CHOICES = { always: "CO2PRISM.ModeAlways", combat: "CO2PRISM.ModeInCombat", off: "CO2PRISM.ModeNever" };
 const ABILITIES = ["for", "agi", "con", "cha", "int", "vol", "per"];
 const MAX_SHORTCUT_ACTIONS = 4;
 const SHORTCUT_PREVIEW_DELAY = 350;
@@ -46,9 +47,12 @@ Hooks.once("init", () => {
   });
   game.settings.register(MODULE, "economyMode", {
     name: "CO2PRISM.EconomyMode", hint: "CO2PRISM.EconomyModeHint", scope: "user", config: true,
-    type: String, default: "combat", choices: {
-      always: "CO2PRISM.EconomyAlways", combat: "CO2PRISM.EconomyCombat", off: "CO2PRISM.EconomyOff"
-    }, onChange: () => bar?.refreshActor()
+    type: String, default: "combat", choices: MODE_CHOICES, onChange: () => bar?.refreshActor()
+  });
+  game.settings.register(MODULE, "movementMode", {
+    name: "CO2PRISM.MovementMode", scope: "user", config: true, type: String, default: "always",
+    choices: MODE_CHOICES,
+    onChange: () => bar?.refreshActor()
   });
   game.settings.register(MODULE, "size", {
     scope: "user", config: false, type: String, default: "M"
@@ -64,7 +68,7 @@ Hooks.once("init", () => {
     scope: "user", config: false, type: Object, default: {}
   });
   game.settings.register(MODULE, "locked", {
-    name: "CO2PRISM.Locked", hint: "CO2PRISM.LockedHint", scope: "user", config: true,
+    name: "CO2PRISM.Locked", hint: "CO2PRISM.LockedHint", scope: "user", config: false,
     type: Boolean, default: true, onChange: () => bar?.updateLock()
   });
 });
@@ -307,6 +311,13 @@ class PrismBar {
         this.refreshActor();
       });
     }
+    for (const event of ["createCombatant", "updateCombatant", "deleteCombatant"]) {
+      Hooks.on(event, combatant => {
+        if (game.settings.get(MODULE, "movementMode") === "combat" && combatant.parent === game.combats?.active) {
+          this.refreshActor();
+        }
+      });
+    }
     // L'instance vit avec le monde ; ces hooks ne sont installés qu'au premier rendu.
     Hooks.on("controlToken", () => this.refreshActor());
     Hooks.on("updateUser", (user, changes) => {
@@ -319,11 +330,11 @@ class PrismBar {
       this.refreshActor(false);
     });
     Hooks.on("moveToken", (token, movement) => {
-      this.movementTracker.update(token, movement);
+      if (this.movementTrackingAllowed(token)) this.movementTracker.update(token, movement);
       if (token === this.token?.document) this.refreshActor();
     });
     Hooks.on("recordToken", token => {
-      this.movementTracker.refresh(token);
+      if (this.movementTrackingAllowed(token)) this.movementTracker.refresh(token);
       if (token === this.token?.document) this.refreshActor();
     });
     Hooks.on("deleteScene", scene => {
@@ -1031,10 +1042,18 @@ class PrismBar {
     }
   }
 
+  movementTrackingAllowed(token = this.token?.document) {
+    const mode = game.settings?.get(MODULE, "movementMode");
+    if (mode !== "combat") return mode !== "off";
+    const combat = game.combats?.active;
+    return Boolean(token && combat?.started && (!combat.scene || combat.scene === token.parent)
+      && combat.getCombatantsByToken(token.id).some(combatant => combatant.token === token));
+  }
+
   movementToken() {
     const token = this.token?.document;
     return this.actor && token && token.parent === globalThis.canvas?.scene && token?.parent?.tokens?.get(token.id) === token
-      && token.canUserModify?.(game.user, "update") ? token : null;
+      && token.canUserModify?.(game.user, "update") && this.movementTrackingAllowed(token) ? token : null;
   }
 
   movementView(token) {
@@ -1096,7 +1115,7 @@ class PrismBar {
           if (sameContext()) this.movementErrors.set(token, "validation-failed");
           return false;
         } finally {
-          this.movementClosures.delete(token);
+          if (this.movementClosures.get(token) === context) this.movementClosures.delete(token);
           if (!this.movementDestroyed && this.element?.isConnected !== false) this.refreshActor();
         }
       }
@@ -1112,6 +1131,7 @@ class PrismBar {
   }
 
   startMovement(token, available) {
+    if (!this.movementTrackingAllowed(token)) return false;
     this.movementOpenToken = token;
     this.movementOpenActor = token.actor;
     if (!available) return true;
@@ -1149,7 +1169,8 @@ class PrismBar {
         const version = this.movementContextVersion, resetVersion = engine.getResetVersion();
         const valid = () => {
           const current = this.movementTracker.getSnapshot(token).state;
-          return current && (required === 0 || engine.getSnapshot().movementsRemaining > 0) && token.parent?.tokens?.get(token.id) === token && token.actor === actor
+          return current && this.movementTrackingAllowed(token)
+            && (required === 0 || engine.getSnapshot().movementsRemaining > 0) && token.parent?.tokens?.get(token.id) === token && token.actor === actor
             && (!closure || (!this.movementDestroyed && this.element?.isConnected !== false
               && this.movementToken() === token && this.movementOpenToken === token && globalThis.canvas?.scene === closure.scene))
             && (!game.scenes || game.scenes.get(token.parent.id) === token.parent)
@@ -1201,7 +1222,13 @@ class PrismBar {
     } catch {
       this.movementErrors.set(token, "validation-failed"); return false;
     } finally {
-      this.movementValidations.delete(token); this.refreshActor();
+      this.movementValidations.delete(token);
+      if (!this.movementTrackingAllowed(token)) {
+        this.movementTracker.deleteToken(token);
+        this.movementResults.delete(token);
+        this.movementErrors.delete(token);
+      }
+      this.refreshActor();
     }
   }
 
@@ -1227,12 +1254,18 @@ class PrismBar {
     const token = this.movementToken();
     if (this.movementOpenToken && (this.movementOpenToken !== token || this.movementOpenActor !== token?.actor || !this.configuration.panels.combat)) {
       const previous = this.movementOpenToken;
-      if (!this.movementValidations.has(previous) && !(this.movementResults.get(previous)?.success && this.movementResults.get(previous).sessionId === this.movementTracker.getSnapshot(previous).state?.sessionId)) this.movementTracker.cancel(previous);
+      if (!this.movementTrackingAllowed(previous)) {
+        this.movementTracker.deleteToken(previous);
+        this.movementResults.delete(previous);
+        this.movementClosures.delete(previous);
+      } else if (!this.movementValidations.has(previous) && !(this.movementResults.get(previous)?.success && this.movementResults.get(previous).sessionId === this.movementTracker.getSnapshot(previous).state?.sessionId)) this.movementTracker.cancel(previous);
       this.movementOpenToken = null;
       this.movementErrors.delete(previous);
       this.movementZones.clear();
     }
-    const open = Boolean(this.actor && this.configuration.panels.combat);
+    const combatOpen = Boolean(this.actor && this.configuration.panels.combat);
+    const open = combatOpen && this.movementTrackingAllowed();
+    const showBudget = combatOpen && Boolean(this.budgetBand) && economyEnabled();
     const available = token ? (economyEnabled() ? new ActionEconomy(token.actor).getSnapshot().movementsRemaining : 2) : 0;
     if (open && !this.element?.hidden && token && !this.movementDestroyed && !this.movementValidations.has(token) && !this.movementClosures.has(token)
       && (!this.movementOpenToken || (available > 0 && !this.movementErrors.has(token) && !this.movementTracker.getSnapshot(token).state))) {
@@ -1244,14 +1277,13 @@ class PrismBar {
     const settled = Boolean(token && this.movementResults.get(token)?.success && this.movementResults.get(token).sessionId === view?.state.sessionId);
     const busy = Boolean(token && (this.movementResets.has(token) || validating || this.movementClosures.has(token)));
     const error = token ? this.movementErrors.get(token) : null;
-    const combatOpen = this.configuration.panels.combat;
-    const signature = JSON.stringify([open, combatOpen, available, token?.uuid ?? token?.id, view, busy, settled, validating, error,
+    const signature = JSON.stringify([open, combatOpen, showBudget, available, token?.uuid ?? token?.id, view, busy, settled, validating, error,
       this.movementZones.visible, this.movementZones.busy, this.movementZones.diagnostic, this.movementZones.stats]);
     if (signature === this.movementSignature) return false;
     this.movementSignature = signature;
     const localize = key => game.i18n.localize(`CO2PRISM.Movement.${key}`);
     const format = (key, data) => game.i18n.format(`CO2PRISM.Movement.${key}`, data);
-    this.upperLine.hidden = !open;
+    this.upperLine.hidden = !(open || showBudget);
     this.movementPanel.hidden = !open;
     if (!open) return true;
     const query = selector => this.movementPanel.querySelector(".co2prism-movement-" + selector);

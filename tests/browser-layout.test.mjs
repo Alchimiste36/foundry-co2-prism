@@ -1736,6 +1736,31 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           trackedMove(1, secondDocument);
           canvas.tokens.controlled = [selectedToken]; hooks.get('controlToken')();
           check(!bar.movementTracker.getSnapshot(secondDocument).success && bar.movementTracker.getSnapshot(tracked).state.segmentCount === 0, 'Selection abandons previous session');
+          const savedCombat = game.combats;
+          const participants = new Map([[secondDocument.id, { token: secondDocument }]]);
+          const activeCombat = { started: true, scene: movementScene,
+            getCombatantsByToken: id => participants.has(id) ? [participants.get(id)] : [] };
+          game.combats = { active: activeCombat };
+          settings.movementMode = 'combat'; settings.economyMode = 'off'; bar.refreshActor();
+          check(bar.upperLine.hidden && movementPanel.hidden && bar.combatValues.cells.getClientRects().length &&
+            !bar.movementTracker.getSnapshot(tracked).success, 'Another token of the same actor does not enable tracking');
+          const combatant = { parent: activeCombat, token: tracked };
+          participants.set(tracked.id, combatant); hooks.get('createCombatant')(combatant);
+          check(!movementPanel.hidden && bar.movementTracker.getSnapshot(tracked).success, 'Combatant entry enables tracking');
+          trackedMove(1);
+          const budgetBeforeDisable = JSON.stringify(actor.flags.co2prism.actionEconomy);
+          participants.delete(tracked.id); hooks.get('deleteCombatant')(combatant);
+          trackedMove(1);
+          check(movementPanel.hidden && !bar.movementTracker.getSnapshot(tracked).success &&
+            !await bar.validateMovement(tracked) && !await bar.toggleMovementZones() &&
+            JSON.stringify(actor.flags.co2prism.actionEconomy) === budgetBeforeDisable,
+            'Leaving combat discards the path and prevents spending or opening the zone');
+          settings.movementMode = 'off'; settings.economyMode = 'always'; bar.refreshActor();
+          check(movementPanel.hidden && !bar.upperLine.hidden && !bar.budgetBand.hidden &&
+            bar.combatValues.cells.getClientRects().length, 'Movement off preserves the budget and movement rectangle');
+          settings.movementMode = 'always'; game.combats = savedCombat; bar.refreshActor();
+          check(!movementPanel.hidden && bar.movementTracker.getSnapshot(tracked).state.segmentCount === 0,
+            'Re-enabling starts a clean movement session');
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.position = { x: innerWidth - 1, y: 0 }; bar.layout();
             const bounds = root.getBoundingClientRect(), panel = movementPanel.getBoundingClientRect();

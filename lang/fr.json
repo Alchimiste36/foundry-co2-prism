@@ -218,8 +218,9 @@
     "MovementRoundingDown": "Arrondir à l'inférieur",
     "EconomyMode": "Budget d’actions",
     "EconomyModeHint": "Affichage et utilisation du budget ; changer ce mode ne réinitialise pas le budget.",
-    "EconomyAlways": "Toujours affiché et actif",
-    "EconomyCombat": "Affiché et actif uniquement en combat",
-    "EconomyOff": "Ni affiché ni actif"
+    "MovementMode": "Suivi du déplacement",
+    "ModeAlways": "Toujours",
+    "ModeInCombat": "Uniquement en combat",
+    "ModeNever": "Jamais"
   }
 }

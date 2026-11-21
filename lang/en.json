@@ -218,8 +218,9 @@
     "MovementRoundingDown": "Round down",
     "EconomyMode": "Action budget",
     "EconomyModeHint": "Display and use of the budget; changing mode does not reset it.",
-    "EconomyAlways": "Always visible and active",
-    "EconomyCombat": "Visible and active only in combat",
-    "EconomyOff": "Hidden and inactive"
+    "MovementMode": "Movement tracking",
+    "ModeAlways": "Always",
+    "ModeInCombat": "Only in combat",
+    "ModeNever": "Never"
   }
 }
