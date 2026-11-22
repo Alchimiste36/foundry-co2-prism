@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
+import { ForcedDeletion, mergeFlagPatch } from "./helpers/flag-patch-double.mjs";
+
 const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]);
 
 // Simuler les documents préparés, sans dépendre d'un monde Foundry lancé.
@@ -21,6 +23,9 @@ function setup() {
   vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/import[^;]+;/g, "").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/combat/defense.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
+  vm.runInContext("foundry.applications.api.ApplicationV2 = class {}; foundry.applications.api.HandlebarsApplicationMixin = base => base;", context);
+  vm.runInContext(readFileSync(new URL("../module/applications/documentation.mjs", import.meta.url), "utf8")
+    .replace("export class", "class"), context);
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
@@ -136,7 +141,10 @@ function setupMovementValidation() {
   let mode = "always", serial = 0;
   context.game.settings = { get: (_, key) => key === "economyMode" ? mode : "nearest" };
   const warnings = [];
-  bar.movementNotifications = { broadcast: (token, excess) => { warnings.push({ token, excess }); return true; } };
+  bar.movementNotifications = {
+    broadcast: (token, excess) => { warnings.push({ token, excess }); return true; },
+    disconnect() {}
+  };
   const a = configuredActor("movement-budget", { co2prism: { panels: { combat: true } } });
   a.system.attributes.movement = { value: 10, unit: "m" };
   const create = (actor = a) => {
@@ -862,7 +870,8 @@ function setupConfiguration() {
   const env = setup();
   const { bar, context, actor, token, hooks } = env;
   const writes = [], errors = [];
-  context.foundry = { utils: { deepClone: structuredClone, escapeHTML, cleanHTML: value => value }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
+  context.foundry.data = { operators: { ForcedDeletion } };
+  context.foundry.utils.deepClone = structuredClone;
   context.game.settings ??= { get: () => false };
   context.ui = { notifications: { error: message => errors.push(message), warn: message => errors.push(message) } };
   context.console = { error() {} };
@@ -886,11 +895,7 @@ function setupConfiguration() {
         if (!target[part] || typeof target[part] !== "object" || Array.isArray(target[part])) target[part] = {};
         target = target[part];
       }
-      if (value && typeof value === "object") {
-        value = structuredClone(value);
-        for (const key of Object.keys(value)) if (key.startsWith("-=")) { delete value[key.slice(2)]; delete value[key]; }
-      }
-      target[parts.at(-1)] = value;
+      mergeFlagPatch(target, { [parts.at(-1)]: value });
       hooks.get("updateActor")(a, { [`flags.${scope}.${key}`]: value });
       return a;
     };
@@ -1198,7 +1203,9 @@ function setupMovementDisplay() {
   context.canvas.scene = { grid: { type: 1, distance: 3, units: "m" } };
   const settings = { movementRounding: "nearest", economyMode: "off" }, registrations = new Map();
   context.game.system = { id: "co2" };
-  context.game.settings = { get: (_, key) => settings[key], register: (_, key, config) => registrations.set(key, config) };
+  context.game.settings = {
+    get: (_, key) => settings[key], register: (_, key, config) => registrations.set(key, config), registerMenu() {}
+  };
   hooks.get("init")();
   bar.actor = a;
   bar.configuration = { panels: { combat: true }, activePreset: 1 };
@@ -1771,6 +1778,11 @@ test("règles de preset : défauts, isolation, identité CO2 et invalidation pru
   assert.equal(await save(2, "activate"), true);
   assert.equal(rule(1), "unchanged");
   assert.equal(rule(2), "activate");
+  assert.equal(await save(3, "deactivate"), true);
+  assert.equal(await save(3, "unchanged"), true);
+  const remaining = a.flags.co2prism.presetActionRules["item:0"];
+  assert.deepEqual(Object.keys(remaining).sort(), ["2", "fingerprint"]);
+  assert.equal(remaining[2], "activate");
   assert.equal(await save(2, "unchanged"), true);
   assert.equal(a.flags.co2prism.presetActionRules["item:0"], undefined);
   a.activateAction = () => assert.fail("Le preset déjà actif ne doit pas exécuter d'action");
@@ -2890,13 +2902,18 @@ test("défenses sans budget : refus natif et annulation si le contexte change pe
 test("Tokens visibility uses the saved Foundry user setting and defaults on", () => {
   const { context, hooks } = setup();
   const registrations = new Map();
+  const menus = new Map();
   let stored;
   context.game.system = { id: "co2" };
   context.game.settings = {
     register: (module, key, data) => registrations.set(key, data),
+    registerMenu: (module, key, data) => menus.set(key, data),
     get: (_module, key) => stored ?? registrations.get(key)?.default
   };
   hooks.get("init")();
+  const manual = menus.get("documentation");
+  assert.equal(manual.restricted, false);
+  assert.equal(new manual.type(), new manual.type());
   assert.equal(registrations.get("visible").scope, "user");
   assert.equal(registrations.get("visible").default, true);
   const controls = { tokens: { tools: {} }, measure: { tools: {} } };

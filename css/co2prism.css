@@ -778,8 +778,6 @@
 .co2prism-path-group[data-collapsed="false"] {
   flex: 0 0 100%;
   min-width: 0;
-}
-.co2prism-path-group[data-collapsed="false"] {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: calc(4 * var(--unit)) var(--gap);
@@ -1702,7 +1700,7 @@
   height: 100%;
   background: var(--co2prism-time-color);
   color: var(--prism-text);
-  font-size: calc(var(--time-font-size, 40) * var(--co2prism-unit));
+  font-size: calc(24 * var(--unit));
   pointer-events: auto;
   border-radius: var(--radius);
 }
@@ -1720,9 +1718,6 @@
 .co2prism-time > span {
   pointer-events: none;
 }
-.co2prism-bar button.co2prism-time {
-  font-size: calc(24 * var(--unit));
-}
 .co2prism-bar button.co2prism-time[data-co2prism-time="am"] {
   background: linear-gradient(
     135deg,
@@ -1738,9 +1733,6 @@
 .co2prism-time:focus-visible {
   outline: calc(3 * var(--co2prism-unit)) solid var(--prism-focus);
   outline-offset: calc(-5 * var(--co2prism-unit));
-}
-.co2prism-time-available {
-  filter: drop-shadow(0 0 max(2px, calc(4 * var(--unit))) var(--prism-focus));
 }
 .co2prism-time-bar {
   display: flex;
@@ -1771,12 +1763,10 @@
   pointer-events: auto;
   background: transparent;
   border-radius: calc(8 * var(--co2prism-unit));
+  scrollbar-width: auto;
 }
 .co2prism-combat-row:empty {
   pointer-events: none;
-}
-.co2prism-combat-row {
-  scrollbar-width: auto;
 }
 .co2prism-combat-row > .co2prism-combat-slot,
 .co2prism-shortcut-preview > .co2prism-combat-slot {

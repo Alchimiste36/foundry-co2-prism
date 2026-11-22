@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
+import { ForcedDeletion, mergeFlagPatch } from "./helpers/flag-patch-double.mjs";
 
 const edge = process.env.CO2PRISM_EDGE ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const foundryCSS = process.env.CO2PRISM_FOUNDRY_CSS ?? "F:/FVTT_V14/public/css/foundry2.css";
@@ -33,7 +34,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
     const html = `<!doctype html><html><head>
       <link rel="stylesheet" href="${pathToFileURL(foundryCSS).href}">
       <link rel="stylesheet" href="${new URL("../fonts/fontawesome/css/all.min.css", pathToFileURL(foundryCSS)).href}">
-      <style>${read("../css/co2prism.css")}</style></head>
+      <style>${read("../css/co2prism.css")}${read("../css/documentation.css")}</style></head>
       <body class="vtt game"><canvas id="board" aria-label="Canvas Board"></canvas><script>
       const ready = [];
       const hooks = new Map();
@@ -43,6 +44,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
       const measureRecordedPath = ${measureRecordedPath.toString()};
+      ${ForcedDeletion.toString()}
+      ${mergeFlagPatch.toString()}
       const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError", "ActionTime_Limited", "ActionTime_Attack", "ActionTime_Move", "ActionTime_Free", "ActionManaCost", "ActionUses_daily", "ActionUses_combat", "Active", "Inactive"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Movement).map(([key, value]) => [`CO2PRISM.Movement.${key}`, value])))});
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Equipment.Operations).map(([key, value]) => [`CO2PRISM.Equipment.Operations.${key}`, value])))});
@@ -56,6 +59,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
         applications: { api: { DialogV2: { confirm: async () => false, wait: async () => "validate" } }, handlebars: {
           renderTemplate: async (path, data) => (${JSON.stringify(templates)})[path].replace(/\\{\\{\\{(\\w+)\\}\\}\\}/g, (_, key) => data[key])
         } } };
+      foundry.data = { operators: { ForcedDeletion } };
       foundry.applications.ux = { TextEditor: { implementation: { async enrichHTML(description, options) {
         if (!options.relativeTo.id) throw new Error('Missing native Item context');
         return description;
@@ -66,11 +70,42 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-zones.mjs").replace(/import[^;]+;/g, "").replace(/export /g, "")}
       ${read("../module/combat/defense.mjs").replace(/export /g, "")}
+      foundry.applications.api.ApplicationV2 = class { _onRender() {} };
+      foundry.applications.api.HandlebarsApplicationMixin = base => base;
+      ${read("../module/applications/documentation.mjs").replace("export class", "class")}
       ${read("../module/applications/_module.mjs").replace(/import \{[^}]+\} from [^;]+;/g, "")}
       (async () => {
         const result = { dimensions: [], errors: [] };
         const check = (condition, message) => { if (!condition) result.errors.push(message); };
         try {
+          {
+            const manual = new PrismDocumentation();
+            const frame = document.createElement("section");
+            frame.className = "co2prism-documentation";
+            frame.innerHTML = '<div class="window-content" style="width: 760px; height: 260px;"></div>';
+            const content = frame.firstElementChild;
+            content.innerHTML = ${JSON.stringify(read("../templates/documentation/documentation.hbs"))};
+            document.body.append(frame);
+            manual.element = frame;
+            const scroll = content.firstElementChild;
+            const article = scroll.querySelector("article");
+            const target = article.querySelector("#raccourcis-action");
+            manual._onRender({}, {});
+            const chapters = scroll.querySelectorAll(".co2prism-doc-toc > ul > li > button");
+            check(chapters.length === 7 && getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 2,
+              "Manual builds a two-level table of contents in a wide window");
+            chapters[5].click();
+            scroll.querySelector('button[data-target="raccourcis-action"]').click();
+            check(document.activeElement === target && article.scrollTop > 0 && !location.hash,
+              "Table of contents scrolls the manual and focuses its heading");
+            content.style.width = "340px";
+            chapters[0].click();
+            article.querySelector('a[href="#raccourcis-action"]').click();
+            check(getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 1 &&
+              document.activeElement === target && article.scrollTop > 0 && !location.hash,
+              "Internal manual links still work in the narrow layout");
+            frame.remove();
+          }
           await ready[0]();
           const root = document.getElementById("co2prism-bar");
           const prism = (node, name) => getComputedStyle(node).getPropertyValue("--prism-" + name).trim();
@@ -108,11 +143,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             async setFlag(scope, key, value) {
               this.flags[scope] ??= {}; let target = this.flags[scope]; const parts = key.split(".");
               for (const part of parts.slice(0, -1)) target = target[part] ??= {};
-              if (value && typeof value === "object") {
-                value = structuredClone(value);
-                for (const key of Object.keys(value)) if (key.startsWith("-=")) { delete value[key.slice(2)]; delete value[key]; }
-              }
-              target[parts.at(-1)] = value;
+              if (parts[0] === "shortcuts" || parts[0] === "presetActionRules") {
+                mergeFlagPatch(target, { [parts.at(-1)]: value });
+              } else target[parts.at(-1)] = structuredClone(value);
             },
             getSkillBonuses: key => key === "for" ? [{ name: "Métier", value: 3,
               pathName: "Voie du métier", description: '<b>Escalade</b><img src="invalid" onerror="globalThis.co2prismInjected=true">',
@@ -727,6 +760,16 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await removeHand(index);
             check(!shield.system.equipped, "Retrait du bouclier direct");
           }
+          shield.system.usage = { oneHand: false, twoHand: true };
+          await dropAt(1, 0, shieldPayload);
+          const equipmentMirror = cards(0)[1];
+          const occupiedLabel = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
+          check(equipmentMirror.classList.contains("co2prism-hand-mirror") &&
+            equipmentMirror.dataset.co2prismActionSummary === [shield.name, occupiedLabel].join("\\n") &&
+            equipmentMirror.dataset.co2prismDescriptionHtml?.includes(shield.system.description) &&
+            !equipmentMirror.hasAttribute("aria-pressed"), "Direct equipment mirror keeps its identity and description without an action");
+          await removeHand(0);
+          shield.system.usage = { oneHand: true, twoHand: false };
           const checkMirror = index => {
             const mirror = cards(0)[index];
             const illustration = mirror.querySelector("img");
@@ -745,6 +788,15 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           item.actions.push(secondAction);
           const secondPayload = { ...payload, indice: 1 };
           item.system.usage.oneHand = true;
+          await dropAt(1, 0, { type: "Item", uuid: item.uuid });
+          check(cards(0)[1].classList.contains("co2prism-hand-mirror"), "A directly equipped versatile weapon still has a mirror");
+          await dropAt(1, 1, secondPayload);
+          check(bar.configuration.handPresets[1]["left-hand"]?.kind === "equipment" &&
+            bar.configuration.handPresets[1]["right-hand"]?.indice === 1 &&
+            cards(0)[1].classList.contains("co2prism-slot-executable"),
+            "An action can replace the mirror of a directly equipped versatile weapon");
+          if (bar.configuration.handPresets[1]["right-hand"]) await removeHand(1);
+          await removeHand(0);
           await dropAt(3, 0);
           const directSummary = node => [node.dataset.co2prismActionSummary, node.dataset.co2prismActionSummaryHtml].join("|");
           for (const primary of [0, 1]) {
@@ -3196,6 +3248,38 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             "Reactivation reuses the same element, anchor and scale");
           await visibilityWrite;
           check(board.width === innerWidth && board.height === innerHeight, "Board natif modifié");
+          {
+            const disposed = bar;
+            const before = new Map(hooks);
+            disposed.connectActor();
+            check([...before].every(([name, callback]) => hooks.get(name) === callback) && hooks.size === before.size,
+              "Connecting Prism again adds no hooks");
+            const observers = [disposed.movementZonesObserver, disposed.presentationObserver,
+              disposed.inventoryScrollResize, disposed.inventoryScrollContent, disposed.tooltipObserver];
+            const disconnected = new Set();
+            for (const observer of observers) {
+              const disconnect = observer.disconnect.bind(observer);
+              observer.disconnect = () => { disconnected.add(observer); disconnect(); };
+            }
+            let layouts = 0, refreshes = 0;
+            disposed.layout = () => { layouts++; };
+            disposed.refreshActor = () => { refreshes++; };
+            root.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            document.dispatchEvent(new DragEvent("dragstart"));
+            document.dispatchEvent(new DragEvent("dragend"));
+            window.dispatchEvent(new Event("resize"));
+            check(disconnected.size === observers.length && disposed.globalListeners.signal.aborted &&
+              !hooks.has("targetToken") && !hooks.has("controlToken") && hooks.has("getSceneControlButtons") &&
+              layouts === 0 && refreshes === 0, "Removing Prism tears down observers, hooks and global listeners");
+            const recreated = new PrismBar();
+            await Promise.all([recreated.render(), recreated.render()]);
+            check(document.querySelectorAll("#co2prism-bar").length === 1 &&
+              hooks.size === before.size && hooks.get("targetToken") !== before.get("targetToken"),
+              "Concurrent renders recreate one bar and one set of hooks");
+            recreated.element.remove();
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
         } catch (error) { result.errors.push(error.stack); }
         const output = document.createElement("pre"); output.id = "co2prism-browser-result";
         output.textContent = JSON.stringify(result); document.body.append(output);

@@ -2,12 +2,19 @@ const CHANNEL = "module.co2prism";
 
 /** Canal informatif uniquement : aucun document ni budget n'est modifié à la réception. */
 export class MovementNotifications {
-  constructor() { this.seen = new Set(); this.connected = false; }
+  constructor() { this.seen = new Set(); }
 
   connect() {
-    if (this.connected || !game.socket?.on) return;
-    game.socket.on(CHANNEL, packet => { this.receive(packet); });
-    this.connected = true;
+    if (this.socket || !game.socket?.on) return;
+    this.socket = game.socket;
+    this.listener = packet => { this.receive(packet); };
+    this.socket.on(CHANNEL, this.listener);
+  }
+
+  disconnect() {
+    this.socket?.off?.(CHANNEL, this.listener);
+    this.socket = null;
+    this.listener = null;
   }
 
   receive(packet) {

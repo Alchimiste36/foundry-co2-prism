@@ -1,0 +1,246 @@
+.co2prism-documentation {
+  --doc-text: #fbf4e9;
+  --doc-emphasis: #fffaf1;
+  --doc-muted: #c3bdca;
+  --doc-gold: #ffc639;
+  --doc-glow: #ffdc36;
+  --doc-edge: #e2cda538;
+  --doc-shadow: #121019ad;
+  --doc-highlight: #ffe19718;
+  color: var(--doc-text);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(ellipse at 15% 0%, var(--doc-highlight), transparent 69%),
+    linear-gradient(154deg, #403946ed, #272632ed 58%, #10101aed);
+  border: 1px solid #ffdc3680;
+  border-radius: 11px;
+  box-shadow:
+    inset 0 0 13px #ffdc361c,
+    0 0 5px #ffdc364a,
+    0 5px 17px var(--doc-shadow);
+  backdrop-filter: blur(8px);
+}
+
+.co2prism-documentation .window-header {
+  color: var(--doc-gold);
+  background: #12141b66;
+  border-block-end: 1px solid var(--doc-edge);
+}
+
+.co2prism-documentation .window-header :is(.window-title, .window-icon, button.header-control) {
+  color: inherit;
+}
+
+.co2prism-documentation .window-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  background: transparent;
+  color: var(--doc-text);
+}
+
+.co2prism-documentation .co2prism-doc-scroll {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(11rem, 25%) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1rem;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.25rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.co2prism-documentation .co2prism-doc-nav,
+.co2prism-documentation .co2prism-doc-toc,
+.co2prism-documentation .co2prism-doc-article {
+  min-width: 0;
+  min-height: 0;
+}
+
+.co2prism-documentation .co2prism-doc-toc,
+.co2prism-documentation .co2prism-doc-article {
+  overflow: hidden auto;
+  padding: 0.75rem;
+  scrollbar-color: #a198af transparent;
+}
+
+.co2prism-documentation .co2prism-doc-nav,
+.co2prism-documentation .co2prism-doc-article {
+  border: 1px solid var(--doc-edge);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px #e2cda51a,
+    0 3px 8px var(--doc-shadow);
+}
+
+.co2prism-documentation .co2prism-doc-nav {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: linear-gradient(150deg, #47405270, #211f2abf);
+}
+
+.co2prism-documentation .co2prism-doc-toc > strong {
+  color: var(--doc-gold);
+}
+
+.co2prism-documentation .co2prism-doc-article {
+  background: #211f2abf;
+}
+
+.co2prism-documentation .co2prism-doc-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-block-start: 1px solid var(--doc-edge);
+}
+
+.co2prism-documentation .co2prism-doc-controls button {
+  min-height: 1.75rem;
+  padding: 0;
+  color: var(--doc-gold);
+  border: 1px solid var(--doc-edge);
+  background: #12141b66;
+  box-shadow: none;
+}
+
+.co2prism-documentation .co2prism-doc-controls button:not(:disabled):hover,
+.co2prism-documentation .co2prism-doc-nav button[data-target]:hover {
+  color: var(--doc-gold);
+  background: var(--doc-highlight);
+  box-shadow: none;
+}
+
+.co2prism-documentation .co2prism-doc-controls button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.co2prism-documentation [hidden] {
+  display: none;
+}
+
+.co2prism-documentation nav ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.co2prism-documentation nav .co2prism-doc-subsections {
+  margin-block: 0.15rem 0.5rem;
+  padding-inline-start: 1rem;
+}
+
+.co2prism-documentation .co2prism-doc-nav button[data-target] {
+  display: inline-block;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--doc-text);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.co2prism-documentation .co2prism-doc-nav button {
+  transition:
+    color 130ms ease,
+    background-color 130ms ease;
+}
+
+.co2prism-documentation :is(.window-header button, .co2prism-doc-nav button, a.co2prism-doc-anchor-link):focus-visible {
+  outline: 2px solid var(--doc-gold);
+  outline-offset: 1px;
+}
+
+.co2prism-documentation .co2prism-doc-nav .co2prism-doc-active > button[data-target],
+.co2prism-documentation .co2prism-doc-nav button[aria-current="location"] {
+  font-weight: bold;
+  color: var(--doc-gold);
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--doc-glow);
+  text-underline-offset: 0.16em;
+}
+
+.co2prism-documentation article :is(h2, h3) {
+  color: var(--doc-gold);
+}
+
+.co2prism-documentation article h2 {
+  margin-block: 0 0.5rem;
+}
+
+.co2prism-documentation article h3 {
+  margin-block: 1rem 0.4rem;
+}
+
+.co2prism-documentation strong {
+  color: var(--doc-emphasis);
+  font-weight: 700;
+  text-shadow: 0px 1px 1px var(--doc-gold);
+}
+
+.co2prism-documentation a.co2prism-doc-anchor-link {
+  color: var(--doc-gold);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.co2prism-documentation a.co2prism-doc-anchor-link:hover {
+  color: var(--doc-glow);
+  text-shadow: none;
+}
+
+.co2prism-documentation a.co2prism-doc-anchor-link:active {
+  text-decoration-thickness: 2px;
+}
+
+.co2prism-documentation article figure {
+  margin: 1rem 0;
+}
+
+.co2prism-documentation article img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.co2prism-documentation figcaption {
+  margin-block-start: 0.4rem;
+  color: var(--doc-muted);
+  font-size: 0.9em;
+}
+
+.co2prism-documentation .co2prism-doc-icon {
+  margin-inline-end: 0.25em;
+}
+
+@container (max-width: 35rem) {
+  .co2prism-documentation .co2prism-doc-scroll {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .co2prism-documentation .co2prism-doc-nav button {
+    transition: none;
+  }
+}

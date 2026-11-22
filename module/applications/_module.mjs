@@ -1,4 +1,5 @@
 import { ActionEconomy } from "../combat/action-economy.mjs";
+import { PrismDocumentation } from "./documentation.mjs";
 import { DEFENSE_COSTS, defenseStances } from "../combat/defense.mjs";
 
 import { MovementTracker, roundMovementCells } from "../movement/movement-tracker.mjs";
@@ -39,6 +40,14 @@ function economyEnabled() {
 
 Hooks.once("init", () => {
   if (game.system.id !== "co2") return;
+  game.settings.registerMenu(MODULE, "documentation", {
+    name: "CO2PRISM.Documentation.Name",
+    label: "CO2PRISM.Documentation.Open",
+    hint: "CO2PRISM.Documentation.Hint",
+    icon: "fa-solid fa-book-open",
+    type: PrismDocumentation,
+    restricted: false
+  });
   game.settings.register(MODULE, "movementRounding", {
     name: "CO2PRISM.MovementRounding", hint: "CO2PRISM.MovementRoundingHint", scope: "world", config: true,
     type: String, default: "nearest", choices: {
@@ -118,12 +127,13 @@ class PrismBar {
   }
 
   async render() {
-    if (document.getElementById("co2prism-bar")) return;
+    if (this.movementDestroyed || document.getElementById("co2prism-bar")) return;
     const { renderTemplate } = foundry.applications.handlebars;
     // Seuls les fragments statiques rendus par Handlebars sont insérés dans bar.hbs.
     const sections = await Promise.all(Object.entries(PARTIALS).map(async ([key, name]) =>
       [key, await renderTemplate(`${TEMPLATE_ROOT}/partials/${name}.hbs`, {})]));
     const markup = await renderTemplate(`${TEMPLATE_ROOT}/bar.hbs`, Object.fromEntries(sections));
+    if (this.movementDestroyed || document.getElementById("co2prism-bar")) return;
     document.body.insertAdjacentHTML("beforeend", markup);
     this.element = document.getElementById("co2prism-bar");
     this.handle = this.element.querySelector(".co2prism-portrait");
@@ -190,17 +200,11 @@ class PrismBar {
       event.preventDefault(); event.stopPropagation(); void this.toggleMovementZones();
     });
     this.movementZonesObserver = new MutationObserver(() => {
-      if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
       if (!this.element.isConnected) {
-        this.movementZones.clear();
-        this.movementZonesObserver.disconnect();
-        this.presentationObserver?.disconnect();
-        this.disconnectInventoryScroll();
-        this.tooltipListeners?.abort();
-        this.tooltipObserver?.disconnect();
-        this.clearDescriptiveTooltip();
-        if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
+        this.destroy();
+        return;
       }
+      if (this.shortcutHover && (this.element.hidden || !this.element.getClientRects().length)) this.clearShortcutPreview();
     });
     this.movementZonesObserver.observe(document.body, { childList: true });
     this.movementZonesObserver.observe(this.element, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
@@ -218,18 +222,20 @@ class PrismBar {
       event.preventDefault(); event.stopPropagation(); void this.changeEconomy("reset");
     });
     // Observer le début/la fin du drag, sans intercepter les dépôts hors Prism.
+    this.globalListeners = new AbortController();
+    const { signal } = this.globalListeners;
     document.addEventListener("dragstart", event => {
       this.clearShortcutPreview();
       if (this.combatSlots.contains(event.target)) return;
       this.refreshActor();
       this.slotDrag = { actor: this.actor, token: this.token, preset: this.configuration.activePreset };
-    });
+    }, { signal });
     document.addEventListener("dragend", () => {
       this.slotDrag = null;
       setTimeout(() => { this.suppressShortcutClick = false; }, 0);
       this.combatSlots.querySelectorAll(".co2prism-drop-target, .co2prism-drop-candidate, .co2prism-drop-insert")
         .forEach(node => node.classList.remove("co2prism-drop-target", "co2prism-drop-candidate", "co2prism-drop-insert"));
-    });
+    }, { signal });
     this.skillsPanel = this.element.querySelector(".co2prism-skills");
     this.skillsToggle = this.element.querySelector(".co2prism-skills-toggle");
     this.skillsToggle.addEventListener("click", event => {
@@ -295,8 +301,7 @@ class PrismBar {
       event.stopPropagation();
       if (!this.portraitFirstClickMoved && !this.portraitMoved) void this.performAction("sheet");
     });
-    this.onWindowResize = () => this.layout();
-    window.addEventListener("resize", this.onWindowResize);
+    window.addEventListener("resize", () => this.layout(), { signal });
     this.presentationObserver = new ResizeObserver(() => this.layout({ preserveAnchor: true }));
     this.presentationObserver.observe(this.art);
     this.updateLock();
@@ -349,62 +354,67 @@ class PrismBar {
   }
 
   connectActor() {
+    if (this.actorHooks || this.movementDestroyed) return;
+    this.actorHooks = [];
+    const on = (event, callback) => {
+      Hooks.on(event, callback);
+      this.actorHooks.push([event, callback]);
+    };
     this.movementNotifications.connect();
     for (const event of ["createCombat", "updateCombat", "deleteCombat", "combatTurnChange"]) {
-      Hooks.on(event, (combat, changed) => {
+      on(event, (combat, changed) => {
         if (event !== "createCombat" && (event !== "updateCombat" || ["round", "turn", "active"].some(key => key in (changed ?? {})))) this.movementContextVersion++;
         this.refreshActor();
       });
     }
     for (const event of ["createCombatant", "updateCombatant", "deleteCombatant"]) {
-      Hooks.on(event, combatant => {
+      on(event, combatant => {
         if (game.settings.get(MODULE, "movementMode") === "combat" && combatant.parent === game.combats?.active) {
           this.refreshActor();
         }
       });
     }
     // L'instance vit avec le monde ; ces hooks ne sont installés qu'au premier rendu.
-    Hooks.on("controlToken", () => {
+    on("controlToken", () => {
       this.renderTargets();
       this.refreshActor();
     });
-    Hooks.on("updateUser", (user, changes) => {
+    on("updateUser", (user, changes) => {
       if (user.id === game.user.id && "character" in changes) this.refreshActor();
       if (user.id === game.user.id && "role" in changes) this.renderTargets();
     });
-    this.onTargetToken = user => { if (user === game.user) this.renderTargets(); };
-    Hooks.on("targetToken", this.onTargetToken);
-    Hooks.on("canvasReady", () => {
+    on("targetToken", user => { if (user === game.user) this.renderTargets(); });
+    on("canvasReady", () => {
       this.targetScene = globalThis.canvas?.scene;
       this.renderTargets();
       this.refreshActor();
     });
-    Hooks.on("canvasTearDown", canvas => {
+    on("canvasTearDown", canvas => {
       this.targetScene = null;
       this.renderTargets();
       this.movementZones.clear();
       this.movementTracker.closeScene(canvas?.scene ?? globalThis.canvas?.scene);
       this.refreshActor(false);
     });
-    Hooks.on("moveToken", (token, movement) => {
+    on("moveToken", (token, movement) => {
       if (this.movementTrackingAllowed(token)) this.movementTracker.update(token, movement);
       if (token === this.token?.document) this.refreshActor();
     });
-    Hooks.on("recordToken", token => {
+    on("recordToken", token => {
       if (this.movementTrackingAllowed(token)) this.movementTracker.refresh(token);
       if (token === this.token?.document) this.refreshActor();
     });
-    Hooks.on("deleteScene", scene => {
+    on("deleteScene", scene => {
       if (scene === this.movementZones.token?.parent) this.movementZones.clear();
       this.movementTracker.closeScene(scene);
       if (scene === this.token?.document?.parent) this.refreshActor(false);
     });
-    Hooks.on("updateScene", (scene, changed) => {
+    on("updateScene", (scene, changed) => {
       if (scene === globalThis.canvas?.scene && Object.keys(changed).some(key => key === "grid" || key.startsWith("grid."))) {
         this.refreshActor();
       }
     });
-    Hooks.on("updateActor", (actor, changed) => {
+    on("updateActor", (actor, changed) => {
       if (Object.keys(changed).some(key => key === "ownership" || key.startsWith("ownership."))
         && Array.from(game.user.targets ?? []).some(token => token.actor === actor)) this.renderTargets();
       if (Object.keys(changed).some(key => key === "flags" || key.startsWith("flags.co2prism"))) {
@@ -419,10 +429,10 @@ class PrismBar {
         this.refreshActor();
       }
     });
-    Hooks.on("deleteActor", actor => {
+    on("deleteActor", actor => {
       if (this.concernsActor(actor)) this.refreshActor(false);
     });
-    Hooks.on("updateToken", (token, changed) => {
+    on("updateToken", (token, changed) => {
       if (game.user.targets?.has(token.object)) this.renderTargets();
       const relevant = Object.keys(changed).some(key => ["actorId", "actorLink", "delta", "ownership"].includes(key)
         || key.startsWith("delta."));
@@ -431,7 +441,7 @@ class PrismBar {
         this.refreshActor();
       }
     });
-    Hooks.on("deleteToken", token => {
+    on("deleteToken", token => {
       if (token.parent === this.targetScene) this.renderTargets(token);
       if (token === this.movementZones.token) this.movementZones.clear();
       this.movementTracker.deleteToken(token);
@@ -440,7 +450,7 @@ class PrismBar {
     // Les objets et effets peuvent modifier les valeurs préparées sans updateActor.
     for (const type of ["Item", "ActiveEffect"]) {
       for (const event of ["create", "update", "delete"]) {
-        Hooks.on(`${event}${type}`, document => {
+        on(`${event}${type}`, document => {
           const parent = document.parent?.documentName === "Item" ? document.parent.parent : document.parent;
           if (this.concernsActor(parent)) {
             this.invalidateShortcutVisibility();
@@ -459,6 +469,7 @@ class PrismBar {
   }
 
   refreshActor(useCanvas = true) {
+    if (this.movementDestroyed) return;
     const controlled = useCanvas && globalThis.canvas?.ready ? canvas.tokens?.controlled ?? [] : [];
     const token = controlled.length === 1 ? controlled[0] : null;
     const mainCharacter = controlled.length === 0 && !game.user.isGM ? game.user.character : null;
@@ -546,8 +557,8 @@ class PrismBar {
     if (this.portrait.getAttribute("src") !== portrait) this.portrait.setAttribute("src", portrait);
     this.art.setAttribute("aria-label", actor ? `${name}. ${summaries.join(". ")}`
       : game.i18n.localize("CO2PRISM.NoActor"));
-    this.updateActions();
     this.configuration = this.readConfiguration(actor);
+    this.updateActions();
     this.updatePresets();
     const panels = [this.skillsPanel, this.combatPanel, this.movementPanel, this.equipmentPanel, this.pathsPanel];
     const visibility = panels.map(panel => panel?.hidden);
@@ -1431,7 +1442,12 @@ class PrismBar {
   }
 
   destroy() {
-    if (this.onTargetToken) Hooks.off("targetToken", this.onTargetToken);
+    if (this.movementDestroyed) return;
+    this.movementDestroyed = true;
+    for (const [event, callback] of this.actorHooks ?? []) Hooks.off(event, callback);
+    this.actorHooks = null;
+    this.globalListeners?.abort();
+    this.movementNotifications.disconnect();
     this.targetScene = null;
     this.renderTargets();
     this.targetStrip = null;
@@ -1446,9 +1462,8 @@ class PrismBar {
     this.closePresetActionMenu();
     this.closeEquipmentMenu();
     this.presentationObserver?.disconnect();
-    if (this.onWindowResize) window.removeEventListener("resize", this.onWindowResize);
-    this.movementDestroyed = true;
     this.movementZones.clear(); this.movementZonesObserver?.disconnect();
+    if (bar === this) bar = undefined;
   }
 
   updateSkills() {
@@ -1815,7 +1830,7 @@ class PrismBar {
     const slots = config.slots;
     const rows = [[], [], []];
     for (const [key, reference] of Object.entries(slots)) {
-      if (["left-hand", "right-hand"].includes(key)) continue;
+      if (this.handKey(key)) continue;
       const row = [2, 3].includes(reference?.row) ? reference.row : 1;
       rows[row - 1].push({ key, reference, row, order: Number.isSafeInteger(reference?.order) ? reference.order : 0 });
     }
@@ -1825,7 +1840,7 @@ class PrismBar {
     const primary = hands.find(slot => this.handItem(actor, slot.reference)?.system.usage?.twoHand);
     if (primary) {
       const other = hands[1 - primary.order];
-      const replaceable = this.isVersatileHandAction(this.handItem(actor, primary.reference), primary.reference);
+      const replaceable = this.isVersatileHandWeapon(this.handItem(actor, primary.reference));
       if (!other.reference || (!replaceable && other.reference.itemId === primary.reference.itemId)) {
         other.mirror = primary.reference;
         other.mirrorLocked = !replaceable;
@@ -1848,12 +1863,15 @@ class PrismBar {
     const { actions, source, indice, itemId, ...slot } = entry;
     if (references.length === 1) {
       const { source, indice, itemId } = references[0];
-      return { ...slot, source, indice, itemId, ...(actions ? { "-=actions": null } : {}) };
+      return { ...slot, source, indice, itemId,
+        ...(actions ? { actions: new foundry.data.operators.ForcedDeletion() } : {}) };
     }
     return { ...slot, actions: references.map(reference =>
       ({ source: reference?.source, indice: reference?.indice, itemId: reference?.itemId })),
       ...(source !== undefined || indice !== undefined || itemId !== undefined
-        ? { "-=source": null, "-=indice": null, "-=itemId": null } : {}) };
+        ? { source: new foundry.data.operators.ForcedDeletion(),
+          indice: new foundry.data.operators.ForcedDeletion(),
+          itemId: new foundry.data.operators.ForcedDeletion() } : {}) };
   }
 
   sameShortcutReference(a, b) {
@@ -1904,9 +1922,9 @@ class PrismBar {
       && model?.properties?.equipable && typeof model.equipped === "boolean";
   }
 
-  isVersatileHandAction(item, reference) {
+  isVersatileHandWeapon(item) {
     const usage = item?.system.usage;
-    return reference?.kind !== "equipment" && item?.system.isWeapon && usage?.oneHand === true && usage.twoHand === true;
+    return item?.system.isWeapon && usage?.oneHand === true && usage.twoHand === true;
   }
 
   async updateHands(actor, config, number, key, reference, bypassChecks = false) {
@@ -1918,7 +1936,7 @@ class PrismBar {
       const other = key === "left-hand" ? "right-hand" : "left-hand";
       if (this.slotRows(actor)[0].find(slot => slot.key === key)?.mirrorLocked) return warn("HandsConflict");
       const previousItem = this.handItem(actor, previous[key]);
-      if (previousItem?.system.usage?.twoHand && !this.isVersatileHandAction(previousItem, previous[key])
+      if (previousItem?.system.usage?.twoHand && !this.isVersatileHandWeapon(previousItem)
         && incoming[other]?.itemId === previous[key]?.itemId) incoming[other] = null;
     }
     const references = Object.entries(incoming).filter(([hand, ref]) => this.handKey(hand) && ref != null).map(([, ref]) => ref);
@@ -1926,10 +1944,9 @@ class PrismBar {
     const items = references.filter(ref => !attacks.includes(ref)).map(ref => this.handItem(actor, ref));
     if (items.includes(null)) return warn("HandsInvalidItem");
     const required = new Set(items);
-    const versatile = item => references.filter(ref => ref.itemId === item.id).every(ref => this.isVersatileHandAction(item, ref));
     const hands = item => item.system.usage?.twoHand ? 2 : 1;
     if (items.length !== required.size && [...required].some(item => hands(item) === 1)) return warn("HandsConflict");
-    if ([...required].reduce((used, item) => used + (versatile(item) ? 1 : hands(item)), 0) > 2) return warn("HandsConflict");
+    if ([...required].reduce((used, item) => used + (this.isVersatileHandWeapon(item) ? 1 : hands(item)), 0) > 2) return warn("HandsConflict");
     const outgoing = new Set(Object.entries(previous).filter(([hand]) => this.handKey(hand))
       .map(([, ref]) => actor.items?.get(ref?.itemId))
       .filter(item => this.isHandEquipment(actor, item) && !required.has(item)));
@@ -2056,10 +2073,9 @@ class PrismBar {
         changed = true;
       }
       if (!changed) { this.prunedSignatures.delete(actor); return false; }
-      for (const key of keys) delete slots[key];
       if (keys.length) for (const row of this.slotRows(actor)) row.filter(slot => !slot.hand && !slot.terminal && !keys.includes(slot.key))
         .forEach((slot, order) => { slots[slot.key] = { ...slots[slot.key], order }; });
-      for (const key of keys) slots[`-=${key}`] = null;
+      for (const key of keys) slots[key] = new foundry.data.operators.ForcedDeletion();
       await actor.setFlag(MODULE, "shortcuts", slots);
       this.prunedSignatures.delete(actor);
       return true;
@@ -2179,25 +2195,7 @@ class PrismBar {
           icon.setAttribute("aria-hidden", "true");
         }
         if (slot.mirror) {
-          const item = this.handItem(this.actor, slot.mirror);
-          const resolved = this.resolveShortcut(this.actor, slot.mirror);
-          const action = resolved?.action;
-          const image = action?.actionImg || action?.img || item?.img;
-          node.classList.add("co2prism-hand-mirror");
-          const occupied = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
-          node.dataset.co2prismTooltipText = occupied;
-          node.setAttribute("aria-label", occupied);
-          if (resolved) {
-            this.describeShortcut(node, resolved, action.actionName || item?.name || occupied);
-            node.dataset.co2prismActionSummary = [node.dataset.co2prismActionSummary, occupied].filter(Boolean).join("\n");
-            if (node.dataset.co2prismActionSummaryHtml) {
-              node.dataset.co2prismActionSummaryHtml += `\n${foundry.utils.escapeHTML(occupied)}`;
-            }
-            node.removeAttribute("aria-pressed");
-          } else if (item) this.describeHandEquipment(node, item, occupied);
-          if (image) {
-            const img = add("img", "co2prism-slot-image"); img.src = image; img.alt = ""; img.draggable = false;
-          }
+          this.renderHandMirror(node, slot.mirror);
           if (slot.mirrorLocked) {
             node.addEventListener("dragover", event => event.stopPropagation());
             node.addEventListener("drop", event => { event.preventDefault(); event.stopPropagation(); });
@@ -2285,8 +2283,9 @@ class PrismBar {
           }
         } else if (slot.reference !== undefined && !resolved) {
           node.classList.add("co2prism-slot-unavailable");
-          add("span", "co2prism-slot-empty", game.i18n.localize("CO2PRISM.Combat.UnavailableSlot"));
-          node.dataset.co2prismTooltipText = game.i18n.localize("CO2PRISM.Combat.UnavailableSlot");
+          const unavailable = game.i18n.localize("CO2PRISM.Combat.UnavailableSlot");
+          add("span", "co2prism-slot-empty", unavailable);
+          node.dataset.co2prismTooltipText = unavailable;
         } else if (resolved) {
           const { action, item } = resolved;
           const name = this.renderShortcutVisual(node, resolved, references[0]);
@@ -2335,6 +2334,33 @@ class PrismBar {
       this.combatRows[index].scrollLeft = scroll;
     }
     return resized;
+  }
+
+  renderHandMirror(node, reference) {
+    const item = this.handItem(this.actor, reference);
+    const resolved = this.resolveShortcut(this.actor, reference);
+    const action = resolved?.action;
+    const image = action?.actionImg || action?.img || item?.img;
+    node.classList.add("co2prism-hand-mirror");
+    const occupied = game.i18n.localize("CO2PRISM.Combat.HandOccupied");
+    node.dataset.co2prismTooltipText = occupied;
+    node.setAttribute("aria-label", occupied);
+    if (resolved) {
+      this.describeShortcut(node, resolved, action.actionName || item?.name || occupied);
+      node.dataset.co2prismActionSummary = [node.dataset.co2prismActionSummary, occupied].filter(Boolean).join("\n");
+      if (node.dataset.co2prismActionSummaryHtml) {
+        node.dataset.co2prismActionSummaryHtml += `\n${foundry.utils.escapeHTML(occupied)}`;
+      }
+      node.removeAttribute("aria-pressed");
+    } else if (item) this.describeHandEquipment(node, item, occupied);
+    if (image) {
+      const img = document.createElement("img");
+      img.className = "co2prism-slot-image";
+      node.append(img);
+      img.src = image;
+      img.alt = "";
+      img.draggable = false;
+    }
   }
 
   combatSlotsSignature(rows, editable, disabled) {
@@ -2694,7 +2720,8 @@ class PrismBar {
       const path = `presetActionRules.${identity.key}`;
       if (!Object.keys(rules).length) await actor.unsetFlag(MODULE, path);
       else {
-        const removed = Object.fromEntries([1, 2, 3].filter(number => !(number in rules)).map(number => [`-=${number}`, null]));
+        const removed = Object.fromEntries([1, 2, 3].filter(number => !(number in rules))
+          .map(number => [number, new foundry.data.operators.ForcedDeletion()]));
         await actor.setFlag(MODULE, path, { fingerprint: identity.fingerprint, ...rules, ...removed });
       }
       return true;
@@ -3052,7 +3079,7 @@ class PrismBar {
 
   manageShortcut(context, target) {
     this.refreshActor();
-    if (!this.validShortcutContext(context) || (target && (target.hand || ["left-hand", "right-hand"].includes(context.key)))) return Promise.resolve(false);
+    if (!this.validShortcutContext(context) || (target && (target.hand || this.handKey(context.key)))) return Promise.resolve(false);
     return this.queueConfiguration(context.actor, async () => {
       this.refreshActor();
       if (!this.validShortcutContext(context)) return false;
@@ -3084,12 +3111,11 @@ class PrismBar {
         for (const row of rows) { const index = row.indexOf(source); if (index >= 0) row.splice(index, 1); }
         const index = target.terminal ? destination.length : destination.findIndex(slot => slot.key === target.key);
         destination.splice(index, 0, source);
-      } else delete slots[context.key];
+      }
       rows.forEach((row, index) => row.filter(slot => target || slot.key !== context.key).forEach((slot, order) => {
         slots[slot.key] = { ...slots[slot.key], row: index + 1, order };
       }));
-      // Une seule écriture native ; la clé de suppression Foundry évite la fusion résiduelle.
-      if (!target) slots[`-=${context.key}`] = null;
+      if (!target) slots[context.key] = new foundry.data.operators.ForcedDeletion();
       await context.actor.setFlag(MODULE, "shortcuts", slots);
       return true;
     });
