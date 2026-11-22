@@ -40,6 +40,13 @@
       }
     },
     "Title": "CO2 Prism",
+    "Documentation": {
+      "Name": "User documentation",
+      "Open": "Open the manual",
+      "Hint": "Read the CO2 Prism user manual (in French).",
+      "Title": "CO2 Prism — User documentation",
+      "Contents": "Contents"
+    },
     "ManyTargets": "Many tokens are targeted",
     "Size": "Bar size",
     "SizeHint": "Adjust the size of Prism. Lock Prism to save the size.",

@@ -21,6 +21,9 @@ function setup() {
   vm.runInContext(readFileSync(new URL("../module/movement/movement-notifications.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/movement/movement-zones.mjs", import.meta.url), "utf8").replace(/import[^;]+;/g, "").replace(/export /g, ""), context);
   vm.runInContext(readFileSync(new URL("../module/combat/defense.mjs", import.meta.url), "utf8").replace(/export /g, ""), context);
+  vm.runInContext("foundry.applications.api.ApplicationV2 = class {}; foundry.applications.api.HandlebarsApplicationMixin = base => base;", context);
+  vm.runInContext(readFileSync(new URL("../module/applications/documentation.mjs", import.meta.url), "utf8")
+    .replace("export class", "class"), context);
   vm.runInContext(readFileSync(new URL("../module/applications/_module.mjs", import.meta.url), "utf8").replace(/import \{[^}]+\} from [^;]+;/g, "")
     + "\nglobalThis.PrismBar = PrismBar;", context);
   const bar = new context.PrismBar();
@@ -1201,7 +1204,9 @@ function setupMovementDisplay() {
   context.canvas.scene = { grid: { type: 1, distance: 3, units: "m" } };
   const settings = { movementRounding: "nearest", economyMode: "off" }, registrations = new Map();
   context.game.system = { id: "co2" };
-  context.game.settings = { get: (_, key) => settings[key], register: (_, key, config) => registrations.set(key, config) };
+  context.game.settings = {
+    get: (_, key) => settings[key], register: (_, key, config) => registrations.set(key, config), registerMenu() {}
+  };
   hooks.get("init")();
   bar.actor = a;
   bar.configuration = { panels: { combat: true }, activePreset: 1 };
@@ -2893,13 +2898,18 @@ test("défenses sans budget : refus natif et annulation si le contexte change pe
 test("Tokens visibility uses the saved Foundry user setting and defaults on", () => {
   const { context, hooks } = setup();
   const registrations = new Map();
+  const menus = new Map();
   let stored;
   context.game.system = { id: "co2" };
   context.game.settings = {
     register: (module, key, data) => registrations.set(key, data),
+    registerMenu: (module, key, data) => menus.set(key, data),
     get: (_module, key) => stored ?? registrations.get(key)?.default
   };
   hooks.get("init")();
+  const manual = menus.get("documentation");
+  assert.equal(manual.restricted, false);
+  assert.equal(new manual.type(), new manual.type());
   assert.equal(registrations.get("visible").scope, "user");
   assert.equal(registrations.get("visible").default, true);
   const controls = { tokens: { tools: {} }, measure: { tools: {} } };

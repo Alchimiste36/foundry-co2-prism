@@ -40,6 +40,13 @@
       }
     },
     "Title": "CO2 Prism",
+    "Documentation": {
+      "Name": "Documentation utilisateur",
+      "Open": "Ouvrir le manuel",
+      "Hint": "Consulter le manuel utilisateur de CO2 Prism.",
+      "Title": "CO2 Prism — Documentation utilisateur",
+      "Contents": "Sommaire"
+    },
     "ManyTargets": "De nombreux tokens sont ciblés",
     "Size": "Taille de la barre",
     "SizeHint": "Ajuster la taille de Prism. Verrouiller Prism pour enregistrer la taille.",

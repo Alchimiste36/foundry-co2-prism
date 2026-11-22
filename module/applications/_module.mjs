@@ -1,4 +1,5 @@
 import { ActionEconomy } from "../combat/action-economy.mjs";
+import { PrismDocumentation } from "./documentation.mjs";
 import { DEFENSE_COSTS, defenseStances } from "../combat/defense.mjs";
 
 import { MovementTracker, roundMovementCells } from "../movement/movement-tracker.mjs";
@@ -39,6 +40,14 @@ function economyEnabled() {
 
 Hooks.once("init", () => {
   if (game.system.id !== "co2") return;
+  game.settings.registerMenu(MODULE, "documentation", {
+    name: "CO2PRISM.Documentation.Name",
+    label: "CO2PRISM.Documentation.Open",
+    hint: "CO2PRISM.Documentation.Hint",
+    icon: "fa-solid fa-book-open",
+    type: PrismDocumentation,
+    restricted: false
+  });
   game.settings.register(MODULE, "movementRounding", {
     name: "CO2PRISM.MovementRounding", hint: "CO2PRISM.MovementRoundingHint", scope: "world", config: true,
     type: String, default: "nearest", choices: {

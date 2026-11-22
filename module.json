@@ -13,7 +13,7 @@
     "systems": [{ "id": "co2", "type": "system" }]
   },
   "esmodules": ["co2prism.mjs"],
-  "styles": ["css/co2prism.css"],
+  "styles": ["css/co2prism.css", "css/documentation.css"],
   "languages": [
     { "lang": "fr", "name": "Français", "path": "lang/fr.json" },
     { "lang": "en", "name": "English", "path": "lang/en.json" }

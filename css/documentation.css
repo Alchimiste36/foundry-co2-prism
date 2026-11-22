@@ -1,0 +1,76 @@
+.co2prism-documentation .window-content {
+  container-type: inline-size;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.co2prism-documentation .co2prism-doc-scroll {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.25rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.co2prism-documentation nav {
+  padding: 0.75rem;
+  border-inline-start: 1px solid currentColor;
+}
+
+.co2prism-documentation nav ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.co2prism-documentation .co2prism-doc-subsection {
+  padding-inline-start: 1rem;
+}
+
+.co2prism-documentation article {
+  max-width: 68ch;
+}
+
+.co2prism-documentation article h2 {
+  margin-block: 1.5rem 0.5rem;
+}
+
+.co2prism-documentation article h3 {
+  margin-block: 1rem 0.4rem;
+}
+
+.co2prism-documentation a {
+  text-decoration: underline;
+}
+
+.co2prism-documentation article figure {
+  margin: 1rem 0;
+}
+
+.co2prism-documentation article img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.co2prism-documentation figcaption {
+  margin-block-start: 0.4rem;
+  font-size: 0.9em;
+}
+
+.co2prism-documentation .co2prism-doc-icon {
+  margin-inline-end: 0.25em;
+}
+
+@container (max-width: 36rem) {
+  .co2prism-documentation .co2prism-doc-scroll {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

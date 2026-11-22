@@ -33,7 +33,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
     const html = `<!doctype html><html><head>
       <link rel="stylesheet" href="${pathToFileURL(foundryCSS).href}">
       <link rel="stylesheet" href="${new URL("../fonts/fontawesome/css/all.min.css", pathToFileURL(foundryCSS)).href}">
-      <style>${read("../css/co2prism.css")}</style></head>
+      <style>${read("../css/co2prism.css")}${read("../css/documentation.css")}</style></head>
       <body class="vtt game"><canvas id="board" aria-label="Canvas Board"></canvas><script>
       const ready = [];
       const hooks = new Map();
@@ -66,11 +66,41 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       ${read("../module/movement/movement-notifications.mjs").replace(/export /g, "")}
       ${read("../module/movement/movement-zones.mjs").replace(/import[^;]+;/g, "").replace(/export /g, "")}
       ${read("../module/combat/defense.mjs").replace(/export /g, "")}
+      foundry.applications.api.ApplicationV2 = class { _onRender() {} };
+      foundry.applications.api.HandlebarsApplicationMixin = base => base;
+      ${read("../module/applications/documentation.mjs").replace("export class", "class")}
       ${read("../module/applications/_module.mjs").replace(/import \{[^}]+\} from [^;]+;/g, "")}
       (async () => {
         const result = { dimensions: [], errors: [] };
         const check = (condition, message) => { if (!condition) result.errors.push(message); };
         try {
+          {
+            const manual = new PrismDocumentation();
+            const frame = document.createElement("section");
+            frame.className = "co2prism-documentation";
+            frame.innerHTML = '<div class="window-content" style="width: 760px; height: 260px;"></div>';
+            const content = frame.firstElementChild;
+            content.innerHTML = ${JSON.stringify(read("../templates/documentation/documentation.hbs"))};
+            document.body.append(frame);
+            manual.element = frame;
+            const scroll = content.firstElementChild;
+            const target = scroll.querySelector("h3:last-of-type");
+            target.style.marginTop = "400px";
+            manual._onRender({}, {});
+            const links = [...scroll.querySelectorAll("nav a")];
+            check(links.length === 4 && getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 2,
+              "Manual builds a two-level table of contents in a wide window");
+            links.at(-1).click();
+            check(document.activeElement === target && scroll.scrollTop > 0 && !location.hash,
+              "Table of contents scrolls the manual and focuses its heading");
+            content.style.width = "340px";
+            scroll.scrollTop = 0;
+            scroll.querySelector("article a").click();
+            check(getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 1 &&
+              document.activeElement === target && scroll.scrollTop > 0 && !location.hash,
+              "Internal manual links still work in the narrow layout");
+            frame.remove();
+          }
           await ready[0]();
           const root = document.getElementById("co2prism-bar");
           const prism = (node, name) => getComputedStyle(node).getPropertyValue("--prism-" + name).trim();
