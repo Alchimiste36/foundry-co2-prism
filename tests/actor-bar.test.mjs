@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
 
+import { ForcedDeletion, mergeFlagPatch } from "./helpers/flag-patch-double.mjs";
+
 const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" })[c]);
 
 // Simuler les documents préparés, sans dépendre d'un monde Foundry lancé.
@@ -868,7 +870,8 @@ function setupConfiguration() {
   const env = setup();
   const { bar, context, actor, token, hooks } = env;
   const writes = [], errors = [];
-  context.foundry = { utils: { deepClone: structuredClone, escapeHTML, cleanHTML: value => value }, applications: { api: { DialogV2: { wait: async () => "validate" } } } };
+  context.foundry.data = { operators: { ForcedDeletion } };
+  context.foundry.utils.deepClone = structuredClone;
   context.game.settings ??= { get: () => false };
   context.ui = { notifications: { error: message => errors.push(message), warn: message => errors.push(message) } };
   context.console = { error() {} };
@@ -892,11 +895,7 @@ function setupConfiguration() {
         if (!target[part] || typeof target[part] !== "object" || Array.isArray(target[part])) target[part] = {};
         target = target[part];
       }
-      if (value && typeof value === "object") {
-        value = structuredClone(value);
-        for (const key of Object.keys(value)) if (key.startsWith("-=")) { delete value[key.slice(2)]; delete value[key]; }
-      }
-      target[parts.at(-1)] = value;
+      mergeFlagPatch(target, { [parts.at(-1)]: value });
       hooks.get("updateActor")(a, { [`flags.${scope}.${key}`]: value });
       return a;
     };
@@ -1779,6 +1778,11 @@ test("règles de preset : défauts, isolation, identité CO2 et invalidation pru
   assert.equal(await save(2, "activate"), true);
   assert.equal(rule(1), "unchanged");
   assert.equal(rule(2), "activate");
+  assert.equal(await save(3, "deactivate"), true);
+  assert.equal(await save(3, "unchanged"), true);
+  const remaining = a.flags.co2prism.presetActionRules["item:0"];
+  assert.deepEqual(Object.keys(remaining).sort(), ["2", "fingerprint"]);
+  assert.equal(remaining[2], "activate");
   assert.equal(await save(2, "unchanged"), true);
   assert.equal(a.flags.co2prism.presetActionRules["item:0"], undefined);
   a.activateAction = () => assert.fail("Le preset déjà actif ne doit pas exécuter d'action");

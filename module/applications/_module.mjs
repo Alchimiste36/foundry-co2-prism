@@ -1863,12 +1863,15 @@ class PrismBar {
     const { actions, source, indice, itemId, ...slot } = entry;
     if (references.length === 1) {
       const { source, indice, itemId } = references[0];
-      return { ...slot, source, indice, itemId, ...(actions ? { "-=actions": null } : {}) };
+      return { ...slot, source, indice, itemId,
+        ...(actions ? { actions: new foundry.data.operators.ForcedDeletion() } : {}) };
     }
     return { ...slot, actions: references.map(reference =>
       ({ source: reference?.source, indice: reference?.indice, itemId: reference?.itemId })),
       ...(source !== undefined || indice !== undefined || itemId !== undefined
-        ? { "-=source": null, "-=indice": null, "-=itemId": null } : {}) };
+        ? { source: new foundry.data.operators.ForcedDeletion(),
+          indice: new foundry.data.operators.ForcedDeletion(),
+          itemId: new foundry.data.operators.ForcedDeletion() } : {}) };
   }
 
   sameShortcutReference(a, b) {
@@ -2070,10 +2073,9 @@ class PrismBar {
         changed = true;
       }
       if (!changed) { this.prunedSignatures.delete(actor); return false; }
-      for (const key of keys) delete slots[key];
       if (keys.length) for (const row of this.slotRows(actor)) row.filter(slot => !slot.hand && !slot.terminal && !keys.includes(slot.key))
         .forEach((slot, order) => { slots[slot.key] = { ...slots[slot.key], order }; });
-      for (const key of keys) slots[`-=${key}`] = null;
+      for (const key of keys) slots[key] = new foundry.data.operators.ForcedDeletion();
       await actor.setFlag(MODULE, "shortcuts", slots);
       this.prunedSignatures.delete(actor);
       return true;
@@ -2718,7 +2720,8 @@ class PrismBar {
       const path = `presetActionRules.${identity.key}`;
       if (!Object.keys(rules).length) await actor.unsetFlag(MODULE, path);
       else {
-        const removed = Object.fromEntries([1, 2, 3].filter(number => !(number in rules)).map(number => [`-=${number}`, null]));
+        const removed = Object.fromEntries([1, 2, 3].filter(number => !(number in rules))
+          .map(number => [number, new foundry.data.operators.ForcedDeletion()]));
         await actor.setFlag(MODULE, path, { fingerprint: identity.fingerprint, ...rules, ...removed });
       }
       return true;
@@ -3108,12 +3111,11 @@ class PrismBar {
         for (const row of rows) { const index = row.indexOf(source); if (index >= 0) row.splice(index, 1); }
         const index = target.terminal ? destination.length : destination.findIndex(slot => slot.key === target.key);
         destination.splice(index, 0, source);
-      } else delete slots[context.key];
+      }
       rows.forEach((row, index) => row.filter(slot => target || slot.key !== context.key).forEach((slot, order) => {
         slots[slot.key] = { ...slots[slot.key], row: index + 1, order };
       }));
-      // Une seule écriture native ; la clé de suppression Foundry évite la fusion résiduelle.
-      if (!target) slots[`-=${context.key}`] = null;
+      if (!target) slots[context.key] = new foundry.data.operators.ForcedDeletion();
       await context.actor.setFlag(MODULE, "shortcuts", slots);
       return true;
     });

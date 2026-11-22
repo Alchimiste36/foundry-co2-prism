@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { measureRecordedPath } from "./helpers/native-movement-double.mjs";
+import { ForcedDeletion, mergeFlagPatch } from "./helpers/flag-patch-double.mjs";
 
 const edge = process.env.CO2PRISM_EDGE ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const foundryCSS = process.env.CO2PRISM_FOUNDRY_CSS ?? "F:/FVTT_V14/public/css/foundry2.css";
@@ -43,6 +44,8 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
       const ui = { notifications: { warn: text => warnings.push(text), error: text => warnings.push(text) } };
       const canvas = globalThis.canvas = { ready: true, tokens: { controlled: [] } };
       const measureRecordedPath = ${measureRecordedPath.toString()};
+      ${ForcedDeletion.toString()}
+      ${mergeFlagPatch.toString()}
       const budgetTranslations = ${JSON.stringify(Object.fromEntries(["TimeOr", "TimeControls", "TimeUnavailable", "BonusTime", "NormalTime", "EconomyError", "ActionTime_Limited", "ActionTime_Attack", "ActionTime_Move", "ActionTime_Free", "ActionManaCost", "ActionUses_daily", "ActionUses_combat", "Active", "Inactive"].map(key => [`CO2PRISM.Combat.${key}`, translations.CO2PRISM.Combat[key]])))};
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Movement).map(([key, value]) => [`CO2PRISM.Movement.${key}`, value])))});
       Object.assign(budgetTranslations, ${JSON.stringify(Object.fromEntries(Object.entries(translations.CO2PRISM.Equipment.Operations).map(([key, value]) => [`CO2PRISM.Equipment.Operations.${key}`, value])))});
@@ -56,6 +59,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
         applications: { api: { DialogV2: { confirm: async () => false, wait: async () => "validate" } }, handlebars: {
           renderTemplate: async (path, data) => (${JSON.stringify(templates)})[path].replace(/\\{\\{\\{(\\w+)\\}\\}\\}/g, (_, key) => data[key])
         } } };
+      foundry.data = { operators: { ForcedDeletion } };
       foundry.applications.ux = { TextEditor: { implementation: { async enrichHTML(description, options) {
         if (!options.relativeTo.id) throw new Error('Missing native Item context');
         return description;
@@ -84,20 +88,21 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             document.body.append(frame);
             manual.element = frame;
             const scroll = content.firstElementChild;
-            const target = scroll.querySelector("h3:last-of-type");
-            target.style.marginTop = "400px";
+            const article = scroll.querySelector("article");
+            const target = article.querySelector("#raccourcis-action");
             manual._onRender({}, {});
-            const links = [...scroll.querySelectorAll("nav a")];
-            check(links.length === 4 && getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 2,
+            const chapters = scroll.querySelectorAll(".co2prism-doc-toc > ul > li > button");
+            check(chapters.length === 7 && getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 2,
               "Manual builds a two-level table of contents in a wide window");
-            links.at(-1).click();
-            check(document.activeElement === target && scroll.scrollTop > 0 && !location.hash,
+            chapters[5].click();
+            scroll.querySelector('button[data-target="raccourcis-action"]').click();
+            check(document.activeElement === target && article.scrollTop > 0 && !location.hash,
               "Table of contents scrolls the manual and focuses its heading");
             content.style.width = "340px";
-            scroll.scrollTop = 0;
-            scroll.querySelector("article a").click();
+            chapters[0].click();
+            article.querySelector('a[href="#raccourcis-action"]').click();
             check(getComputedStyle(scroll).gridTemplateColumns.split(" ").length === 1 &&
-              document.activeElement === target && scroll.scrollTop > 0 && !location.hash,
+              document.activeElement === target && article.scrollTop > 0 && !location.hash,
               "Internal manual links still work in the narrow layout");
             frame.remove();
           }
@@ -138,11 +143,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             async setFlag(scope, key, value) {
               this.flags[scope] ??= {}; let target = this.flags[scope]; const parts = key.split(".");
               for (const part of parts.slice(0, -1)) target = target[part] ??= {};
-              if (value && typeof value === "object") {
-                value = structuredClone(value);
-                for (const key of Object.keys(value)) if (key.startsWith("-=")) { delete value[key.slice(2)]; delete value[key]; }
-              }
-              target[parts.at(-1)] = value;
+              if (parts[0] === "shortcuts" || parts[0] === "presetActionRules") {
+                mergeFlagPatch(target, { [parts.at(-1)]: value });
+              } else target[parts.at(-1)] = structuredClone(value);
             },
             getSkillBonuses: key => key === "for" ? [{ name: "Métier", value: 3,
               pathName: "Voie du métier", description: '<b>Escalade</b><img src="invalid" onerror="globalThis.co2prismInjected=true">',
