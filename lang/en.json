@@ -124,7 +124,7 @@
       "Active": "Action active",
       "Inactive": "Action inactive",
       "ActorActionUnsupported": "The installed CO2 APIs require an Item source to use or publish this actor action.",
-      "InvalidDrop": "Drop rejected: selection changed, insufficient permissions, or CO2 action not found on this actor.",
+      "InvalidDrop": "Drop rejected: selection changed, insufficient permissions, or the action or item is unavailable for this actor.",
       "ActionBudget": "Available action time budget",
       "RemainingMovement": "Remaining movement / round reference capacity, including bonuses",
       "TimeControls": "Left click: spend / Right click: grant a bonus",

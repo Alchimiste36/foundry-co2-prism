@@ -18,135 +18,561 @@
   </nav>
   <article class="co2prism-doc-article">
     <section class="co2prism-doc-chapter">
-    <h2 id="decouvrir-prism">1. Découvrir Prism</h2>
-    <h3 id="presentation">1.1. À quoi sert CO2 Prism ?</h3>
-    <p>CO2 Prism est une barre d'interface pour <strong>Chroniques Oubliées 2</strong>, affichée directement sur la scène de Foundry VTT. Elle rassemble les informations essentielles de votre acteur et vous permet d'effectuer de nombreuses actions sans ouvrir constamment sa fiche.</p>
-    <p>Depuis Prism, vous pouvez consulter vos ressources, effectuer des tests de compétences, retrouver vos équipements et vos voies et capacités, ou utiliser des <a class="co2prism-doc-anchor-link" href="#raccourcis-action">raccourcis d'action</a>. Les volets s'ouvrent autour du portrait pour garder les commandes à portée de main pendant la partie.</p>
-    <p><strong>Un mot du créateur</strong></p>
-    <!-- Remplacer le texte réservé ci-dessous par le mot du créateur. -->
-    <blockquote>
-    <p><strong>[EMPLACEMENT RÉSERVÉ AU CRÉATEUR]</strong><br />
-    Présentation personnelle, intention du projet, remerciements ou informations de votre choix. Ce passage sera rédigé par le créateur de CO2 Prism.</p>
-    </blockquote>
-    <h3 id="afficher-prism">1.2. Afficher Prism</h3>
-    <p><strong>Activer le module.</strong> La personne qui administre le monde Foundry doit activer <strong>CO2 Prism</strong> dans la gestion des modules. Prism est conçu pour un monde utilisant le système <strong>Chroniques Oubliées 2</strong> sous Foundry VTT v14.</p>
-    <p><strong>Afficher ou masquer la barre.</strong> Dans les contrôles des tokens de la scène, cliquez sur le bouton représentant une <strong>gemme</strong> <i class="fa-solid fa-gem co2prism-doc-icon" aria-hidden="true"></i> pour afficher ou masquer Prism. Ce choix concerne votre propre interface.</p>
-    <p><strong>Choisir votre acteur.</strong> Sélectionnez un token sur la scène : Prism affiche alors les informations de son acteur, si vous disposez des droits nécessaires pour les consulter. Si vous ne sélectionnez aucun token, Prism peut afficher votre personnage attribué dans Foundry. Lorsque plusieurs tokens sont sélectionnés, aucun acteur n'est suivi par cette sélection.</p>
-    <!-- #image emplacement du bouton gemme dans les contrôles de tokens -->
-    <h3 id="reperer-interface">1.3. Présentation générale</h3>
-    <!-- #image capture globale de Prism avec tous les volets ouverts -->
-    <p><strong>Les trois thèmes.</strong> Prism adapte ses couleurs selon l'acteur suivi : <strong>bleu</strong> pour un personnage, <strong>rouge</strong> pour une rencontre et <strong>jaune</strong> pour un compagnon. Vous identifiez ainsi rapidement le type d'acteur affiché.</p>
-    <p><strong>Le portrait et ses boutons.</strong> Le portrait occupe le centre de la barre. Les boutons placés autour servent à ouvrir les volets et à <a class="co2prism-doc-anchor-link" href="#personnaliser-prism">personnaliser l'interface</a>. Un double-clic sur le portrait ouvre la fiche de l'acteur.</p>
-    <p><strong>Les informations permanentes.</strong> Les jauges de ressources et les valeurs principales restent visibles au centre de Prism. Leur fonctionnement est détaillé dans <a class="co2prism-doc-anchor-link" href="#ressources">Ressources</a>. Les effets et statuts actifs sur l'acteur sont affichés en permanence également.</p>
-    <p><strong>Les quatre volets.</strong> Les boutons autour du portrait donnent accès aux <strong>Compétences</strong>, aux <strong>Équipements</strong>, aux <strong>Voies &amp; Capacités</strong> et au <strong>Combat</strong>. Vous pouvez les ouvrir selon vos besoins, sans quitter la scène.</p>
-    <p><strong>Les commandes de combat et la ligne supérieure.</strong> Le <a class="co2prism-doc-anchor-link" href="#combat">volet Combat</a> rassemble les commandes de défense, d'action et de déplacement. Selon vos réglages et la situation, une ligne supplémentaire peut apparaître au-dessus de Prism pour suivre les actions ou les cases parcourues.</p>
-    <p><strong>Les info-bulles.</strong> Survolez les éléments de Prism pour consulter leurs indications. La plupart des info-bulles sont affichées en maintenant <strong>Maj (Shift)</strong> pour éviter d'être dérangé lors de l'utilisation. Si une info-bulle s'affiche sans maintenir <strong>Maj (Shift)</strong>, utiliser cette touche affichera une info-bulle plus détaillée.</p>
-    </section>
-    <section class="co2prism-doc-chapter" hidden>
-    <h2 id="personnaliser-prism">2. Personnaliser l'interface de Prism</h2>
-    <p>Le bouton en forme d'<strong>engrenage</strong> <i class="fa-solid fa-gear co2prism-doc-icon" aria-hidden="true"></i>, au coin inférieur droit du portrait, permet de verrouiller ou de déverrouiller Prism. Le mode déverrouillé sert à adapter la barre à votre écran et à préparer vos raccourcis.</p>
-    <p><strong>Déplacer Prism.</strong> Une fois la barre déverrouillée, faites-la glisser depuis le portrait jusqu'à l'emplacement souhaité. Vous pouvez ainsi la positionner sans gêner la lecture de la scène.</p>
-    <p><strong>Modifier sa taille.</strong> Le curseur de taille apparaît sous le nom de l'acteur lorsque Prism est déverrouillé. Déplacez-le pour agrandir ou réduire l'ensemble de l'interface et voir immédiatement le résultat.</p>
-    <p><strong>Configurer les raccourcis.</strong> Le déverrouillage permet également de modifier les <a class="co2prism-doc-anchor-link" href="#raccourcis-action">raccourcis d'action</a> du volet Combat. Leur création, leur remplacement et leur utilisation sont expliqués dans la section correspondante.</p>
-    <p><strong>Enregistrer les modifications.</strong> Cliquez de nouveau sur l'engrenage <i class="fa-solid fa-gear co2prism-doc-icon" aria-hidden="true"></i> pour verrouiller Prism. La taille choisie est enregistrée à ce moment-là ; la barre retrouve son mode d'utilisation normal. La taille et la position sont des préférences personnelles, distinctes de la configuration des raccourcis de chaque acteur.</p>
-    <!-- #image Prism déverrouillé avec curseur de taille visible -->
-    </section>
-    <section class="co2prism-doc-chapter" hidden>
-    <h2 id="centre-prism">3. Comprendre le noyau de Prism</h2>
-    <p>Le noyau est la partie centrale de Prism : il reste visible lorsque vous refermez les volets et vous donne accès aux informations les plus utiles de l'acteur suivi.</p>
-    <h3 id="portrait">3.1. Portrait et identité</h3>
-    <p><strong>Le portrait.</strong> L'image centrale correspond à l'acteur actuellement suivi par Prism. Elle change lorsque vous sélectionnez un autre token autorisé sur la scène. Un double clic gauche sur le portrait permet d'ouvrir la feuille de l'acteur. Les images des <a class="co2prism-doc-anchor-link" href="#cibles">tokens ciblés</a> apparaissent sur le portrait</p>
-    <p><strong>Le nom.</strong> Le nom affiché permet de vérifier rapidement quel acteur vous utilisez. Pour les rencontres, le nom est suivi du niveau de créature entre parenthèses</p>
-    <h3 id="ressources">3.2. Ressources</h3>
-    <!-- #image gros plan des quatre jauges et des boutons de repos -->
-    <p>Les jauges présentent les valeurs actuelles et maximales des ressources disponibles. Leur remplissage donne un repère visuel immédiat ; les chiffres permettent de connaître les valeurs exactes.</p>
-    <p><strong>Points de vigueur (PV).</strong> La jauge de vigueur indique l'état de santé de votre personnage. Cliquez sur sa <strong>valeur numérique</strong> pour ouvrir une fenêtre permettant de saisir une nouvelle valeur, dans les limites autorisées.</p>
-    <p><strong>Points de Magie (PM).</strong> La jauge de magie fonctionne de la même manière. Cliquez sur sa <strong>valeur numérique</strong> pour ajuster les PM disponibles.</p>
-    <p><strong>Points de chance (PC).</strong> La jauge de chance affiche les points disponibles. Le bouton portant un <strong>trèfle</strong> <i class="fa-solid fa-clover co2prism-doc-icon" aria-hidden="true"></i> permet d'utiliser l'action de chance prévue par le système CO2.</p>
-    <p><strong>Dés de récupération (DR).</strong> La jauge orange indique la réserve de Dés de Récupération.</p>
-    <p><strong>Repos rapide et repos complet.</strong> Les boutons <strong>tasse</strong> <i class="fa-solid fa-mug-hot co2prism-doc-icon" aria-hidden="true"></i> et <strong>lit</strong> <i class="fa-solid fa-bed co2prism-doc-icon" aria-hidden="true"></i>, situés sur la ligne des points de vigueur, déclenchent respectivement le repos rapide et le repos complet du système CO2.</p>
-    <p><strong>Pour les rencontres :</strong> cette zone est différente pour les acteurs de type rencontre. Il est affiché le type de la rencontre, sa taille et une ligne Propriété qui permet d'afficher une info-bulle du texte écrit dans le bloc &quot;Propriété&quot; de la rencontre. La jauge de PV est identique sans les boutons de récupération rapide et complète.</p>
-    <h3 id="effets">3.3. États et effets</h3>
-    <p>Les effets associés à l'acteur sont affichés sous son nom. Ils permettent de repérer rapidement les situations qui l'affectent, sans ouvrir sa fiche. Survolez un effet en maintenant <strong>Maj (Shift)</strong> pour obtenir les informations de ce statut ou de cet effet. Si vous avez besoin de consulter ou de modifier davantage de détails, ouvrez la fiche de l'acteur depuis son portrait.</p>
-    <h3 id="cibles">3.4. Tokens ciblés</h3>
-    <!-- #image portrait avec plusieurs miniatures de tokens ciblés -->
-    <p><strong>Les miniatures des cibles.</strong> Lorsque vous ciblez des tokens sur la scène, leurs images apparaissent en bas du portrait de Prism. Seules <strong>vos propres cibles</strong> sont affichées : celles des autres joueurs et joueuses n'y figurent pas. Prism affiche jusqu'à <strong>cinq cibles par ligne</strong>, sur <strong>deux lignes</strong> au maximum. Si vous ciblez plus de dix tokens, les miniatures sont remplacées par le message <strong>« De nombreux tokens sont ciblés »</strong>.</p>
-    <p><strong>Décibler depuis Prism.</strong> Faites un <strong>clic droit</strong> sur une miniature pour retirer uniquement ce token de vos cibles. Les autres restent ciblés et les miniatures se réorganisent aussitôt.</p>
-    <p><strong>Le nom des cibles.</strong> Survolez une miniature pour voir le nom du token, lorsque ses paramètres de visibilité dans Foundry vous autorisent à le consulter. Un nom masqué sur la scène ne doit pas être révélé par Prism.</p>
-    </section>
-    <section class="co2prism-doc-chapter" hidden>
-    <h2 id="competences">4. Le volet Compétences</h2>
-    <p>Le volet <strong>Compétences</strong> <i class="fa-solid fa-user co2prism-doc-icon"></i> s'ouvre avec le bouton situé en bas à gauche du portrait. Il rassemble les sept caractéristiques de l'acteur : Agilité (AGI), Perception (PER), Constitution (CON), Charisme (CHA), Force (FOR), Intelligence (INT) et Volonté (VOL).</p>
-    <!-- #image volet Compétences ouvert avec les sept caractéristiques -->
-    <p>Chaque carré indique le <strong>modificateur</strong> de la caractéristique. Le nombre entre parenthèses correspond au <strong>nombre de bonus de compétence</strong> associés à cette caractéristique, et non à leur somme. Une caractéristique supérieure bénéficie d'une présentation visuelle particulière. En maintenant <strong>Maj (Shift)</strong> au survol, vous pouvez consulter le détail des bonus et leur provenance.</p>
-    <p>Pour réaliser un <strong>test de compétence</strong>, cliquez sur le carré correspondant. Prism utilise le jet du système CO2 et ouvre sa fenêtre habituelle de lancement du dé. Vous n'avez donc pas besoin d'ouvrir la fiche de votre acteur pour effectuer ce test.</p>
-    </section>
-    <section class="co2prism-doc-chapter" hidden>
-    <h2 id="equipements-voies">5. Les volets Équipements et Voies &amp; Capacités</h2>
-    <p>Ces deux volets s'ouvrent depuis les boutons situés en haut à gauche du portrait : <strong>Équipements</strong> <i class="fa-solid fa-suitcase co2prism-doc-icon"></i> et <strong>Voies &amp; Capacités</strong> <i class="fa-solid fa-award co2prism-doc-icon"></i>. Ils présentent les éléments de la fiche de votre acteur sous forme de vignettes illustrées. Cliquez sur une vignette pour ouvrir la fiche correspondante ; maintenez <strong>Maj (Shift)</strong> au survol pour consulter sa description dans une info-bulle.</p>
-    <!-- #image volets Équipements et Voies & Capacités ouverts -->
-    <p><strong>Voies &amp; Capacités.</strong> Les voies sont regroupées sous leur propre vignette. Un clic gauche sur l'image d'une voie permet de déplier ou replier les capacités associées. Un <strong>clic droit sur le bouton du volet</strong> permet de tout déplier ou tout replier. Les capacités apprises et non apprises sont distinguées visuellement.</p>
-    <p><strong>Équipements.</strong> Les objets sont classés en catégories identifiables par leurs icônes : <strong>armes</strong> <i class="fa-solid fa-axe co2prism-doc-icon"></i>, <strong>protections</strong> <i class="fa-solid fa-helmet-battle co2prism-doc-icon"></i>, <strong>consommables</strong> <i class="fa-solid fa-flask-round-potion co2prism-doc-icon"></i>, <strong>objets divers</strong> <i class="fa-solid fa-backpack co2prism-doc-icon"></i> et <strong>contenants</strong> <i class="fa-solid fa-treasure-chest co2prism-doc-icon"></i>. Cliquez sur l'icône d'une catégorie pour afficher ou masquer les objets qu'elle contient. Un <strong>clic droit sur le bouton du volet</strong> permet de déplier ou replier toutes les catégories à la fois.</p>
-    <p>Lorsque Prism est <a class="co2prism-doc-anchor-link" href="#personnaliser-prism">déverrouillé</a>, un <strong>clic droit sur la vignette d'un équipement</strong> permet de le masquer dans le volet. L'objet reste dans l'inventaire de l'acteur : il est simplement masqué de l'affichage normal du volet Équipement de Prism. Tant que l'interface est déverrouillée, les objets masqués restent visibles sous une apparence différente et peuvent être réaffichés par un nouveau clic droit sur l'image.</p>
-    <p>Lorsque Prism est <strong>verrouillé</strong>, un clic droit sur un équipement peut ouvrir un <strong>menu d'opérations</strong> différent en fonction de l'objet. Ce menu permet notamment d'<strong>équiper ou retirer</strong> un objet équipable, d'<strong>augmenter ou diminuer sa quantité</strong> lorsqu'il est empilable, ou d'<strong>utiliser une action</strong> associée à l'objet. Seules les opérations réellement disponibles sont proposées.</p>
-    <!-- #image menu contextuel d'un équipement avec plusieurs opérations disponibles -->
-    </section>
-    <section class="co2prism-doc-chapter" hidden>
-    <h2 id="combat">6. Le volet Combat</h2>
-    <p>Le volet <strong>Combat</strong> s'ouvre depuis le bouton situé autour du portrait <i class="fa-solid fa-hand-fist co2prism-doc-icon"></i>. Il réunit les valeurs de défense, les commandes de temps d'action, le déplacement, les raccourcis et les équipements tenus en main. Les fonctionnalités disponibles peuvent varier selon l'acteur et les <a class="co2prism-doc-anchor-link" href="#parametres">options du module</a>.</p>
-    <!-- #image volet Combat ouvert avec les raccourcis et les commandes visibles -->
-    <h3 id="defenses">6.1. Défenses</h3>
-    <p>Le volet affiche la <strong>Défense (DEF)</strong> et la <strong>réduction des dégâts (RD)</strong> de l'acteur. Ces valeurs sont consultables directement, sans ouvrir sa fiche.</p>
-    <p>Les boutons <strong>Défense partielle</strong> <i class="fa-solid fa-shield-halved co2prism-doc-icon"></i> et <strong>Défense totale</strong> <i class="fa-solid fa-shield co2prism-doc-icon"></i> permettent d'activer les postures correspondantes du système CO2. Cliquez sur la défense souhaitée pour l'activer ; cliquez de nouveau sur une défense active pour la retirer. Ces deux postures ne peuvent pas être actives simultanément. Lorsque la gestion des <a class="co2prism-doc-anchor-link" href="#durees-action">durées d'action</a> est activée, leur utilisation tient compte du temps nécessaire : <strong>A</strong> pour la défense partielle et <strong>L</strong> pour la défense totale.</p>
-    <h3 id="durees-action">6.2. La gestion des durées d'action</h3>
-    <p>Prism peut suivre les temps d'action disponibles pour votre acteur. Les quatre commandes <strong>A</strong>, <strong>L</strong>, <strong>AM</strong> et <strong>M</strong> se trouvent dans le volet Combat : <strong>A</strong> correspond à l'action d'Attaque, <strong>L</strong> à l'action Limitée, <strong>M</strong> au Mouvement et <strong>AM</strong> à un temps pouvant servir à l'Attaque ou au Mouvement. Les temps disponibles ne s'additionnent pas tous librement : Prism applique les possibilités de combinaison prévues par son budget d'action.</p>
-    <p>Un <strong>clic gauche</strong> sur <strong>A</strong>, <strong>L</strong> ou <strong>M</strong> dépense le temps correspondant lorsqu'il est disponible. Un <strong>clic droit</strong> ajoute un temps bonus du type choisi. Le bouton <strong>AM</strong> est particulier : son clic droit ajoute un bonus AM, mais son clic gauche ne dépense pas de temps. Les bonus peuvent ensuite être utilisés par les actions compatibles.</p>
-    <p>La <strong>ligne de budget de temps au-dessus</strong> représente les temps d'action encore disponibles, y compris les bonus. Elle permet de voir d'un coup d'œil les possibilités restantes durant le round. Le bouton de réinitialisation <i class="fa-solid fa-arrow-rotate-left co2prism-doc-icon"></i> de cette ligne remet manuellement le budget à son état initial. Le budget d'action est aussi automatiquement réinitialisé au début du tour de combat de l'acteur.</p>
-    <p>La consommation du budget est soit manuelle avec les trois boutons <strong>L</strong>, <strong>A</strong> et <strong>M</strong> soit automatique lorsque vous utilisez une action qui a un temps d'action défini. Par exemple, si vous attaquez avec l'action de votre arme et qu'elle est correctement configurée avec une action <strong>A</strong>, l'une de vos actions <strong>A</strong> ou <strong>AM</strong> sera automatiquement consommée. En cas d'erreur, vous pouvez vous rajouter une action supplémentaire avec un clic gauche sur le bon bouton ou en consommant manuellement l'action non dépensée en cliquant gauche sur le bon bouton.</p>
-    <p>Cette gestion peut être affichée en permanence, uniquement pendant les combats ou désactivée depuis les <a class="co2prism-doc-anchor-link" href="#parametres">options de Prism</a>. Lorsque le suivi est désactivé, les commandes et la ligne de temps correspondantes sont masquées.</p>
-    <!-- #image boutons A L AM M et ligne supérieure du budget d'action -->
-    <h3 id="mouvements">6.3. Les mouvements</h3>
-    <p>Le bloc <strong>Déplacement</strong> indique la capacité de mouvement de l'acteur en <strong>mètres</strong> et en <strong>cases</strong>. Selon les réglages et les temps disponibles, les valeurs affichées permettent de suivre le déplacement possible. Le nombre de cases dépend notamment de la grille de la scène et de la règle d'arrondi choisie dans les <a class="co2prism-doc-anchor-link" href="#parametres">options de Prism</a>. <strong>Le réglage du calcul des diagonales</strong> dans les options « core » de Foundry VTT est pris en compte pour le calcul du nombre de cases parcourues et dans le calcul des cases atteignables de la Zone Tactique.</p>
-    <p>Le bouton <strong>Zone tactique</strong> <i class="fa-solid fa-border-all co2prism-doc-icon"></i> permet de visualiser sur la scène les cases accessibles depuis la position de départ du token. La zone prend en compte les coûts de déplacement de la scène et les chemins possibles ; elle constitue une aide pour choisir votre trajet. La Zone Tactique ne prend en compte qu'une seule action de Mouvement à la fois. Cette fonctionnalité n'est pas possible pour les acteurs de plus de 1 case par 1 case.</p>
-    <!-- #image panneau supérieur du mouvement et zone tactique affichée sur la scène -->
-    <p>Lorsque le <strong>suivi du mouvement</strong> est disponible, la ligne de mouvement indique le nombre de cases restantes à parcourir avec une action de Mouvement ainsi qu'une représentation graphique de ce budget de déplacement. Il permet de suivre vos mouvements sur la scène, sans avoir à effectuer vous-même le décompte. Lorsqu'aucune action de Mouvement n'est disponible, la ligne devient inutilisable.</p>
-    <p>Au fur et à mesure que vous déplacez votre token, Prism actualise le parcours suivi. Le bouton <strong>Réinitialiser</strong> <i class="fa-solid fa-arrow-rotate-left co2prism-doc-icon"></i> annule le parcours en cours et ramène le token à son point de départ. Le bouton <strong>Valider</strong> <i class="fa-solid fa-check co2prism-doc-icon"></i> confirme le déplacement effectué. Lorsque le budget d'action est actif, cette validation consomme une action de mouvement <strong>M</strong> disponible ; si le parcours dépasse la capacité prévue pour ce mouvement, Prism signale le dépassement par un message sur la fenêtre. Il est toujours possible de dépasser son budget de cases pour pallier toutes les circonstances de jeu. Vous pouvez poursuivre avec un autre déplacement tant que les conditions le permettent.</p>
-    <p>Le suivi des déplacements est une aide qui suit les règles de CO2 mais il est toujours possible de déplacer son token de la distance que l'on souhaite, quel que soit le nombre d'actions de mouvement disponible.</p>
-    <h3 id="raccourcis-action">6.4. Les raccourcis d'action</h3>
-    <p>Les <strong>raccourcis d'action</strong> permettent de lancer depuis Prism les actions de votre acteur, sans rechercher à chaque fois leur commande dans la liste des actions de sa fiche. Ils occupent <strong>trois rangées</strong> de carrés dans le volet Combat. Chaque carré peut contenir une action ou un <strong>groupe d'actions</strong> ; les carrés d'un groupe donnent accès à plusieurs possibilités depuis un même emplacement.</p>
-    <p>Pour <strong>configurer un raccourci</strong>, <a class="co2prism-doc-anchor-link" href="#personnaliser-prism">déverrouillez Prism</a>, puis faites glisser <strong>une action depuis la fiche de l'acteur</strong> vers un carré libre. Les raccourcis acceptent les actions compatibles du système CO2, notamment celles associées aux capacités et aux équipements. Il faut déposer <strong>l'action</strong>, et non l'objet ou la capacité elle-même. Il n'est pas possible d'effectuer ce glisser-déposer depuis les volets Équipements ou Voies &amp; Capacités de Prism. Lorsque Prism est déverrouillé, vous pouvez aussi réorganiser les raccourcis par glisser-déposer, regrouper plusieurs actions dans un carré ou supprimer une entrée avec l'icône de poubelle <i class="fa-solid fa-trash co2prism-doc-icon"></i>.</p>
-    <!-- #image rangées de raccourcis en mode déverrouillé avec un groupe d'actions -->
-    <p>Un carré présente l'illustration de l'action et, selon celle-ci, des indications autour de l'image. Le <strong>type d'action</strong> dans l'angle haut-gauche, la <strong>durée de l'action</strong> dans l'angle haut-droit, son <strong>coût en PM</strong> dans le coin bas-droit ou ses <strong>utilisations restantes</strong> dans le coin bas-gauche. Une icône spéciale peut apparaître en haut au centre pour les activations ou désactivations automatiques en fonction des <a class="co2prism-doc-anchor-link" href="#mains">presets de mains</a> utilisés.
-    Une info-bulle sur les raccourcis d'action donne les informations &quot;techniques&quot; de l'action. Maintenez <strong>Maj (Shift)</strong> au survol pour consulter les informations complètes.</p>
-    <p>Lorsque Prism est verrouillé, cliquez gauche sur un raccourci pour utiliser l'action correspondante : Prism transmet la commande au système CO2. Un raccourci peut présenter différents <strong>états visuels</strong>. Une action peut être <strong>activée ou désactivée</strong>, <strong>disponible ou indisponible</strong> selon ses conditions, ou <strong>possédée ou absente</strong> selon les éléments de l'acteur. Un raccourci grisé qui conserve ses informations sur le contour n'a plus d'utilisation disponible. Par contre, un raccourci qui est grisé sans aucune information sur le contour est devenue absente de l'acteur (désapprise, supprimée…).</p>
-    <p><strong>Actions liées et conditionnelles.</strong> Certaines actions dépendent de l'activation d'une autre action pour être visible. Prism fait apparaître les actions liées sur une ligne au-dessus des raccourcis d'action. Une bordure rosée vous aide à repérer les actions qui possèdent des actions liées à son activation.</p>
-    <p><strong>Actions activables et sélections.</strong> Certaines actions peuvent être activées ou désactivées. En mode déverrouillé, le clic droit sur un raccourci activable et temporaire ouvre un menu permettant de définir son comportement lors de la sélection d'un presets de mains : <strong>activer</strong>, <strong>désactiver</strong> ou <strong>ne rien changer</strong>. Ce réglage s'applique au presets de mains concerné.</p>
-    <h3 id="mains">6.5. Les deux mains</h3>
-    <p>Deux carrés spécifiques représentent la <strong>main droite</strong> et la <strong>main gauche</strong> de l'acteur. Dans ces raccourcis, il est possible de glisser-déposer les actions provenant d'un équipement qui est équipable uniquement. Il faut glisser-déposer les actions de ses équipements depuis la liste des actions et non pas l'équipement directement sinon vous ne pourrez pas activer l'action de cet équipement depuis le raccourci. Il est aussi possible de déposer un bouclier, par exemple.</p>
-    <p>Prism tient compte des armes utilisant <strong>une main</strong>, <strong>deux mains</strong> ou pouvant être employées de l'une ou l'autre manière. Une arme tenue à deux mains occupe les emplacements nécessaires ; Prism adapte l'affichage des mains et évite les combinaisons incompatibles.</p>
-    <p>Les boutons <strong>1</strong>, <strong>2</strong> et <strong>3</strong>, situés sous les raccourcis des mains, permettent de passer entre <strong>trois sélections d'équipement</strong> ou <strong>presets de mains</strong>. Chaque sélection conserve sa propre configuration des mains. Le changement de sélection peut également activer ou désactiver automatiquement certaines actions, selon les règles définies pour leurs <a class="co2prism-doc-anchor-link" href="#raccourcis-action">raccourcis</a>. Vous pouvez ainsi préparer plusieurs façons de combattre et passer de l'une à l'autre pendant la partie. Le passage d'un preset à un autre déséquipe les équipements du preset quitté et équipe les équipements du nouveau preset.</p>
-    <p>Vous pouvez configurer Prism pour que certaines actions activables et temporaires s'activent ou se désactivent automatiquement lorsque vous sélectionnez un preset de mains. Cette possibilité fonctionne uniquement pour les actions qui sont activables et temporaires. Après avoir sélectionné un presets de mains, effectuez un clic droit sur le raccourci d'action et sélectionnez une option :</p>
-    <ul>
-    <li>Ne rien faire : c'est l'option de base. Cela signifie que si vous sélectionnez ce presets de mains, cette action ne sera pas modifiée automatiquement. Si elle est activée, elle restera activée. Si elle est désactivée elle restera désactivée. L'icône <i class="fa-solid fa-circle-dashed co2prism-doc-icon"></i> indique ce choix en haut au centre du raccourci.</li>
-    <li>Activation auto avec cette sélection d'arme : si vous choisissez cette option, lorsque vous sélectionnerez ce preset d'arme, l'action du raccourci sera automatiquement activée. L'icône verte <i class="fa-solid fa-toggle-large-on co2prism-doc-icon"></i> indique l'application de cette option sur le raccourci.</li>
-    <li>Désactivation auto avec cette sélection d'arme : si vous choisissez cette option, lorsque vous sélectionnerez ce preset d'arme, l'action du raccourci sera automatiquement désactivée. L'icône rouge <i class="fa-solid fa-toggle-large-off co2prism-doc-icon"></i> indique l'application de cette option sur le raccourci.</li>
-    </ul>
-    <p>Cette fonction est très pratique pour les actions qui s'appliquent en fonction du type d'arme que votre personnage manie comme arme de prédilection, par exemple. Si vous passez quelques instants à configurer vos raccourcis d'action correctement, vous n'oublierez plus d'activer une capacité lorsque vous changez d'arme.</p>
-    <!-- #image trois sélections de mains et exemple d'arme à deux mains -->
-    </section>
-    <section class="co2prism-doc-chapter" hidden>
-    <h2 id="parametres">7. Options de Prism dans Foundry</h2>
-    <p>Les options de CO2 Prism sont accessibles depuis les <strong>paramètres de Foundry</strong>, dans la configuration du module <strong>CO2 Prism</strong>. Elles permettent d'adapter l'affichage du <a class="co2prism-doc-anchor-link" href="#durees-action">budget d'actions</a> et du <a class="co2prism-doc-anchor-link" href="#mouvements">suivi du déplacement</a>, ainsi que la façon dont les cases de déplacement sont calculées pour leur affichage.</p>
-    <!-- #image paramètres de CO2 Prism dans la configuration des modules -->
-    <p><strong>Budget d'actions.</strong> Ce paramètre détermine quand Prism affiche et utilise la gestion des durées d'action : <strong>Toujours</strong>, <strong>Uniquement en combat</strong> ou <strong>Jamais</strong>. Avec « Uniquement en combat », la gestion s'active lorsqu'un combat est commencé.</p>
-    <p><strong>Suivi du déplacement.</strong> Vous pouvez choisir <strong>Toujours</strong>, <strong>Uniquement en combat</strong> ou <strong>Jamais</strong> pour le suivi des déplacements. En mode « Uniquement en combat », le suivi concerne les tokens participant au combat en cours. Ce réglage est indépendant de celui du budget d'actions : vous pouvez donc utiliser l'un sans nécessairement afficher l'autre.</p>
-    <p><strong>Arrondi des cases de déplacement.</strong> Ce paramètre définit comment arrondir le nombre de cases calculé à partir de la distance de déplacement et de la grille de la scène : <strong>au plus proche</strong>, <strong>au supérieur</strong> ou <strong>à l'inférieur</strong>. Il agit sur les cases affichées dans Prism, sans modifier la distance en mètres ni le budget d'actions.</p>
-    <p>Les réglages <strong>Budget d'actions</strong> et <strong>Suivi du déplacement</strong> sont <strong>personnels</strong> : chaque joueur ou joueuse peut choisir leur affichage pour sa propre interface. En revanche, l'<strong>arrondi des cases de déplacement</strong> est un <strong>réglage du monde</strong>, commun à l'ensemble de la table et configurable par la personne disposant des droits nécessaires.</p>
+      <h2 id="decouvrir-prism">1. Découvrir Prism</h2>
 
-    <p><strong>Documentation de CO2 Prism</strong><br />
-    La documentation est accessible depuis les paramètres du module dans Foundry. Elle dispose de trois boutons de navigation : <strong>Précédent</strong> et <strong>Suivant</strong> permettent de parcourir les chapitres, tandis que <strong>Retour</strong> ramène à la consultation précédente, même après avoir suivi plusieurs liens internes. L'historique est automatiquement effacé à la fermeture de la documentation.</p>
+      <h3 id="presentation">1.1. À quoi sert CO2 Prism ?</h3>
+      <p>
+        CO2 Prism est une barre d'interface pour <strong>Chroniques Oubliées 2</strong>, affichée directement sur la
+        scène de Foundry VTT. Elle rassemble les informations essentielles de votre acteur et vous permet d'effectuer de
+        nombreuses actions sans ouvrir constamment sa fiche.
+      </p>
+      <p>
+        Depuis Prism, vous pouvez consulter vos ressources, effectuer des tests de compétences, retrouver vos
+        équipements et vos voies et capacités, ou utiliser des
+        <a class="co2prism-doc-anchor-link" href="#raccourcis-action">raccourcis d'action</a>. Les volets s'ouvrent
+        autour du portrait pour garder les commandes à portée de main pendant la partie.
+      </p>
+      <p><strong>Un mot du créateur</strong></p>
+      <!-- Remplacer le texte réservé ci-dessous par le mot du créateur. -->
+      <blockquote>
+        <p>
+          <strong>[EMPLACEMENT RÉSERVÉ AU CRÉATEUR]</strong><br />
+          Présentation personnelle, intention du projet, remerciements ou informations de votre choix. Ce passage sera
+          rédigé par le créateur de CO2 Prism.
+        </p>
+      </blockquote>
 
-    <!-- CONCLUSION : ajouter ici le texte de conclusion du créateur. -->
+      <h3 id="afficher-prism">1.2. Afficher Prism</h3>
+      <p>
+        <strong>Activer le module.</strong> La personne qui administre le monde Foundry doit activer
+        <strong>CO2 Prism</strong> dans la gestion des modules. Prism est conçu pour un monde utilisant le système
+        <strong>Chroniques Oubliées 2</strong> sous Foundry VTT v14.
+      </p>
+      <p>
+        <strong>Afficher ou masquer la barre.</strong> Dans les contrôles des tokens de la scène, cliquez sur le bouton
+        représentant une <strong>gemme</strong> <i class="fa-solid fa-gem co2prism-doc-icon" aria-hidden="true"></i>
+        pour afficher ou masquer Prism. Ce choix concerne votre propre interface.
+      </p>
+      <p>
+        <strong>Choisir votre acteur.</strong> Sélectionnez un token sur la scène : Prism affiche alors les informations
+        de son acteur, si vous disposez des droits nécessaires pour les consulter. Si vous ne sélectionnez aucun token,
+        Prism peut afficher votre personnage attribué dans Foundry. Lorsque plusieurs tokens sont sélectionnés, aucun
+        acteur n'est suivi par cette sélection.
+      </p>
+      <!-- #image emplacement du bouton gemme dans les contrôles de tokens -->
+
+      <h3 id="reperer-interface">1.3. Présentation générale</h3>
+      <!-- #image capture globale de Prism avec tous les volets ouverts -->
+      <p>
+        <strong>Les trois thèmes.</strong> Prism adapte ses couleurs selon l'acteur suivi : <strong>bleu</strong> pour
+        un personnage, <strong>rouge</strong> pour une rencontre et <strong>jaune</strong> pour un compagnon. Vous
+        identifiez ainsi rapidement le type d'acteur affiché.
+      </p>
+      <p>
+        <strong>Le portrait et ses boutons.</strong> Le portrait occupe le centre de la barre. Les boutons placés autour
+        servent à ouvrir les volets et à
+        <a class="co2prism-doc-anchor-link" href="#personnaliser-prism">personnaliser l'interface</a>. Un double-clic
+        sur le portrait ouvre la fiche de l'acteur.
+      </p>
+      <p>
+        <strong>Les informations permanentes.</strong> Les jauges de ressources et les valeurs principales restent
+        visibles au centre de Prism. Leur fonctionnement est détaillé dans
+        <a class="co2prism-doc-anchor-link" href="#ressources">Ressources</a>. Les effets et statuts actifs sur l'acteur
+        sont affichés en permanence également.
+      </p>
+      <p>
+        <strong>Les quatre volets.</strong> Les boutons autour du portrait donnent accès aux
+        <strong>Compétences</strong>, aux <strong>Équipements</strong>, aux <strong>Voies &amp; Capacités</strong> et au
+        <strong>Combat</strong>. Vous pouvez les ouvrir selon vos besoins, sans quitter la scène.
+      </p>
+      <p>
+        <strong>Les commandes de combat et la ligne supérieure.</strong> Le
+        <a class="co2prism-doc-anchor-link" href="#combat">volet Combat</a> rassemble les commandes de défense, d'action
+        et de déplacement. Selon vos réglages et la situation, une ligne supplémentaire peut apparaître au-dessus de
+        Prism pour suivre les actions ou les cases parcourues.
+      </p>
+      <p>
+        <strong>Les info-bulles.</strong> Survolez les éléments de Prism pour consulter leurs indications. La plupart
+        des info-bulles sont affichées en maintenant <strong>Maj (Shift)</strong> pour éviter d'être dérangé lors de
+        l'utilisation. Si une info-bulle s'affiche sans maintenir <strong>Maj (Shift)</strong>, utiliser cette touche
+        affichera une info-bulle plus détaillée.
+      </p>
+    </section>
+
+    <section class="co2prism-doc-chapter" hidden>
+      <h2 id="personnaliser-prism">2. Personnaliser l'interface de Prism</h2>
+
+      <p>
+        Le bouton en forme d'<strong>engrenage</strong>
+        <i class="fa-solid fa-gear co2prism-doc-icon" aria-hidden="true"></i>, au coin inférieur droit du portrait,
+        permet de verrouiller ou de déverrouiller Prism. Le mode déverrouillé sert à adapter la barre à votre écran et à
+        préparer vos raccourcis.
+      </p>
+      <p>
+        <strong>Déplacer Prism.</strong> Une fois la barre déverrouillée, faites-la glisser depuis le portrait jusqu'à
+        l'emplacement souhaité. Vous pouvez ainsi la positionner sans gêner la lecture de la scène.
+      </p>
+      <p>
+        <strong>Modifier sa taille.</strong> Le curseur de taille apparaît sous le nom de l'acteur lorsque Prism est
+        déverrouillé. Déplacez-le pour agrandir ou réduire l'ensemble de l'interface et voir immédiatement le résultat.
+      </p>
+      <p>
+        <strong>Configurer les raccourcis.</strong> Le déverrouillage permet également de modifier les
+        <a class="co2prism-doc-anchor-link" href="#raccourcis-action">raccourcis d'action</a> du volet Combat. Leur
+        création, leur remplacement et leur utilisation sont expliqués dans la section correspondante.
+      </p>
+      <p>
+        <strong>Enregistrer les modifications.</strong> Cliquez de nouveau sur l'engrenage
+        <i class="fa-solid fa-gear co2prism-doc-icon" aria-hidden="true"></i> pour verrouiller Prism. La taille choisie
+        est enregistrée à ce moment-là ; la barre retrouve son mode d'utilisation normal. La taille et la position sont
+        des préférences personnelles, distinctes de la configuration des raccourcis de chaque acteur.
+      </p>
+      <!-- #image Prism déverrouillé avec curseur de taille visible -->
+    </section>
+
+    <section class="co2prism-doc-chapter" hidden>
+      <h2 id="centre-prism">3. Comprendre le noyau de Prism</h2>
+
+      <p>
+        Le noyau est la partie centrale de Prism : il reste visible lorsque vous refermez les volets et vous donne accès
+        aux informations les plus utiles de l'acteur suivi.
+      </p>
+
+      <h3 id="portrait">3.1. Portrait et identité</h3>
+      <p>
+        <strong>Le portrait.</strong> L'image centrale correspond à l'acteur actuellement suivi par Prism. Elle change
+        lorsque vous sélectionnez un autre token autorisé sur la scène. Un double clic gauche sur le portrait permet
+        d'ouvrir la feuille de l'acteur. Les images des
+        <a class="co2prism-doc-anchor-link" href="#cibles">tokens ciblés</a> apparaissent sur le portrait
+      </p>
+      <p>
+        <strong>Le nom.</strong> Le nom affiché permet de vérifier rapidement quel acteur vous utilisez. Pour les
+        rencontres, le nom est suivi du niveau de créature entre parenthèses
+      </p>
+
+      <h3 id="ressources">3.2. Ressources</h3>
+      <!-- #image gros plan des quatre jauges et des boutons de repos -->
+      <p>
+        Les jauges présentent les valeurs actuelles et maximales des ressources disponibles. Leur remplissage donne un
+        repère visuel immédiat ; les chiffres permettent de connaître les valeurs exactes.
+      </p>
+      <p>
+        <strong>Points de vigueur (PV).</strong> La jauge de vigueur indique l'état de santé de votre personnage.
+        Cliquez sur sa <strong>valeur numérique</strong> pour ouvrir une fenêtre permettant de saisir une nouvelle
+        valeur, dans les limites autorisées.
+      </p>
+      <p>
+        <strong>Points de Magie (PM).</strong> La jauge de magie fonctionne de la même manière. Cliquez sur sa
+        <strong>valeur numérique</strong> pour ajuster les PM disponibles.
+      </p>
+      <p>
+        <strong>Points de chance (PC).</strong> La jauge de chance affiche les points disponibles. Le bouton portant un
+        <strong>trèfle</strong> <i class="fa-solid fa-clover co2prism-doc-icon" aria-hidden="true"></i> permet
+        d'utiliser l'action de chance prévue par le système CO2.
+      </p>
+      <p><strong>Dés de récupération (DR).</strong> La jauge orange indique la réserve de Dés de Récupération.</p>
+      <p>
+        <strong>Repos rapide et repos complet.</strong> Les boutons <strong>tasse</strong>
+        <i class="fa-solid fa-mug-hot co2prism-doc-icon" aria-hidden="true"></i> et <strong>lit</strong>
+        <i class="fa-solid fa-bed co2prism-doc-icon" aria-hidden="true"></i>, situés sur la ligne des points de vigueur,
+        déclenchent respectivement le repos rapide et le repos complet du système CO2.
+      </p>
+      <p>
+        <strong>Pour les rencontres :</strong> cette zone est différente pour les acteurs de type rencontre. Il est
+        affiché le type de la rencontre, sa taille et une ligne Propriété qui permet d'afficher une info-bulle du texte
+        écrit dans le bloc &quot;Propriété&quot; de la rencontre. La jauge de PV est identique sans les boutons de
+        récupération rapide et complète.
+      </p>
+
+      <h3 id="effets">3.3. États et effets</h3>
+      <p>
+        Les effets associés à l'acteur sont affichés sous son nom. Ils permettent de repérer rapidement les situations
+        qui l'affectent, sans ouvrir sa fiche. Survolez un effet en maintenant <strong>Maj (Shift)</strong> pour obtenir
+        les informations de ce statut ou de cet effet. Si vous avez besoin de consulter ou de modifier davantage de
+        détails, ouvrez la fiche de l'acteur depuis son portrait.
+      </p>
+
+      <h3 id="cibles">3.4. Tokens ciblés</h3>
+      <!-- #image portrait avec plusieurs miniatures de tokens ciblés -->
+      <p>
+        <strong>Les miniatures des cibles.</strong> Lorsque vous ciblez des tokens sur la scène, leurs images
+        apparaissent en bas du portrait de Prism. Seules <strong>vos propres cibles</strong> sont affichées : celles des
+        autres joueurs et joueuses n'y figurent pas. Prism affiche jusqu'à <strong>cinq cibles par ligne</strong>, sur
+        <strong>deux lignes</strong> au maximum. Si vous ciblez plus de dix tokens, les miniatures sont remplacées par
+        le message <strong>« De nombreux tokens sont ciblés »</strong>.
+      </p>
+      <p>
+        <strong>Décibler depuis Prism.</strong> Faites un <strong>clic droit</strong> sur une miniature pour retirer
+        uniquement ce token de vos cibles. Les autres restent ciblés et les miniatures se réorganisent aussitôt.
+      </p>
+      <p>
+        <strong>Le nom des cibles.</strong> Survolez une miniature pour voir le nom du token, lorsque ses paramètres de
+        visibilité dans Foundry vous autorisent à le consulter. Un nom masqué sur la scène ne doit pas être révélé par
+        Prism.
+      </p>
+    </section>
+
+    <section class="co2prism-doc-chapter" hidden>
+      <h2 id="competences">4. Le volet Compétences</h2>
+
+      <p>
+        Le volet <strong>Compétences</strong> <i class="fa-solid fa-user co2prism-doc-icon"></i> s'ouvre avec le bouton
+        situé en bas à gauche du portrait. Il rassemble les sept caractéristiques de l'acteur : Agilité (AGI),
+        Perception (PER), Constitution (CON), Charisme (CHA), Force (FOR), Intelligence (INT) et Volonté (VOL).
+      </p>
+      <!-- #image volet Compétences ouvert avec les sept caractéristiques -->
+      <p>
+        Chaque carré indique le <strong>modificateur</strong> de la caractéristique. Le nombre entre parenthèses
+        correspond au <strong>nombre de bonus de compétence</strong> associés à cette caractéristique, et non à leur
+        somme. Une caractéristique supérieure bénéficie d'une présentation visuelle particulière. En maintenant
+        <strong>Maj (Shift)</strong> au survol, vous pouvez consulter le détail des bonus et leur provenance.
+      </p>
+      <p>
+        Pour réaliser un <strong>test de compétence</strong>, cliquez sur le carré correspondant. Prism utilise le jet
+        du système CO2 et ouvre sa fenêtre habituelle de lancement du dé. Vous n'avez donc pas besoin d'ouvrir la fiche
+        de votre acteur pour effectuer ce test.
+      </p>
+    </section>
+
+    <section class="co2prism-doc-chapter" hidden>
+      <h2 id="equipements-voies">5. Les volets Équipements et Voies &amp; Capacités</h2>
+
+      <p>
+        Ces deux volets s'ouvrent depuis les boutons situés en haut à gauche du portrait : <strong>Équipements</strong>
+        <i class="fa-solid fa-suitcase co2prism-doc-icon"></i> et <strong>Voies &amp; Capacités</strong>
+        <i class="fa-solid fa-award co2prism-doc-icon"></i>. Ils présentent les éléments de la fiche de votre acteur
+        sous forme de vignettes illustrées. Cliquez sur une vignette pour ouvrir la fiche correspondante ; maintenez
+        <strong>Maj (Shift)</strong> au survol pour consulter sa description dans une info-bulle.
+      </p>
+      <!-- #image volets Équipements et Voies & Capacités ouverts -->
+      <p>
+        <strong>Voies &amp; Capacités.</strong> Les voies sont regroupées sous leur propre vignette. Un clic gauche sur
+        l'image d'une voie permet de déplier ou replier les capacités associées. Un
+        <strong>clic droit sur le bouton du volet</strong> permet de tout déplier ou tout replier. Les capacités
+        apprises et non apprises sont distinguées visuellement.
+      </p>
+      <p>
+        <strong>Équipements.</strong> Les objets sont classés en catégories identifiables par leurs icônes :
+        <strong>armes</strong> <i class="fa-solid fa-axe co2prism-doc-icon"></i>, <strong>protections</strong>
+        <i class="fa-solid fa-helmet-battle co2prism-doc-icon"></i>, <strong>consommables</strong>
+        <i class="fa-solid fa-flask-round-potion co2prism-doc-icon"></i>, <strong>objets divers</strong>
+        <i class="fa-solid fa-backpack co2prism-doc-icon"></i> et <strong>contenants</strong>
+        <i class="fa-solid fa-treasure-chest co2prism-doc-icon"></i>. Cliquez sur l'icône d'une catégorie pour afficher
+        ou masquer les objets qu'elle contient. Un <strong>clic droit sur le bouton du volet</strong> permet de déplier
+        ou replier toutes les catégories à la fois.
+      </p>
+      <p>
+        Lorsque Prism est <a class="co2prism-doc-anchor-link" href="#personnaliser-prism">déverrouillé</a>, un
+        <strong>clic droit sur la vignette d'un équipement</strong> permet de le masquer dans le volet. L'objet reste
+        dans l'inventaire de l'acteur : il est simplement masqué de l'affichage normal du volet Équipement de Prism.
+        Tant que l'interface est déverrouillée, les objets masqués restent visibles sous une apparence différente et
+        peuvent être réaffichés par un nouveau clic droit sur l'image.
+      </p>
+      <p>
+        Lorsque Prism est <strong>verrouillé</strong>, un clic droit sur un équipement peut ouvrir un
+        <strong>menu d'opérations</strong> différent en fonction de l'objet. Ce menu permet notamment
+        d'<strong>équiper ou retirer</strong> un objet équipable, d'<strong>augmenter ou diminuer sa quantité</strong>
+        lorsqu'il est empilable, ou d'<strong>utiliser une action</strong> associée à l'objet. Seules les opérations
+        réellement disponibles sont proposées.
+      </p>
+      <p>
+        Dans le volet Voies et Capacités, un <strong>clic droit sur l'image d'une capacité</strong> ouvre un menu contextuel permettant d'exécuter directement les actions associées à cette capacité, sans avoir besoin de les ajouter aux raccourcis.</p>
+
+      <!-- #image menu contextuel d'un équipement avec plusieurs opérations disponibles -->
+    </section>
+
+    <section class="co2prism-doc-chapter" hidden>
+      <h2 id="combat">6. Le volet Combat</h2>
+
+      <p>
+        Le volet <strong>Combat</strong> s'ouvre depuis le bouton situé autour du portrait
+        <i class="fa-solid fa-hand-fist co2prism-doc-icon"></i>. Il réunit les valeurs de défense, les commandes de
+        temps d'action, le déplacement, les raccourcis et les équipements tenus en main. Les fonctionnalités disponibles
+        peuvent varier selon l'acteur et les
+        <a class="co2prism-doc-anchor-link" href="#parametres">options du module</a>.
+      </p>
+      <!-- #image volet Combat ouvert avec les raccourcis et les commandes visibles -->
+
+      <h3 id="defenses">6.1. Défenses</h3>
+      <p>
+        Le volet affiche la <strong>Défense (DEF)</strong> et la <strong>réduction des dégâts (RD)</strong> de l'acteur.
+        Ces valeurs sont consultables directement, sans ouvrir sa fiche.
+      </p>
+      <p>
+        Les boutons <strong>Défense partielle</strong> <i class="fa-solid fa-shield-halved co2prism-doc-icon"></i> et
+        <strong>Défense totale</strong> <i class="fa-solid fa-shield co2prism-doc-icon"></i> permettent d'activer les
+        postures correspondantes du système CO2. Cliquez sur la défense souhaitée pour l'activer ; cliquez de nouveau
+        sur une défense active pour la retirer. Ces deux postures ne peuvent pas être actives simultanément. Lorsque la
+        gestion des <a class="co2prism-doc-anchor-link" href="#durees-action">durées d'action</a> est activée, leur
+        utilisation tient compte du temps nécessaire : <strong>A</strong> pour la défense partielle et
+        <strong>L</strong> pour la défense totale.
+      </p>
+
+      <h3 id="durees-action">6.2. La gestion des durées d'action</h3>
+      <p>
+        Prism peut suivre les temps d'action disponibles pour votre acteur. Les quatre commandes <strong>A</strong>,
+        <strong>L</strong>, <strong>AM</strong> et <strong>M</strong> se trouvent dans le volet Combat :
+        <strong>A</strong> correspond à l'action d'Attaque, <strong>L</strong> à l'action Limitée, <strong>M</strong> au
+        Mouvement et <strong>AM</strong> à un temps pouvant servir à l'Attaque ou au Mouvement. Les temps disponibles ne
+        s'additionnent pas tous librement : Prism applique les possibilités de combinaison prévues par son budget
+        d'action.
+      </p>
+      <p>
+        Un <strong>clic gauche</strong> sur <strong>A</strong>, <strong>L</strong> ou <strong>M</strong> dépense le
+        temps correspondant lorsqu'il est disponible. Un <strong>clic droit</strong> ajoute un temps bonus du type
+        choisi. Le bouton <strong>AM</strong> est particulier : son clic droit ajoute un bonus AM, mais son clic gauche
+        ne dépense pas de temps. Les bonus peuvent ensuite être utilisés par les actions compatibles.
+      </p>
+      <p>
+        La <strong>ligne de budget de temps au-dessus</strong> représente les temps d'action encore disponibles, y
+        compris les bonus. Elle permet de voir d'un coup d'œil les possibilités restantes durant le round. Le bouton de
+        réinitialisation <i class="fa-solid fa-arrow-rotate-left co2prism-doc-icon"></i> de cette ligne remet
+        manuellement le budget à son état initial. Le budget d'action est aussi automatiquement réinitialisé au début du
+        tour de combat de l'acteur.
+      </p>
+      <p>
+        La consommation du budget est soit manuelle avec les trois boutons <strong>L</strong>, <strong>A</strong> et
+        <strong>M</strong> soit automatique lorsque vous utilisez une action qui a un temps d'action défini. Par
+        exemple, si vous attaquez avec l'action de votre arme et qu'elle est correctement configurée avec une action
+        <strong>A</strong>, l'une de vos actions <strong>A</strong> ou <strong>AM</strong> sera automatiquement
+        consommée. En cas d'erreur, vous pouvez vous rajouter une action supplémentaire avec un clic gauche sur le bon
+        bouton ou en consommant manuellement l'action non dépensée en cliquant gauche sur le bon bouton.
+      </p>
+      <p>
+        Cette gestion peut être affichée en permanence, uniquement pendant les combats ou désactivée depuis les
+        <a class="co2prism-doc-anchor-link" href="#parametres">options de Prism</a>. Lorsque le suivi est désactivé, les
+        commandes et la ligne de temps correspondantes sont masquées.
+      </p>
+      <!-- #image boutons A L AM M et ligne supérieure du budget d'action -->
+
+      <h3 id="mouvements">6.3. Les mouvements</h3>
+      <p>
+        Le bloc <strong>Déplacement</strong> indique la capacité de mouvement de l'acteur en <strong>mètres</strong> et
+        en <strong>cases</strong>. Selon les réglages et les temps disponibles, les valeurs affichées permettent de
+        suivre le déplacement possible. Le nombre de cases dépend notamment de la grille de la scène et de la règle
+        d'arrondi choisie dans les <a class="co2prism-doc-anchor-link" href="#parametres">options de Prism</a>.
+        <strong>Le réglage du calcul des diagonales</strong> dans les options « core » de Foundry VTT est pris en compte
+        pour le calcul du nombre de cases parcourues et dans le calcul des cases atteignables de la Zone Tactique.
+      </p>
+      <p>
+        Le bouton <strong>Zone tactique</strong> <i class="fa-solid fa-border-all co2prism-doc-icon"></i> permet de
+        visualiser sur la scène les cases accessibles depuis la position de départ du token. La zone prend en compte les
+        coûts de déplacement de la scène et les chemins possibles ; elle constitue une aide pour choisir votre trajet.
+        La Zone Tactique ne prend en compte qu'une seule action de Mouvement à la fois. Cette fonctionnalité n'est pas
+        possible pour les acteurs de plus de 1 case par 1 case.
+      </p>
+      <!-- #image panneau supérieur du mouvement et zone tactique affichée sur la scène -->
+      <p>
+        Lorsque le <strong>suivi du mouvement</strong> est disponible, la ligne de mouvement indique le nombre de cases
+        restantes à parcourir avec une action de Mouvement ainsi qu'une représentation graphique de ce budget de
+        déplacement. Il permet de suivre vos mouvements sur la scène, sans avoir à effectuer vous-même le décompte.
+        Lorsqu'aucune action de Mouvement n'est disponible, la ligne devient inutilisable.
+      </p>
+      <p>
+        Au fur et à mesure que vous déplacez votre token, Prism actualise le parcours suivi. Le bouton
+        <strong>Réinitialiser</strong> <i class="fa-solid fa-arrow-rotate-left co2prism-doc-icon"></i> annule le
+        parcours en cours et ramène le token à son point de départ. Le bouton <strong>Valider</strong>
+        <i class="fa-solid fa-check co2prism-doc-icon"></i> confirme le déplacement effectué. Lorsque le budget d'action
+        est actif, cette validation consomme une action de mouvement <strong>M</strong> disponible ; si le parcours
+        dépasse la capacité prévue pour ce mouvement, Prism signale le dépassement par un message sur la fenêtre. Il est
+        toujours possible de dépasser son budget de cases pour pallier toutes les circonstances de jeu. Vous pouvez
+        poursuivre avec un autre déplacement tant que les conditions le permettent.
+      </p>
+      <p>
+        Le suivi des déplacements est une aide qui suit les règles de CO2 mais il est toujours possible de déplacer son
+        token de la distance que l'on souhaite, quel que soit le nombre d'actions de mouvement disponible.
+      </p>
+
+      <h3 id="raccourcis-action">6.4. Les raccourcis d'action</h3>
+      <p>
+        Les <strong>raccourcis d'action</strong> permettent de lancer depuis Prism les actions de votre acteur, sans
+        rechercher à chaque fois leur commande dans la liste des actions de sa fiche. Ils occupent
+        <strong>trois rangées</strong> de carrés dans le volet Combat. Chaque carré peut contenir une action ou un
+        <strong>groupe d'actions</strong> ; les carrés d'un groupe donnent accès à plusieurs possibilités depuis un même
+        emplacement.
+      </p>
+      <p>
+        Pour <strong>configurer un raccourci</strong>,
+        <a class="co2prism-doc-anchor-link" href="#personnaliser-prism">déverrouillez Prism</a>, puis faites glisser
+        <strong>une action depuis la fiche de l'acteur</strong> vers un carré libre. Les raccourcis acceptent les
+        actions compatibles du système CO2, notamment celles associées aux capacités et aux équipements. Il faut déposer
+        <strong>l'action</strong>, et non l'objet ou la capacité elle-même. Il n'est pas possible d'effectuer ce
+        glisser-déposer depuis les volets Équipements ou Voies &amp; Capacités de Prism. Lorsque Prism est déverrouillé,
+        vous pouvez aussi réorganiser les raccourcis par glisser-déposer, regrouper plusieurs actions dans un carré ou
+        supprimer une entrée avec l'icône de poubelle <i class="fa-solid fa-trash co2prism-doc-icon"></i>.
+      </p>
+      <!-- #image rangées de raccourcis en mode déverrouillé avec un groupe d'actions -->
+      <p>
+        Un carré présente l'illustration de l'action et, selon celle-ci, des indications autour de l'image. Le
+        <strong>type d'action</strong> dans l'angle haut-gauche, la <strong>durée de l'action</strong> dans l'angle
+        haut-droit, son <strong>coût en PM</strong> dans le coin bas-droit ou ses
+        <strong>utilisations restantes</strong> dans le coin bas-gauche. Une icône spéciale peut apparaître en haut au
+        centre pour les activations ou désactivations automatiques en fonction des
+        <a class="co2prism-doc-anchor-link" href="#mains">presets de mains</a> utilisés. Une info-bulle sur les
+        raccourcis d'action donne les informations &quot;techniques&quot; de l'action. Maintenez
+        <strong>Maj (Shift)</strong> au survol pour consulter les informations complètes.
+      </p>
+      <p>
+        Lorsque Prism est verrouillé, cliquez gauche sur un raccourci pour utiliser l'action correspondante : Prism
+        transmet la commande au système CO2. Un raccourci peut présenter différents <strong>états visuels</strong>. Une
+        action peut être <strong>activée ou désactivée</strong>, <strong>disponible ou indisponible</strong> selon ses
+        conditions, ou <strong>possédée ou absente</strong> selon les éléments de l'acteur. Un raccourci grisé qui
+        conserve ses informations sur le contour n'a plus d'utilisation disponible. Par contre, un raccourci qui est
+        grisé sans aucune information sur le contour est devenue absente de l'acteur (désapprise, supprimée…).
+      </p>
+      <p>
+        <strong>Actions liées et conditionnelles.</strong> Certaines actions dépendent de l'activation d'une autre
+        action pour être visible. Prism fait apparaître les actions liées sur une ligne au-dessus des raccourcis
+        d'action. Une bordure rosée vous aide à repérer les actions qui possèdent des actions liées à son activation.
+      </p>
+      <p>
+        <strong>Actions activables et sélections.</strong> Certaines actions peuvent être activées ou désactivées. En
+        mode déverrouillé, le clic droit sur un raccourci activable et temporaire ouvre un menu permettant de définir
+        son comportement lors de la sélection d'un presets de mains : <strong>activer</strong>,
+        <strong>désactiver</strong> ou <strong>ne rien changer</strong>. Ce réglage s'applique au presets de mains
+        concerné.
+      </p>
+      <p><strong>Ajouter directement des Items aux raccourcis :</strong></p>
+      <p>
+        Vous pouvez aussi glisser-déposer directement des <strong>équipements, capacités et contenants</strong> dans les
+        carrés de raccourcis ou les groupes, même s'ils ne possèdent aucune action. Ces Items sont identifiables par une
+        icône <i class="fa-solid fa-eye-evil"></i> rouge en bas à droite des carrés de raccourci. Cela permet de garder
+        sous les yeux un objet important qui ne contient aucune action ou de configurer un seul raccourci pour un objet
+        qui possède un grand nombre d'actions.
+      </p>
+      <p>
+        Un clic gauche ouvre leur fiche, tandis qu'un clic droit affiche les options disponibles (équiper, modifier la
+        quantité, utiliser une action…).
+      </p>
+      <p>
+        Le survol affiche le nom de l'objet et la touche <strong>MAJ</strong> permet de consulter leur description
+        complète.
+      </p>
+
+
+      <h3 id="mains">6.5. Les deux mains</h3>
+      <p>
+        Deux carrés spécifiques représentent la <strong>main droite</strong> et la <strong>main gauche</strong> de
+        l'acteur. Dans ces raccourcis, il est possible de glisser-déposer les actions provenant d'un équipement qui est
+        équipable uniquement. Il faut glisser-déposer les actions de ses équipements depuis la liste des actions et non
+        pas l'équipement directement sinon vous ne pourrez pas activer l'action de cet équipement depuis le raccourci.
+        Il est aussi possible de déposer un bouclier, par exemple.
+      </p>
+      <p>
+        Prism tient compte des armes utilisant <strong>une main</strong>, <strong>deux mains</strong> ou pouvant être
+        employées de l'une ou l'autre manière. Une arme tenue à deux mains occupe les emplacements nécessaires ; Prism
+        adapte l'affichage des mains et évite les combinaisons incompatibles.
+      </p>
+      <p>
+        Les boutons <strong>1</strong>, <strong>2</strong> et <strong>3</strong>, situés sous les raccourcis des mains,
+        permettent de passer entre <strong>trois sélections d'équipement</strong> ou <strong>presets de mains</strong>.
+        Chaque sélection conserve sa propre configuration des mains. Le changement de sélection peut également activer
+        ou désactiver automatiquement certaines actions, selon les règles définies pour leurs
+        <a class="co2prism-doc-anchor-link" href="#raccourcis-action">raccourcis</a>. Vous pouvez ainsi préparer
+        plusieurs façons de combattre et passer de l'une à l'autre pendant la partie. Le passage d'un preset à un autre
+        déséquipe les équipements du preset quitté et équipe les équipements du nouveau preset.
+      </p>
+      <p><strong>Cas des armes polyvalentes :</strong></p>
+      <p>
+        Les armes polyvalentes peuvent être utilisées <strong>à une ou deux mains</strong>. Pour configurer leurs
+        raccourcis, déverrouillez Prism et déposez dans le même carré de main les deux actions correspondantes à l'arme,
+        si elles existent.
+      </p>
+      <p>
+        Une fois Prism verrouillé, seule l'action correspondant à la prise actuelle est affichée. Cliquez sur
+        <strong>l'icône de main <i class="fa-solid fa-hand"></i></strong> en bleu pour changer de prise.
+      </p>
+      <ul>
+        <li>
+          <strong>À deux mains :</strong> l'équipement de l'autre main est automatiquement déséquipé, mais reste visible
+          et grisé. L'icône <i class="fa-solid fa-hands-bound"></i> est affichée en bleu.
+        </li>
+        <li>
+          <strong>À une main :</strong> l'équipement de l'autre main est automatiquement rééquipé. L'icône
+          <i class="fa-solid fa-hand"></i> est affichée en bleu.
+        </li>
+      </ul>
+      <p>
+        <strong>Chaque preset mémorise la préférence de prise</strong> des armes polyvalentes pour la restaurer lorsque
+        vous y revenez.
+      </p>
+      <p><strong>Activer ou désactiver automatiquement une action en fonction du preset de mains choisi :</strong></p>
+      <p>
+        Vous pouvez configurer Prism pour que certaines actions activables et temporaires s'activent ou se désactivent
+        automatiquement lorsque vous sélectionnez un preset de mains. Cette possibilité fonctionne uniquement pour les
+        actions qui sont activables et temporaires. Après avoir sélectionné un presets de mains, effectuez un clic droit
+        sur le raccourci d'action et sélectionnez une option :
+      </p>
+      <ul>
+        <li>
+          Ne rien faire : c'est l'option de base. Cela signifie que si vous sélectionnez ce presets de mains, cette
+          action ne sera pas modifiée automatiquement. Si elle est activée, elle restera activée. Si elle est désactivée
+          elle restera désactivée. L'icône <i class="fa-solid fa-circle-dashed co2prism-doc-icon"></i> indique ce choix
+          en haut au centre du raccourci.
+        </li>
+        <li>
+          Activation auto avec cette sélection d'arme : si vous choisissez cette option, lorsque vous sélectionnerez ce
+          preset d'arme, l'action du raccourci sera automatiquement activée. L'icône verte
+          <i class="fa-solid fa-toggle-large-on co2prism-doc-icon"></i> indique l'application de cette option sur le
+          raccourci.
+        </li>
+        <li>
+          Désactivation auto avec cette sélection d'arme : si vous choisissez cette option, lorsque vous sélectionnerez
+          ce preset d'arme, l'action du raccourci sera automatiquement désactivée. L'icône rouge
+          <i class="fa-solid fa-toggle-large-off co2prism-doc-icon"></i> indique l'application de cette option sur le
+          raccourci.
+        </li>
+      </ul>
+      <p>
+        Cette fonction est très pratique pour les actions qui s'appliquent en fonction du type d'arme que votre
+        personnage manie comme arme de prédilection, par exemple. Si vous passez quelques instants à configurer vos
+        raccourcis d'action correctement, vous n'oublierez plus d'activer une capacité lorsque vous changez d'arme.
+      </p>
+      <!-- #image trois sélections de mains et exemple d'arme à deux mains -->
+    </section>
+
+    <section class="co2prism-doc-chapter" hidden>
+      <h2 id="parametres">7. Options de Prism dans Foundry</h2>
+
+      <p>
+        Les options de CO2 Prism sont accessibles depuis les <strong>paramètres de Foundry</strong>, dans la
+        configuration du module <strong>CO2 Prism</strong>. Elles permettent d'adapter l'affichage du
+        <a class="co2prism-doc-anchor-link" href="#durees-action">budget d'actions</a> et du
+        <a class="co2prism-doc-anchor-link" href="#mouvements">suivi du déplacement</a>, ainsi que la façon dont les
+        cases de déplacement sont calculées pour leur affichage.
+      </p>
+      <!-- #image paramètres de CO2 Prism dans la configuration des modules -->
+      <p>
+        <strong>Budget d'actions.</strong> Ce paramètre détermine quand Prism affiche et utilise la gestion des durées
+        d'action : <strong>Toujours</strong>, <strong>Uniquement en combat</strong> ou <strong>Jamais</strong>. Avec «
+        Uniquement en combat », la gestion s'active lorsqu'un combat est commencé.
+      </p>
+      <p>
+        <strong>Suivi du déplacement.</strong> Vous pouvez choisir <strong>Toujours</strong>,
+        <strong>Uniquement en combat</strong> ou <strong>Jamais</strong> pour le suivi des déplacements. En mode «
+        Uniquement en combat », le suivi concerne les tokens participant au combat en cours. Ce réglage est indépendant
+        de celui du budget d'actions : vous pouvez donc utiliser l'un sans nécessairement afficher l'autre.
+      </p>
+      <p>
+        <strong>Arrondi des cases de déplacement.</strong> Ce paramètre définit comment arrondir le nombre de cases
+        calculé à partir de la distance de déplacement et de la grille de la scène : <strong>au plus proche</strong>,
+        <strong>au supérieur</strong> ou <strong>à l'inférieur</strong>. Il agit sur les cases affichées dans Prism,
+        sans modifier la distance en mètres ni le budget d'actions.
+      </p>
+      <p>
+        Les réglages <strong>Budget d'actions</strong> et <strong>Suivi du déplacement</strong> sont
+        <strong>personnels</strong> : chaque joueur ou joueuse peut choisir leur affichage pour sa propre interface. En
+        revanche, l'<strong>arrondi des cases de déplacement</strong> est un <strong>réglage du monde</strong>, commun à
+        l'ensemble de la table et configurable par la personne disposant des droits nécessaires.
+      </p>
+      <p>
+        <strong>Documentation de CO2 Prism</strong><br />
+        La documentation est accessible depuis les paramètres du module dans Foundry. Elle dispose de trois boutons de
+        navigation : <strong>Précédent</strong> et <strong>Suivant</strong> permettent de parcourir les chapitres,
+        tandis que <strong>Retour</strong> ramène à la consultation précédente, même après avoir suivi plusieurs liens
+        internes. L'historique est automatiquement effacé à la fermeture de la documentation.
+      </p>
+      <!-- CONCLUSION : ajouter ici le texte de conclusion du créateur. -->
     </section>
   </article>
 </div>

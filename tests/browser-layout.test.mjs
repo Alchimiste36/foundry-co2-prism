@@ -531,6 +531,52 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
                 check(bounds.left >= -1 && bounds.top >= -1 && bounds.right <= innerWidth + 1
                   && bounds.bottom <= innerHeight + 1, 'Native effect tooltip stays inside screen');
               }
+              const anchor = document.createElement('span');
+              anchor.style.cssText = 'position:fixed;width:20px;height:20px;left:0px';
+              anchor.style.top = Math.round(innerHeight * 0.6) + 'px';
+              anchor.dataset.co2prismActionSummary = 'Court';
+              anchor.dataset.co2prismDescriptionHtml = '<p>Description détaillée</p>'.repeat(12);
+              root.append(anchor);
+              const above = () => tooltipElement.getBoundingClientRect().bottom <= anchor.getBoundingClientRect().top - 4;
+              const below = () => tooltipElement.getBoundingClientRect().top >= anchor.getBoundingClientRect().bottom + 4;
+              const activate = manager.activate.bind(manager);
+              let activations = 0;
+              manager.activate = (...args) => { activations++; activate(...args); };
+              hoverDescription(anchor);
+              check(above(), 'Short Prism tooltip prefers the space above');
+              for (let i = 0; i < 4; i++) anchor.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+              check(activations === 1, 'Pointer motion does not reactivate an unchanged tooltip');
+              shift('keydown', true);
+              check(above() && tooltipElement.textContent.includes('Description détaillée'), 'Shift tooltip stays above when it fits');
+              anchor.style.top = '2px';
+              anchor.style.left = (innerWidth - 20) + 'px';
+              anchor.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, shiftKey: true }));
+              check(below() && activations === 2 && tooltipElement.getBoundingClientRect().right <= innerWidth - 4,
+                'Moving a hovered anchor flips the tooltip below and clamps it at the right edge');
+              anchor.dataset.co2prismDescriptionHtml = '<p>Description très longue</p>'.repeat(200);
+              hoverDescription(anchor, true);
+              check(below() && tooltipElement.getBoundingClientRect().bottom <= innerHeight - 4 &&
+                tooltipElement.scrollHeight > tooltipElement.clientHeight, 'Oversized descriptions stay on screen with scrollable content');
+              const lockedTooltip = manager.lockTooltip();
+              anchor.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: lockedTooltip }));
+              lockedTooltip.scrollTop = 80;
+              check(lockedTooltip.matches('.locked-tooltip.co2prism-tooltip:popover-open') &&
+                lockedTooltip.getBoundingClientRect().top >= anchor.getBoundingClientRect().bottom + 4 &&
+                lockedTooltip.scrollTop > 0, 'Native locked tooltip retains Prism placement and scrolling');
+              lockedTooltip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+              check(!lockedTooltip.isConnected, 'Native locked tooltip still dismisses on context click');
+              const foreignAnchor = document.createElement('span');
+              foreignAnchor.style.cssText = 'position:fixed;top:50%;left:50%;width:20px;height:20px';
+              document.body.append(foreignAnchor);
+              manager.activate(foreignAnchor, { text: 'Foundry', direction: 'DOWN' });
+              hoverDescription(anchor, false);
+              manager.activate(foreignAnchor, { text: 'Foundry', direction: 'DOWN' });
+              bar.place(1, 1);
+              check(!tooltipElement.classList.contains('co2prism-tooltip') &&
+                tooltipElement.getBoundingClientRect().top >= foreignAnchor.getBoundingClientRect().bottom + 4,
+                'Prism leaves placement of the next Foundry tooltip alone');
+              manager.deactivate(); manager.activate = activate;
+              root.removeChild(anchor); foreignAnchor.remove();
               bar.position = saved.position; bar.layout();
               const iconAfter = icon.getBoundingClientRect();
               check(Math.abs(iconBefore.width - iconAfter.width) < 1 && Math.abs(iconBefore.height - iconAfter.height) < 1,
@@ -754,7 +800,9 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await bar.configWrites.get(actor);
           };
           await dropAt(1, 2, shieldPayload);
-          check(lengths() === "3,1,1", "Item direct refusé dans les raccourcis");
+          check(lengths() === "4,1,1" && cards(0)[2].querySelector(".fa-eye-evil") && !shield.system.equipped,
+            "Direct equipment shortcut leaves the Item unequipped");
+          cards(0)[2].querySelector(".co2prism-slot-remove").click(); await bar.configWrites.get(actor);
           for (const index of [0, 1]) {
             await dropAt(1, index, shieldPayload);
             const direct = cards(0)[index];
@@ -1129,7 +1177,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           hooks.get("updateItem")(item, { "system.actions": [] });
           check(!root.querySelector(".co2prism-action-active"), "Effet actif sur action ordinaire");
           const invalidBefore = JSON.stringify(actor.flags);
-          await dropAt(2, 1, { type: "Item", uuid: item.uuid });
+          await dropAt(2, 1, { type: "Item", uuid: "Actor.other.Item.owned" });
           check(JSON.stringify(actor.flags) === invalidBefore && lengths() === "4,2,1" && warnings.length > 0, "Drop invalide accepté");
           const executeBefore = calls.length;
           const staleBefore = shortcutCalls.length;
@@ -2896,6 +2944,92 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           check(pathSheets.join() === 'path12,path12rank1,path12rank2' &&
             pathHeader('off-paths').dataset.co2prismTooltipText && !pathHeader('off-paths').dataset.co2prismDescriptionHtml,
             'Native sheets open for both learning states, while Off-path only has its category label');
+          {
+            const capacity = actor.items.get('path12rank1');
+            const freeCapacity = actor.items.get('free');
+            const combatOpen = bar.configuration.panels.combat;
+            const wasLocked = settings.locked;
+            const savedUse = game.system.api.macros.useAction;
+            const itemExecutions = [];
+            const capacityAction = { indice: 0, actionName: 'Capacity operation', type: 'heal', actionTypeFinal: 'f' };
+            capacity.actions = capacity.system.actions = [capacityAction];
+            capacity.canUserModify = freeCapacity.canUserModify = () => true;
+            Object.assign(capacity.system, { frequency: 'daily', charges: { current: 2 } });
+            game.system.api.macros.useAction = async (...args) => itemExecutions.push(args);
+            const oldVisibility = JSON.stringify(actor.flags.co2prism.hiddenEquipment);
+            const oldDisclosure = JSON.stringify(actor.flags.co2prism.pathCollapsed);
+            settings.locked = false;
+            await bar.setPanelState('combat', true);
+            const payload = { type: 'Item', uuid: capacity.uuid };
+            const savedKeys = new Set(Object.keys(bar.configuration.shortcuts));
+            const terminal = () => bar.slotRows()[2].at(-1);
+            const fakeDrop = { dataTransfer: { getData: () => JSON.stringify(payload) },
+              preventDefault() {}, stopPropagation() {} };
+            check(await bar.dropSlot(fakeDrop, terminal(), document.createElement('div')), 'Direct capacity drops into a Combat slot');
+            const key = Object.keys(bar.configuration.shortcuts).find(id => !savedKeys.has(id));
+            const command = () => bar.combatRows[2].querySelector('.co2prism-slot-item-command');
+            const card = () => command().parentElement;
+            const previousSize = settings.size;
+            for (const size of ['S', 'M', 'L', 'XL']) {
+              settings.size = size; bar.layout();
+              const marker = card().querySelector('.fa-eye-evil');
+              const uses = card().querySelector('.co2prism-slot-uses');
+              const remove = card().querySelector('.co2prism-slot-remove');
+              const style = getComputedStyle(marker);
+              const x = marker.getBoundingClientRect().left;
+              check(style.bottom === '0px' && style.right === '0px' && style.color === 'rgb(255, 48, 48)' &&
+                !card().querySelector('.co2prism-slot-type, .co2prism-slot-time, .co2prism-slot-cost') &&
+                uses.textContent.trim() === '2' && x >= uses.getBoundingClientRect().right &&
+                x >= remove.getBoundingClientRect().right, size + ' direct Item eye does not overlap the badges ' +
+                JSON.stringify([style.bottom, style.right, style.color, x - uses.getBoundingClientRect().right,
+                  x - remove.getBoundingClientRect().right, marker.getBoundingClientRect().width, card().clientWidth]));
+            }
+            settings.size = previousSize; bar.layout();
+            const hover = (element, shiftKey) => element.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, shiftKey }));
+            hover(command(), false);
+            check(game.tooltip.tooltip.textContent.trim() === capacity.name, 'Direct Item normal tooltip only shows its name');
+            await settled();
+            hover(command(), true);
+            check(game.tooltip.tooltip.textContent.includes('Details of ' + capacity.id), 'Direct Item Shift tooltip shows the description');
+            command().click();
+            check(pathSheets.pop() === capacity.id, 'Direct Item left click opens its sheet');
+            for (const locked of [false, true]) {
+              settings.locked = locked; bar.updateLock();
+              check(equipment.hidden && contextClick(command()) && menu.matches(':popover-open') &&
+                operations().includes('Exécuter Capacity operation'), 'Direct menu works with Equipment closed, locked=' + locked);
+              bar.closeEquipmentMenu();
+              check(contextClick(pathCapacities('path12')[0]) && menu.matches(':popover-open'),
+                'Capacity context menu works in Paths, locked=' + locked);
+              const operation = [...menu.children].find(button => button.textContent === 'Exécuter Capacity operation');
+              operation.click(); operation.click(); await settled();
+              const emptyTile = pathPanel.querySelector('[data-item-id="free"]');
+              check(contextClick(emptyTile) && !menu.matches(':popover-open'), 'Capacity with no operations opens no menu');
+            }
+            check(itemExecutions.length === 2 && itemExecutions.every(([source, index]) => source === capacity.uuid && index === 0),
+              'Capacity operations use the original actor Item and run once');
+            check(JSON.stringify(actor.flags.co2prism.hiddenEquipment) === oldVisibility &&
+              JSON.stringify(actor.flags.co2prism.pathCollapsed) === oldDisclosure, 'Capacity right click changes no visibility or disclosure flags');
+            capacity.system.charges.current = 1; hooks.get('updateItem')(capacity);
+            check(card().querySelector('.co2prism-slot-uses').textContent.trim() === '1', 'Direct Item uses refresh after native update');
+            settings.locked = false; bar.updateLock();
+            const groupSlot = bar.slotRows()[2].find(slot => slot.key === key);
+            check(await bar.saveShortcut(actor, undefined, groupSlot, { kind: 'item', itemId: freeCapacity.id }), 'Direct Items group together');
+            hover(command(), false);
+            check(!card().querySelector('.fa-eye-evil, .co2prism-slot-uses') && game.tooltip.tooltip.querySelector('.fa-eye-evil'),
+              'Grouped Item keeps its marker in the tooltip only');
+            check(contextClick(command()) && menu.matches(':popover-open'), 'Grouped Item opens the same menu');
+            [...menu.children].find(button => button.textContent === 'Exécuter Capacity operation').click();
+            await settled();
+            check(itemExecutions.length === 3 && itemExecutions.at(-1)[0] === capacity.uuid, 'Grouped Item menu executes its own native action');
+            for (let i = 0; i < 2; i++) {
+              card().querySelector('.co2prism-slot-remove').click(); await bar.configWrites.get(actor);
+            }
+            game.system.api.macros.useAction = savedUse;
+            delete capacity.actions; delete capacity.system.actions; delete capacity.system.frequency; delete capacity.system.charges;
+            delete capacity.canUserModify; delete freeCapacity.canUserModify;
+            settings.locked = wasLocked; bar.updateLock();
+            await bar.setPanelState('combat', combatOpen);
+          }
           for (const size of ['S', 'M', 'L', 'XL']) {
             settings.size = size; bar.layout();
             const skillsOpen = !bar.skillsPanel.hidden;

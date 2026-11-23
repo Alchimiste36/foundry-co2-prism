@@ -675,7 +675,16 @@ class PrismBar {
     });
     this.pathsPanel.addEventListener("contextmenu", event => {
       const header = event.target.closest(".co2prism-path-header");
-      if (!header || this.pathsPanel.hidden) return;
+      if (this.pathsPanel.hidden) return;
+      if (!header) {
+        const tile = event.target.closest(".co2prism-path-tile[data-item-id]");
+        if (!tile || tile.closest("[hidden]")) return;
+        const item = this.actor?.items.get(tile.dataset.itemId);
+        if (item?.type === "capacity" && item.uuid === tile.dataset.itemUuid) {
+          this.openEquipmentMenu(event, item, tile, { surface: "capacity" });
+        }
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       void this.togglePathGroups(header.closest(".co2prism-path-group").dataset.pathKey);
@@ -871,13 +880,19 @@ class PrismBar {
     return this.actor?.items.get(tile.dataset.itemId);
   }
 
-  equipmentOperationItem({ actor, token, itemId }, config = this.readConfiguration(actor)) {
-    if (this.actor !== actor || this.token !== token || !game.settings.get(MODULE, "locked")
-      || !config.panels.equipements || config.hiddenEquipment.has(itemId)) return null;
+  equipmentOperationItem({ actor, token, itemId, item: expected, surface, slotKey, actionIndex }, config = this.readConfiguration(actor)) {
+    if (!actor || this.actor !== actor || this.token !== token
+      || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))) return null;
     const item = actor.items?.get(itemId);
-    if (!item || !["equipment", "container"].includes(item.type) || actor.containedItemUuids?.has(item.uuid)
-      || !(game.user.isGM || actor.testUserPermission(game.user, "OWNER"))
-      || !item.canUserModify?.(game.user, "update")) return null;
+    if (!item || (expected && item !== expected) || !item.canUserModify?.(game.user, "update")) return null;
+    if (surface === "shortcut") {
+      if (!config.panels.combat || this.handKey(slotKey)
+        || this.resolveShortcutItem(actor, this.shortcutReferenceAt(config, slotKey, actionIndex)) !== item) return null;
+    } else if (surface === "capacity") {
+      if (!config.panels.voies || this.resolveShortcutItem(actor, { kind: "item", itemId }) !== item
+        || item.type !== "capacity") return null;
+    } else if (!game.settings.get(MODULE, "locked") || !config.panels.equipements || config.hiddenEquipment.has(itemId)
+      || !["equipment", "container"].includes(item.type) || actor.containedItemUuids?.has(item.uuid)) return null;
     return item;
   }
 
@@ -912,10 +927,12 @@ class PrismBar {
     if (this.equipmentMenu?.matches(":popover-open")) this.equipmentMenu.hidePopover();
   }
 
-  openEquipmentMenu(event, item) {
+  openEquipmentMenu(event, item, anchor = event.target.closest(".co2prism-equipment-tile"), location) {
     this.closeEquipmentMenu();
-    const context = { actor: this.actor, token: this.token, itemId: item.id, equipment: true };
-    if (this.busyEquipment || this.busyAction || this.equipmentOperationItem(context) !== item) return;
+    const context = { actor: this.actor, token: this.token, itemId: item.id, item, equipment: true, ...location };
+    if (location) { event.preventDefault(); event.stopPropagation(); }
+    if (!anchor || this.busyEquipment || this.busyAction || this.changingHands.has(context.actor)
+      || this.equipmentOperationItem(context) !== item) return;
     const operations = this.equipmentOperations(context.actor, item);
     if (!operations.length) return;
     event.preventDefault();
@@ -933,7 +950,7 @@ class PrismBar {
       });
       return button;
     }));
-    this.showActionPopover(menu, event, event.target.closest(".co2prism-equipment-tile"));
+    this.showActionPopover(menu, event, anchor);
   }
 
   showActionPopover(menu, event, anchor) {
@@ -947,7 +964,7 @@ class PrismBar {
   }
 
   async runEquipmentOperation(event, context, chosen) {
-    if (this.busyEquipment || this.busyAction) return;
+    if (this.busyEquipment || this.busyAction || this.changingHands.has(context.actor)) return;
     const item = this.equipmentOperationItem(context);
     const operation = item && this.equipmentOperations(context.actor, item)
       .find(entry => entry.key === chosen.key && entry.action === chosen.action);
@@ -991,13 +1008,14 @@ class PrismBar {
     this.element.addEventListener("pointerout", event => {
       if (this.element.contains(event.relatedTarget)) return;
       this.tooltipHover = null;
-      this.clearDescriptiveTooltip();
+      this.clearDescriptiveTooltip(false);
     }, { signal });
     for (const type of ["keydown", "keyup"]) window.addEventListener(type, event => {
       if (event.key === "Shift") this.syncDescriptiveTooltip(event.shiftKey);
     }, { capture: true, signal });
     window.addEventListener("blur", () => this.syncDescriptiveTooltip(false), { signal });
     this.tooltipObserver = new MutationObserver(() => this.syncDescriptiveTooltip());
+    this.tooltipSizeObserver = new ResizeObserver(() => this.positionDescriptiveTooltip(game.tooltip, this.descriptiveTooltip));
     this.tooltipObserver.observe(this.element, {
       subtree: true, childList: true, attributes: true,
       attributeFilter: ["hidden", "data-co2prism-description", "data-co2prism-description-html",
@@ -1005,10 +1023,12 @@ class PrismBar {
     });
   }
 
-  clearDescriptiveTooltip() {
+  clearDescriptiveTooltip(dismissLocked = true) {
     const manager = globalThis.game?.tooltip;
     if (this.descriptiveTooltip && manager?.element === this.descriptiveTooltip.node) manager.deactivate();
     this.descriptiveTooltip = null;
+    this.tooltipSizeObserver?.disconnect();
+    if (!dismissLocked) return;
     for (const tooltip of globalThis.document?.querySelectorAll?.(".locked-tooltip.co2prism-description") ?? []) {
       manager?.dismissLockedTooltip?.(tooltip);
     }
@@ -1024,23 +1044,58 @@ class PrismBar {
     const html = node?.dataset.co2prismImmediateHtml
       ?? (shift ? node?.dataset.co2prismDescriptionHtml : node?.dataset.co2prismActionSummaryHtml);
     if ((!text && !html) || !node?.isConnected || !this.element.contains(node) || !node.getClientRects().length) {
-      if (this.descriptiveTooltip) this.clearDescriptiveTooltip();
+      if (this.descriptiveTooltip) this.clearDescriptiveTooltip(false);
       return;
     }
     if (!manager) return;
     const previous = this.descriptiveTooltip;
-    if (previous?.node === node && previous.text === text && previous.html === html && manager.element === node) return;
-    if (previous?.node !== node) this.clearDescriptiveTooltip();
-    manager.activate(node, { ...(html ? { html } : { text }), cssClass: "co2prism-tooltip co2prism-description" });
+    if (previous?.node === node && previous.text === text && previous.html === html && manager.element === node) {
+      this.positionDescriptiveTooltip(manager, previous);
+      return;
+    }
+    if (previous?.node !== node) this.clearDescriptiveTooltip(false);
+    manager.activate(node, { ...(html ? { html } : { text }), direction: "UP", cssClass: "co2prism-tooltip co2prism-description" });
     this.descriptiveTooltip = { node, text, html };
+    this.positionDescriptiveTooltip(manager, this.descriptiveTooltip);
+    if (manager.tooltip?.classList.contains("co2prism-tooltip")) this.tooltipSizeObserver?.observe(manager.tooltip);
+  }
+
+  positionDescriptiveTooltip(manager, state) {
+    const tooltip = manager?.tooltip;
+    if (!state?.node.isConnected || manager?.element !== state.node
+      || !tooltip?.classList.contains("co2prism-tooltip")) return;
+    const { left, top, bottom, width } = state.node.getBoundingClientRect();
+    const { innerWidth, innerHeight } = tooltip.ownerDocument.defaultView;
+    const geometry = [left, top, bottom, width, innerWidth, innerHeight];
+    if (state.geometry?.every((value, index) => value === geometry[index])
+      && state.width === tooltip.offsetWidth && state.height === tooltip.offsetHeight) return;
+
+    // Foundry borne la direction demandée sans la retourner.
+    const margin = 5;
+    tooltip.style.removeProperty("--co2prism-tooltip-height");
+    const above = top - margin * 2;
+    const below = innerHeight - bottom - margin * 2;
+    const naturalHeight = tooltip.offsetHeight;
+    const up = naturalHeight <= above || (naturalHeight > below && above >= below);
+    const available = up ? above : below;
+    if (naturalHeight > available && available >= 48) {
+      tooltip.style.setProperty("--co2prism-tooltip-height", `${available}px`);
+    }
+    const height = tooltip.offsetHeight, tooltipWidth = tooltip.offsetWidth;
+    const x = Math.max(margin, Math.min(left + (width - tooltipWidth) / 2, innerWidth - tooltipWidth - margin));
+    const y = Math.max(margin, Math.min(up ? top - height - margin : bottom + margin, innerHeight - height - margin));
+    Object.assign(tooltip.style, { top: `${y}px`, left: `${x}px`, bottom: "", right: "" });
+    Object.assign(state, { geometry, width: tooltipWidth, height });
   }
 
   itemTooltipDescription(item) {
     return item.testUserPermission(game.user, "OBSERVER") ? item.system.description : "";
   }
 
-  async prepareItemTooltip(tile, item, description, label = item.name) {
-    const name = `<strong>${foundry.utils.escapeHTML(label)}</strong>`;
+  async prepareItemTooltip(tile, item, description, label = item.name, groupedItem = false) {
+    const icon = groupedItem ? '<i class="fa-solid fa-eye-evil co2prism-slot-item-icon" aria-hidden="true"></i> ' : "";
+    const name = `<strong>${icon}${foundry.utils.escapeHTML(label)}</strong>`;
+    if (groupedItem) tile.dataset.co2prismActionSummaryHtml = name;
     tile.dataset.co2prismDescriptionHtml = name;
     if (!description) return;
     try {
@@ -1863,27 +1918,31 @@ class PrismBar {
   }
 
   shortcutEntry(entry, references) {
-    const { actions, source, indice, itemId, ...slot } = entry;
-    if (references.length === 1) {
-      const { source, indice, itemId } = references[0];
-      return { ...slot, source, indice, itemId,
-        ...(actions ? { actions: new foundry.data.operators.ForcedDeletion() } : {}) };
+    const { actions, source, indice, itemId, kind, ...slot } = entry;
+    const members = references.map(reference => reference?.kind === "item"
+      ? { kind: "item", itemId: reference.itemId }
+      : { source: reference?.source, indice: reference?.indice, itemId: reference?.itemId });
+    const next = members.length === 1 ? members[0] : { actions: members };
+    for (const [key, previous] of Object.entries({ actions, source, indice, itemId, kind })) {
+      if (previous !== undefined && !Object.hasOwn(next, key)) next[key] = new foundry.data.operators.ForcedDeletion();
     }
-    return { ...slot, actions: references.map(reference =>
-      ({ source: reference?.source, indice: reference?.indice, itemId: reference?.itemId })),
-      ...(source !== undefined || indice !== undefined || itemId !== undefined
-        ? { source: new foundry.data.operators.ForcedDeletion(),
-          indice: new foundry.data.operators.ForcedDeletion(),
-          itemId: new foundry.data.operators.ForcedDeletion() } : {}) };
+    return { ...slot, ...next };
   }
 
   sameShortcutReference(a, b) {
-    return Boolean(a && b && a.indice === b.indice && (a.itemId || null) === (b.itemId || null)
+    return Boolean(a && b && a.kind === b.kind && a.indice === b.indice && (a.itemId || null) === (b.itemId || null)
       && (a.itemId || a.source === b.source));
   }
 
+  resolveShortcutItem(actor, reference) {
+    if (reference?.kind !== "item" || !reference.itemId) return null;
+    const item = actor?.items?.get(reference.itemId);
+    return item && item.parent === actor && ["equipment", "capacity", "container"].includes(item.type)
+      && item.testUserPermission?.(game.user, "LIMITED") ? item : null;
+  }
+
   resolveShortcut(actor, reference, allowMovedHandAction = false) {
-    if (!actor || !reference || typeof reference.source !== "string" || !Number.isSafeInteger(reference.indice)
+    if (!actor || !reference || reference.kind === "item" || typeof reference.source !== "string" || !Number.isSafeInteger(reference.indice)
       || reference.indice < 0) return null;
     try {
       const item = reference.itemId ? actor.items?.get(reference.itemId) : null;
@@ -2175,6 +2234,11 @@ class PrismBar {
 
   shortcutFromDrop(actor, data) {
     try {
+      if (data?.type === "Item" && typeof data.uuid === "string") {
+        const item = [...(actor.items?.values() ?? [])].find(owned => owned.uuid === data.uuid);
+        const reference = { kind: "item", itemId: item?.id };
+        return this.resolveShortcutItem(actor, reference) ? reference : null;
+      }
       if (data?.type === "co.attack") {
         const item = [...(actor.items?.values() ?? [])].find(entry => entry.uuid === data.uuid && entry.type === "attack");
         const action = item?.actions?.[0];
@@ -2218,6 +2282,7 @@ class PrismBar {
     const missing = (reference, hand) => {
       try {
         if (hand && reference?.kind === "equipment") return Boolean(reference.itemId && !actor.items.get(reference.itemId));
+        if (!hand && reference?.kind === "item") return !reference.itemId || !actor.items.get(reference.itemId);
         if (!reference || typeof reference.source !== "string" || !Number.isSafeInteger(reference.indice) || reference.indice < 0) return true;
         const item = reference.itemId ? actor.items.get(reference.itemId) : null;
         if (reference.itemId && !item) return true;
@@ -2358,7 +2423,8 @@ class PrismBar {
     }
     let resized = false;
     const rows = allRows.map(row => row.filter(slot => !game.settings.get(MODULE, "locked")
-      || slot.hand || this.shortcutReferences(slot.reference).some(reference => this.resolveShortcut(this.actor, reference))));
+      || slot.hand || this.shortcutReferences(slot.reference).some(reference =>
+        this.resolveShortcutItem(actor, reference) || this.resolveShortcut(actor, reference))));
     for (const [index, row] of rows.entries()) {
       const scroll = this.combatRows[index].scrollLeft;
       const nodes = row.flatMap(slot => {
@@ -2384,6 +2450,7 @@ class PrismBar {
         const editContext = { actor: this.actor, token: this.token, preset: slot.hand ? this.configuration.activePreset : undefined,
           key: slot.key, reference: slot.reference };
         const resolved = references.length === 1 && !direct ? this.resolveShortcut(this.actor, references[0], editable && Boolean(slot.hand)) : null;
+        const itemShortcut = !slot.hand && !group ? this.resolveShortcutItem(actor, references[0]) : null;
         const add = (tag, cls, text) => {
           const child = document.createElement(tag); child.className = cls;
           if (text !== undefined) child.textContent = text;
@@ -2503,7 +2570,9 @@ class PrismBar {
             const reference = references[index];
             const context = { ...editContext, actionIndex: index };
             const member = this.resolveShortcut(this.actor, reference, editable && Boolean(slot.hand));
-            if (member) {
+            const item = !slot.hand && this.resolveShortcutItem(actor, reference);
+            if (item) this.renderItemShortcut(quadrant, item, context);
+            else if (member) {
               const { action, item } = member;
               const image = this.shortcutImage(action, item);
               if (image) {
@@ -2560,6 +2629,8 @@ class PrismBar {
             node.classList.add("co2prism-hand-unequipped");
             if (handPair) node.setAttribute("aria-disabled", "true");
           }
+        } else if (itemShortcut) {
+          this.renderItemShortcut(node, itemShortcut, editContext);
         } else if (slot.reference !== undefined && !resolved) {
           node.classList.add("co2prism-slot-unavailable");
           const unavailable = game.i18n.localize("CO2PRISM.Combat.UnavailableSlot");
@@ -2634,6 +2705,8 @@ class PrismBar {
       return item && [item.name, item.img, item.system.equipped, item.system.description, item.isOwner];
     };
     const visual = (reference, hand = false) => {
+      const direct = !hand && this.resolveShortcutItem(this.actor, reference);
+      if (direct) return [direct.name, direct.img, direct.isOwner, this.itemTooltipDescription(direct), this.itemShortcutUses(direct)];
       const resolved = this.resolveShortcut(this.actor, reference, editable && hand);
       if (!resolved) return null;
       const { action, item } = resolved;
@@ -2828,6 +2901,60 @@ class PrismBar {
     this.showActionPopover(menu, event, anchor);
   }
 
+  renderItemShortcut(node, item, { actor, token, key, actionIndex }) {
+    const grouped = actionIndex !== undefined;
+    const image = document.createElement("img");
+    image.className = "co2prism-slot-image";
+    image.src = item.img || "icons/svg/item-bag.svg";
+    image.alt = "";
+    image.draggable = false;
+    node.append(image);
+    if (!grouped) {
+      const icon = document.createElement("i");
+      icon.className = "fa-solid fa-eye-evil co2prism-slot-item-icon co2prism-slot-item-marker";
+      icon.setAttribute("aria-hidden", "true");
+      node.append(icon);
+      const uses = this.itemShortcutUses(item);
+      if (uses) this.renderShortcutUses(node, uses, false);
+    }
+    node.dataset.co2prismTooltipText = item.name;
+    node.dataset.co2prismActionSummary = item.name;
+    void this.prepareItemTooltip(node, item, this.itemTooltipDescription(item), item.name, grouped);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "co2prism-quadrant-command co2prism-slot-item-command";
+    button.setAttribute("aria-label", item.name);
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      if (event.detail > 1 || this.slotDrag || this.suppressShortcutClick || this.actor !== actor || this.token !== token) return;
+      const config = this.readConfiguration(actor);
+      if (config.panels.combat && this.resolveShortcutItem(actor, this.shortcutReferenceAt(config, key, actionIndex)) === item) {
+        void this.openItemSheet(item);
+      }
+    });
+    button.addEventListener("contextmenu", event => {
+      if (this.actor === actor && this.token === token) {
+        this.openEquipmentMenu(event, item, node, { surface: "shortcut", slotKey: key, actionIndex });
+      }
+    });
+    node.append(button);
+  }
+
+  renderShortcutUses(node, uses, action = true) {
+    const badge = document.createElement("span");
+    badge.className = "co2prism-slot-uses";
+    badge.textContent = `${uses.value} `;
+    badge.dataset.co2prismUses = uses.type;
+    if (action) {
+      badge.dataset.co2prismTooltipText = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
+      if (uses.value === 0) node.classList.add("co2prism-action-exhausted");
+    }
+    const icon = document.createElement("i");
+    icon.className = `fa-solid fa-${uses.icon}`;
+    badge.append(icon);
+    node.append(badge);
+  }
+
   renderShortcutVisual(node, { action, item }, reference) {
     const read = key => { try { return action[key]; } catch { return undefined; } };
     const add = (tag, className, text) => {
@@ -2850,14 +2977,7 @@ class PrismBar {
     const time = { l: "L", a: "A", am: "AM", m: "M", f: "G" }[actionTime];
     if (time) add("span", `co2prism-slot-time co2prism-slot-time-${time}`, time);
     const uses = this.shortcutUses(action, item);
-    if (uses) {
-      const badge = add("span", "co2prism-slot-uses", `${uses.value} `);
-      badge.dataset.co2prismUses = uses.type;
-      badge.dataset.co2prismTooltipText = game.i18n.localize(`CO2PRISM.Combat.Uses_${uses.type}`);
-      const icon = document.createElement("i");
-      icon.className = `fa-solid fa-${uses.icon}`; badge.append(icon);
-      if (uses.value === 0) node.classList.add("co2prism-action-exhausted");
-    }
+    if (uses) this.renderShortcutUses(node, uses);
     const cost = read("manaCost");
     if (Number.isFinite(cost) && cost > 0) {
       const badge = add("span", "co2prism-slot-cost", `${cost} `);
@@ -3334,6 +3454,21 @@ class PrismBar {
     }
   }
 
+  itemShortcutUses(item) {
+    const model = item.system;
+    const valid = value => Number.isFinite(value) && value >= 0;
+    if (item.type === "capacity" && ["daily", "combat"].includes(model.frequency) && valid(model.charges?.current)) {
+      return { value: model.charges.current, type: model.frequency, icon: model.frequency === "daily" ? "sun" : "swords" };
+    }
+    if ((model.properties?.stackable || model.subtype === "consumable" || item.type === "container") && valid(model.quantity?.current)) {
+      return { value: model.quantity.current, type: "quantity", icon: "sack" };
+    }
+    if (model.properties?.reloadable === true && valid(model.charges?.current)) {
+      return { value: model.charges.current, type: "quantity", icon: "sack" };
+    }
+    return null;
+  }
+
   shortcutUses(action, item) {
     const model = item?.system;
     if (!model) return null;
@@ -3452,7 +3587,8 @@ class PrismBar {
     }
     const token = this.token;
     return this.queueConfiguration(actor, async () => {
-      const resolved = slot.hand ? this.handItem(actor, reference) ?? this.encounterHandAttack(actor, reference) : this.resolveShortcut(actor, reference);
+      const resolved = slot.hand ? this.handItem(actor, reference) ?? this.encounterHandAttack(actor, reference)
+        : this.resolveShortcutItem(actor, reference) ?? this.resolveShortcut(actor, reference);
       if (game.settings.get(MODULE, "locked") || this.actor !== actor || this.token !== token || !this.canConfigure(actor) || !resolved) {
         ui.notifications.warn(game.i18n.localize("CO2PRISM.Combat.InvalidDrop")); return false;
       }
@@ -3868,6 +4004,7 @@ class PrismBar {
       const above = top + (this.panelOffset?.y ?? 0);
       this.conditionalZone.style.setProperty("--conditional-room", `${above}px`);
     }
+    if (this.descriptiveTooltip) this.positionDescriptiveTooltip(game.tooltip, this.descriptiveTooltip);
     return { left, top };
   }
 

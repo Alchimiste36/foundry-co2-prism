@@ -87,7 +87,7 @@
   box-sizing: border-box;
   width: max-content;
   max-width: min(34rem, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  max-height: min(calc(100vh - 24px), var(--co2prism-tooltip-height, 100vh));
   overflow: auto;
   padding: 0.65rem 0.85rem;
   border: 1px solid var(--prism-edge);
@@ -1345,6 +1345,26 @@
   position: absolute;
   top: 0;
   left: 0;
+}
+.co2prism-slot-item-icon {
+  color: var(--prism-negative);
+}
+.co2prism-slot-item-marker {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  color: #ff3030;
+  padding: calc(3 * var(--unit));
+  font-size: calc(19 * var(--unit));
+  text-shadow: var(--prism-text-shadow);
+}
+.co2prism-bar .co2prism-slot-item-command {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .co2prism-slot-time {
   position: absolute;

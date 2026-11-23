@@ -1905,6 +1905,61 @@ test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante",
   assert.equal(bar.slotRows()[0][1].hand, "right");
 });
 
+test("raccourcis d’Items : dépôt embarqué, groupes mixtes, persistance et nettoyage", async () => {
+  const { bar, a, create, event, node, context } = setupShortcuts();
+  const add = (type, count) => {
+    const owned = { id: type, uuid: `${a.uuid}.Item.${type}`, parent: a, type, name: type,
+      system: {}, testUserPermission: () => true, canUserModify: () => true };
+    owned.actions = owned.system.actions = Array.from({ length: count }, (_, indice) =>
+      ({ source: owned.uuid, indice, type: "heal", actionName: `Action ${indice}` }));
+    a.items.set(owned.id, owned);
+    return owned;
+  };
+  const equipment = add("equipment", 0), capacity = add("capacity", 1), container = add("container", 2), path = add("path", 0);
+  const payload = owned => ({ type: "Item", uuid: owned.uuid });
+  const terminal = () => bar.slotRows()[0].at(-1);
+  const ordinary = () => bar.slotRows().flat().filter(slot => !slot.hand && !slot.terminal);
+  const drop = (owned, slot = terminal()) => bar.dropSlot(event(payload(owned)), slot, node);
+  assert.equal(await drop(path), false);
+  assert.equal(await drop(create("foreign").item), false);
+  assert.equal(await drop({ uuid: "Compendium.example.gear.Item.equipment" }), false);
+  for (const owned of [equipment, capacity, container]) assert.equal(await drop(owned), true);
+  assert.equal(await drop(capacity, bar.slotRows()[0][0]), false);
+  const [first, second] = ordinary();
+  assert.equal(await drop(capacity, first), true);
+  assert.equal(await drop(container, ordinary()[0]), true);
+  assert.equal(await bar.dropSlot(event({ type: "co.action", source: capacity.uuid, indice: 0 }), ordinary()[0], node), true);
+  assert.equal(await drop(capacity, ordinary()[0]), false);
+  const current = () => bar.readConfiguration(a).shortcuts[first.key];
+  const captures = actionIndex => ({ actor: a, token: bar.token, key: first.key, reference: current(), actionIndex });
+  assert.equal(await bar.manageShortcut(captures(0), { key: first.key, actionIndex: 2 }), true);
+  assert.equal(await bar.manageShortcut(captures(), bar.slotRows()[1].at(-1)), true);
+  const saved = JSON.parse(JSON.stringify(a.flags));
+  assert.deepEqual(saved.co2prism.shortcuts[first.key].actions.map(ref => [ref.kind ?? "action", ref.itemId]),
+    [["item", capacity.id], ["item", container.id], ["item", equipment.id], ["action", capacity.id]]);
+  assert.equal(saved.co2prism.shortcuts[first.key].row, 2);
+  assert.equal(saved.co2prism.shortcuts[second.key].kind, "item");
+  const itemContext = { actor: a, token: bar.token, surface: "shortcut", item: capacity, itemId: capacity.id, slotKey: first.key, actionIndex: 0 };
+  assert.equal(bar.equipmentOperationItem(itemContext), capacity);
+  context.game.settings.get = () => true;
+  assert.equal(bar.equipmentOperationItem(itemContext), capacity);
+  capacity.canUserModify = () => false;
+  assert.equal(bar.equipmentOperationItem(itemContext), null);
+  capacity.canUserModify = () => true;
+  context.game.settings.get = () => false;
+  a.items.delete(equipment.id); a.items.delete(container.id);
+  bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
+  assert.equal(current().actions.length, 2);
+  assert.equal(await bar.manageShortcut(captures(1)), true);
+  assert.equal(current().kind, "item");
+  assert.equal(current().itemId, capacity.id);
+  assert.equal(current().actions, undefined);
+  assert.equal(current().source, undefined);
+  const previousToken = bar.token;
+  bar.token = {};
+  assert.equal(bar.equipmentOperationItem({ ...itemContext, token: previousToken, actionIndex: undefined }), null);
+});
+
 test("groupes de raccourcis : capacité, persistance, déplacement et nettoyage individuel", async () => {
   const { bar, a, item, event, node, create, select, context, writes, warnings } = setupShortcuts();
   item.actions = Array.from({ length: 5 }, (_, indice) => ({ source: item.uuid, indice }));

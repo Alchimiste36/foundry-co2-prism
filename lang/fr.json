@@ -124,7 +124,7 @@
       "Active": "Action activée",
       "Inactive": "Action désactivée",
       "ActorActionUnsupported": "Les API CO2 installées exigent un Item porteur pour utiliser ou publier cette action d’acteur.",
-      "InvalidDrop": "Dépôt refusé : sélection modifiée, droits insuffisants ou action CO2 introuvable sur cet acteur.",
+      "InvalidDrop": "Dépôt refusé : sélection modifiée, droits insuffisants ou référence indisponible pour cet acteur.",
       "ActionBudget": "Budget de temps d'action disponible",
       "RemainingMovement": "Déplacement restant / capacité de référence du round, bonus compris",
       "TimeControls": "Clic gauche : dépenser · Clic droit : ajouter un bonus",
