@@ -143,7 +143,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             async setFlag(scope, key, value) {
               this.flags[scope] ??= {}; let target = this.flags[scope]; const parts = key.split(".");
               for (const part of parts.slice(0, -1)) target = target[part] ??= {};
-              if (parts[0] === "shortcuts" || parts[0] === "presetActionRules") {
+              if (parts[0] === "shortcuts" || parts[0] === "presetActionRules" || parts[0] === "hands") {
                 mergeFlagPatch(target, { [parts.at(-1)]: value });
               } else target[parts.at(-1)] = structuredClone(value);
             },
@@ -690,6 +690,17 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             type: "melee", properties: { temporary: false, enabled: false, activable: true }, autoAttack: false, hasResolversWithDomage: true,
             hasCharges: true, charges: 3, manaCost: 2 };
           item.actions = [nativeAction]; actor.items = new Map([[item.id, item]]);
+          item.system.usage.preferOneHand = false;
+          Object.defineProperties(item.system, {
+            isOtherHandBusy: { get: () => [...actor.items.values()].some(other => other !== item &&
+              other.type === "equipment" && other.system.equipped && other.system.useHands) },
+            grip: { get: () => item.system.usage.oneHand && (!item.system.usage.twoHand ||
+              item.system.usage.preferOneHand || item.system.isOtherHandBusy) ? "oneHand" : "twoHands" }
+          });
+          item.update = async changes => {
+            item.system.usage.preferOneHand = changes["system.usage.preferOneHand"];
+            hooks.get("updateItem")(item, changes);
+          };
           actor.toggleEquipmentEquipped = async id => { const model = actor.items.get(id).system; model.equipped = !model.equipped; hooks.get("updateItem")(item, {}); };
           Object.defineProperty(actor, "actions", { get: () => [...actor.items.values()].flatMap(owned => owned.actions) });
           const shortcutCalls = [];
@@ -714,6 +725,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             const { left, right } = bar.combatHands;
             return [left.firstElementChild, right.firstElementChild, ...shortcuts];
           };
+          const handCommand = node => node.matches(".co2prism-slot-executable") ? node : node.querySelector(".co2prism-slot-executable");
           const lengths = () => bar.combatRows.map((_, index) => cards(index).length).join(",");
           const dropAt = async (row, index, data = payload) => {
             const transfer = new DataTransfer(); transfer.setData("text/plain", JSON.stringify(data));
@@ -793,7 +805,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
           await dropAt(1, 1, secondPayload);
           check(bar.configuration.handPresets[1]["left-hand"]?.kind === "equipment" &&
             bar.configuration.handPresets[1]["right-hand"]?.indice === 1 &&
-            cards(0)[1].classList.contains("co2prism-slot-executable"),
+            handCommand(cards(0)[1]),
             "An action can replace the mirror of a directly equipped versatile weapon");
           if (bar.configuration.handPresets[1]["right-hand"]) await removeHand(1);
           await removeHand(0);
@@ -818,7 +830,7 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             await bar.setPanelState("combat", false);
             await bar.setPanelState("combat", true);
             check(saved()[hands[primary]]?.indice === 0 && saved()[hands[secondary]]?.indice === 1 &&
-              [0, 1].every(index => cards(0)[index].classList.contains("co2prism-slot-executable")),
+              [0, 1].every(index => handCommand(cards(0)[index])),
               "Reopening preserves two explicit actions from the same versatile weapon");
             check(cards(0)[secondary].dataset.co2prismActionSummary.includes(secondAction.actionName) &&
               !cards(0)[primary].dataset.co2prismActionSummary.includes(secondAction.actionName),
@@ -834,6 +846,106 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
             check([0, 1].every(index => cards(0)[index].dataset.co2prismActionSummary === undefined),
               "Empty hands retain no previous summary");
           }
+          nativeAction.conditions = [{ predicate: "isWieldedOneHand" }];
+          secondAction.conditions = [{ predicate: "isWieldedTwoHands" }];
+          await dropAt(1, 0);
+          await dropAt(1, 0, secondPayload);
+          const initialSize = settings.size;
+          for (const size of ["S", "M", "L", "XL"]) {
+            settings.size = size; bar.layout();
+            const slot = cards(0)[0];
+            const members = [...slot.querySelectorAll(".co2prism-slot-quadrant")];
+            check(slot.classList.contains("co2prism-hand-action-pair") && members.length === 2 &&
+              members.every(member => {
+                const bounds = member.getBoundingClientRect();
+                const image = member.querySelector("img")?.getBoundingClientRect();
+                return image && Math.abs(image.width - image.height) < 1 &&
+                  Math.abs(image.height - bounds.height) < 1 &&
+                  Math.abs(image.left + image.width / 2 - bounds.left - bounds.width / 2) < 1 &&
+                  Math.abs(bounds.width - slot.clientWidth / 2) < 3 &&
+                  !member.draggable && member.querySelector(".co2prism-slot-remove");
+              }) && members[0].offsetTop === members[1].offsetTop, "Centered hand pair at " + size);
+            const control = slot.querySelector(".co2prism-grip-control");
+            const bounds = slot.getBoundingClientRect();
+            const buttonBounds = control?.getBoundingClientRect();
+            check(buttonBounds && Math.abs(buttonBounds.left + buttonBounds.width / 2 - bounds.left - bounds.width / 2) < 1 &&
+              buttonBounds.top < bounds.top + bounds.height / 4 && control.getAttribute("aria-label") &&
+              control.children.length === 1 && control.querySelector(".fa-hands-bound") &&
+              getComputedStyle(control).borderTopWidth === "0px" && getComputedStyle(control).color === palette("electric-glass"),
+              "Centered and tinted grip icon at " + size);
+          }
+          settings.size = initialSize; bar.layout();
+          let visibleGrip = 1;
+          let lateGrip;
+          nativeAction.isVisible = async () => visibleGrip === 0 || visibleGrip === 2;
+          secondAction.isVisible = async () => visibleGrip === 1 || visibleGrip === 2;
+          secondAction.actionImg = "file:///F:/FVTT_V14/public/icons/svg/sword.svg";
+          const refreshGrip = () => hooks.get("updateItem")(item, {});
+          const lockedHand = () => cards(0)[0];
+          const executes = () => Boolean(handCommand(lockedHand()));
+          const selectedName = name => executes() && lockedHand().dataset.co2prismActionSummary.includes(name);
+          const lockedClick = async modifiers => {
+            handCommand(lockedHand()).dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, ...modifiers }));
+            await refreshTick();
+          };
+          const configuredPair = JSON.stringify(bar.configuration.handPresets[1]["left-hand"]);
+          settings.locked = true; refreshGrip();
+          check(!executes() && lockedHand().classList.contains("co2prism-condition-pending"),
+            "A pending hand pair offers no executable action");
+          await refreshTick();
+          check(selectedName(secondAction.actionName) && lockedHand().querySelector("img")?.src === secondAction.actionImg &&
+            !lockedHand().querySelector(".co2prism-slot-quadrant, .co2prism-slot-remove"), "Locked hand renders the second action at full size");
+          const gripButton = () => lockedHand().querySelector(".co2prism-grip-control");
+          check(gripButton()?.querySelector(".fa-hands-bound") && !gripButton().disabled, "Two native hands use a single bound-hands icon");
+          gripButton().click(); await bar.configWrites.get(actor); await refreshTick();
+          check(item.system.usage.preferOneHand && gripButton()?.querySelector(".fa-hand") &&
+            !cards(0)[1].classList.contains("co2prism-hand-mirror") && shortcutCalls.length === 0,
+            "Grip button changes the native preference without executing the card");
+          gripButton().click(); await bar.configWrites.get(actor); await refreshTick();
+          check(!item.system.usage.preferOneHand && gripButton()?.querySelector(".fa-hands-bound") &&
+            cards(0)[1].classList.contains("co2prism-hand-mirror"), "Returning to two hands restores the mirror");
+          const originalUse = game.system.api.macros.useAction;
+          game.system.api.macros.useAction = async (...args) => shortcutCalls.push(["useAction", ...args]);
+          await lockedClick({}); await lockedClick({ ctrlKey: true }); await lockedClick({ altKey: true });
+          const pairCalls = shortcutCalls.splice(0).map(call => [call[0], call[0] === "sendToChat" ? call[3] : call[2]]);
+          check(JSON.stringify(pairCalls) === JSON.stringify([["useAction", 1], ["sendToChat", 1], ["useAction", 1]]),
+            "Second member owns clicks and modifiers");
+          visibleGrip = 0;
+          await lockedClick({});
+          check(shortcutCalls.length === 0, "An old selection cannot execute after native visibility changes");
+          refreshGrip(); await refreshTick();
+          check(selectedName(nativeAction.actionName), "A native item update selects the other action");
+          await lockedClick({});
+          check(shortcutCalls.splice(0)[0]?.[2] === 0, "The first member executes when it is selected");
+          for (const grip of [-1, 2]) {
+            visibleGrip = grip; refreshGrip(); await refreshTick();
+            check(!executes() && lockedHand().classList.contains("co2prism-slot-unavailable"), "Unavailable or ambiguous grip " + grip);
+          }
+          item.system.equipped = false; refreshGrip(); await refreshTick();
+          check(!executes() && lockedHand().classList.contains("co2prism-hand-unequipped"), "Locked unequipped pair is dimmed");
+          settings.locked = false; refreshGrip();
+          check(lockedHand().classList.contains("co2prism-hand-unequipped") &&
+            lockedHand().querySelectorAll(".co2prism-slot-quadrant").length === 2, "Unlocked unequipped pair keeps both dimmed images");
+          item.system.equipped = true; visibleGrip = 1;
+          const secondVisibility = secondAction.isVisible;
+          secondAction.isVisible = () => new Promise(resolve => { lateGrip = resolve; });
+          settings.locked = true; refreshGrip();
+          const resolveOldGrip = lateGrip;
+          secondAction.isVisible = secondVisibility;
+          settings.locked = false; refreshGrip();
+          resolveOldGrip(true); await refreshTick();
+          check(lockedHand().querySelectorAll(".co2prism-slot-quadrant").length === 2 &&
+            JSON.stringify(bar.configuration.handPresets[1]["left-hand"]) === configuredPair, "Late visibility cannot replace an unlocked pair or change flags");
+          game.system.api.macros.useAction = originalUse;
+          delete nativeAction.isVisible;
+          delete secondAction.isVisible;
+          refreshGrip();
+          cards(0)[0].querySelector(".co2prism-slot-remove").click();
+          await bar.configWrites.get(actor);
+          check(bar.configuration.handPresets[1]["left-hand"]?.indice === 1 && item.system.equipped &&
+            !cards(0)[0].classList.contains("co2prism-hand-action-pair"), "Removing either member keeps the remaining hand action");
+          await removeHand(0);
+          delete nativeAction.conditions;
           cards(2)[0].querySelector(".co2prism-slot-remove").click(); await bar.configWrites.get(actor);
           item.actions.pop();
           item.system.usage.oneHand = false;
@@ -1325,13 +1437,14 @@ test("boîtes et zones de capture dans Edge avec le CSS Foundry", {
                   Math.abs(rect.width - before[index].width) < 1, size + ' hand position relative to portrait');
 
                 const hand = index === 0 ? 'left' : 'right';
-                const marker = node.querySelector('.co2prism-slot-hand.fa-hand');
+                const marker = node.querySelector('.co2prism-slot-hand');
+                const icon = marker?.querySelector('.fa-hand');
                 const markerStyle = marker && getComputedStyle(marker);
                 const markerBounds = marker?.getBoundingClientRect();
                 check(markerBounds && Math.abs((markerBounds.left + markerBounds.right - rect.left - rect.right) / 2) < 1
                   && markerBounds.top < rect.top + rect.height / 4 && markerStyle.pointerEvents === 'none'
                   && markerStyle.color === palette('hand') && !marker.textContent
-                  && markerStyle.transform === (hand === 'left' ? 'matrix(-1, 0, 0, 1, 0, 0)' : 'none'),
+                  && icon && getComputedStyle(icon).transform === (hand === 'left' ? 'matrix(-1, 0, 0, 1, 0, 0)' : 'none'),
                   size + ' repère de main centré en haut');
                 if (occupiedHands.includes(index === 0 ? 'left-hand' : 'right-hand')) {
                   check(node.classList.contains('co2prism-slot-executable') && !node.classList.contains('co2prism-hand-empty'), 'Occupied hand hidden');
