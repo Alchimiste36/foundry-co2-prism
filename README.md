@@ -1,37 +1,50 @@
 # CO2 Prism
 
-CO2 Prism affiche sur la scène le portrait, les ressources et les commandes de l’acteur suivi dans un monde Chroniques Oubliées 2. Depuis la barre, on peut accéder aux compétences, aux équipements, aux voies et capacités, ainsi qu’aux raccourcis de combat.
+<p align="center">
+  <img src="assets/co2prism_logo.webp" alt="Logo CO2 Prism" width="180">
+</p>
 
-## Installer et activer
+**L'essentiel de votre personnage à portée de clic, directement sur la scène de Foundry VTT.**
 
-1. Utiliser **Foundry VTT v14** avec un monde **Chroniques Oubliées 2** (système `co2`).
-2. Placer le dossier du module dans `Data/modules/co2prism/` du répertoire de données Foundry. Le fichier [module.json](module.json) doit se trouver directement dans ce dossier.
-3. Ouvrir le monde, puis activer **CO2 Prism** dans la gestion des modules.
+CO2 Prism est un module pour **Chroniques Oubliées Fantasy 2ᵉ édition (CO2)** qui rassemble les informations et les actions de votre acteur dans une interface compacte et personnalisable. Consultez vos ressources, utilisez vos capacités, gérez vos équipements et vos déplacements sans ouvrir constamment votre feuille de personnage.
 
-## Utiliser Prism
+Depuis Prism, vous pouvez **consulter vos ressources, effectuer des tests de compétences, retrouver vos équipements et vos voies et capacités, ou utiliser des raccourcis d'action.** Les volets s'ouvrent autour du portrait pour garder les commandes à portée de main pendant la partie.
 
-- Sélectionner un seul token observable. Un joueur sans token contrôlé peut retrouver son personnage assigné. La gemme des contrôles de tokens permet d’afficher ou de masquer Prism.
-- Déverrouiller Prism avec l’engrenage pour le déplacer depuis le portrait, régler sa taille avec le curseur ou modifier les raccourcis. La taille est enregistrée par utilisateur au verrouillage. Les anciennes préférences S/M/L/XL sont encore lues.
-- Les commandes autour du portrait ouvrent les volets Compétences, Équipements, Voies & Capacités et Combat. Le volet Combat regroupe les défenses, les carrés des mains et leurs presets. Les miniatures au bas du portrait représentent les cibles de l’utilisateur courant. Un clic droit sur une miniature retire cette cible.
-- **Budget d’action** et **Suivi du déplacement** sont deux préférences utilisateur distinctes. Les deux proposent **Toujours**, **Uniquement en combat** et **Jamais**. En mode combat, le suivi exige que le token sélectionné participe au combat actif et démarré. Le rectangle Déplacement reste disponible dans le volet Combat lorsque le suivi supérieur est masqué.
-- Quand le suivi est actif, le panneau compte les cases à partir de la position de départ de la session. La Zone tactique affiche une portée calculée au moment de son activation. Valider un trajet débite une action M lorsque le budget s’applique.
+Ce module fan made a été créée par **l'Alchimiste** pour faciliter la vie des joueuses/joueurs et des meuneuses/meneurs de jeu de Chroniques Oubliées Fantasy 2ème édition sur Foundry VTT. J'espère que ça va vous plaire avec toutes les fonctionnalités proposées en complément de ce super système (gestion des actions par round, Zone Tactique et déplacements, gestion de sélections d'armes...).
 
-## Vérifier le module
+J'ai voulu faire **une interface très compacte avec Prism** afin de centraliser toutes les informations nécessaires accessibles rapidement et les nouvelles fonctionnalités de jeu. Ca peut paraitre trop dense mais au moins vous n'aurez pas beaucoup l'occasion d'ouvrir votre feuille de personnage !
 
-Depuis la racine du dépôt, lancer la suite avec Node.js :
+<p align="center">
+  <img src="assets/prism_global_deverrouiller.PNG" alt="Aperçu de CO2 Prism et de ses raccourcis" width="1000">
+</p>
 
-```sh
-node --test --test-concurrency=1 tests/*.test.mjs
-```
+## Principales fonctionnalités
 
-Le test navigateur utilise Edge et le CSS d’une installation locale de Foundry. Les chemins peuvent être configurés avec `CO2PRISM_EDGE` et `CO2PRISM_FOUNDRY_CSS`. Les tests du contrat de mouvement lisent le script local du Core via `CO2PRISM_FOUNDRY_SCRIPT`. Un test d’intégration des mains lit également les sources du système CO2 installé à côté du module. La suite ignore les contrôles qui nécessitent des fichiers locaux absents. [Test navigateur](tests/browser-layout.test.mjs) · [Contrat natif](tests/native-movement-contract.test.mjs)
+- **Informations essentielles :** portrait, caractéristiques, ressources, défenses, états et cibles.
+- **Compétences :** tests directement depuis Prism.
+- **Équipements, voies et capacités :** consultation et utilisation des objets et de leurs actions.
+- **Raccourcis personnalisables :** actions, Items et groupes de raccourcis.
+- **Gestion des mains :** trois presets d'équipement, changement de prise des armes polyvalentes et mémorisation des préférences.
+- **Budget d'actions :** suivi des actions disponibles au cours du round.
+- **Déplacements et Zone Tactique :** suivi des distances parcourues et visualisation des cases atteignables.
+- **Interface personnalisable :** position, taille, volets indépendants et couleurs adaptées au type d'acteur.
+- **Documentation intégrée :** guide utilisateur accessible depuis Foundry.
 
-La [sonde manuelle de déplacement](tests/manual/movement-zone-probe.md) s’utilise dans un monde Foundry. Elle cite une scène exportée qui doit être fournie séparément.
+## Installation
 
-## Maintenance et références
+**Compatibilité :** Foundry VTT v14 — système Chroniques Oubliées 2 (`co2`).
 
-- Le [journal historique](HISTORIQUE.md) conserve l’ancien README avec ses résultats et limites à la date de chaque étape.
-- Les [consignes de développement](CO2_Prism_Instructions_Codex.md) décrivent les conventions du dépôt.
-- Le [benchmark de Zone tactique](benchmarks/movement-zones.mjs) s’exécute avec `node benchmarks/movement-zones.mjs` et réécrit le [rapport de comparaison à portée égale](benchmarks/movement-zones-single-action-results.json). Les scénarios sont simulés. Le [moteur de référence](benchmarks/reference/movement-zones-step1.mjs) sert aussi aux tests de régression. L’[ancien rapport](benchmarks/movement-zones-results.json) conserve les mesures des scénarios historiques.
+1. Installer le module via son manifest dans Foundry VTT, ou placer son dossier dans `Data/modules/co2prism/`.
+2. Ouvrir un monde utilisant le système CO2.
+3. Activer **CO2 Prism** dans la gestion des modules.
 
-Pour une archive de partage, exclure le répertoire `.git/` du contenu de l’archive et conserver le dossier `co2prism/` à sa racine.
+## Premiers pas
+
+Sélectionnez un token et cliquez sur la gemme dans les contrôles de tokens pour afficher ou masquer Prism. Déverrouillez l'interface avec l'engrenage pour la déplacer, ajuster sa taille et configurer vos raccourcis. Les boutons autour du portrait permettent d'accéder aux différents volets.
+
+La documentation intégrée détaille l'ensemble des fonctionnalités et leur configuration.
+
+## Soutiens
+
+Si ce travail vous plait et surtout vous aide lors de vos parties de Jeu de Rôles Chroniques Oubliées 2ème édition sur Foundry VTT, n'hésitez pas à m'offrir un p'tit café sur Ko-fi pour me motiver à créer de nouveaux outils pour les meneuses et meneurs : https://ko-fi.com/lalchimiste
+Je suis ouvert à toutes les suggestions, propositions et remontées de bug sur gitHub ou directement sur Discord : l.alchimiste

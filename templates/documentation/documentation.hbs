@@ -8,7 +8,12 @@
       <button type="button" aria-label="Chapitre précédent" title="Chapitre précédent" disabled>
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
       </button>
-      <button type="button" aria-label="Revenir à la consultation précédente" title="Revenir à la consultation précédente" disabled>
+      <button
+        type="button"
+        aria-label="Revenir à la consultation précédente"
+        title="Revenir à la consultation précédente"
+        disabled
+      >
         <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
       </button>
       <button type="button" aria-label="Chapitre suivant" title="Chapitre suivant">
@@ -16,16 +21,29 @@
       </button>
     </div>
   </nav>
+
   <article class="co2prism-doc-article">
     <section class="co2prism-doc-chapter">
       <h2 id="decouvrir-prism">1. Découvrir Prism</h2>
 
       <h3 id="presentation">1.1. À quoi sert CO2 Prism ?</h3>
+
       <p>
         CO2 Prism est une barre d'interface pour <strong>Chroniques Oubliées 2</strong>, affichée directement sur la
         scène de Foundry VTT. Elle rassemble les informations essentielles de votre acteur et vous permet d'effectuer de
         nombreuses actions sans ouvrir constamment sa fiche.
       </p>
+      <button
+        type="button"
+        class="co2prism-doc-image-button co2prism-doc-image-large co2prism-doc-image-center"
+        title="Agrandir l’image"
+      >
+        <img
+          class="co2prism-doc-image"
+          src="modules/co2prism/assets/co2prism_logo.webp"
+          alt="Logo de CO2 Prism"
+        >
+      </button>
       <p>
         Depuis Prism, vous pouvez consulter vos ressources, effectuer des tests de compétences, retrouver vos
         équipements et vos voies et capacités, ou utiliser des
@@ -33,21 +51,62 @@
         autour du portrait pour garder les commandes à portée de main pendant la partie.
       </p>
       <p><strong>Un mot du créateur</strong></p>
-      <!-- Remplacer le texte réservé ci-dessous par le mot du créateur. -->
-      <blockquote>
-        <p>
-          <strong>[EMPLACEMENT RÉSERVÉ AU CRÉATEUR]</strong><br />
-          Présentation personnelle, intention du projet, remerciements ou informations de votre choix. Ce passage sera
-          rédigé par le créateur de CO2 Prism.
-        </p>
-      </blockquote>
+      <p>
+        Ce module fan made a été créée par l'Alchimiste pour faciliter la vie des joueuses/joueurs et des
+        meuneuses/meneurs de jeu de Chroniques Oubliées Fantasy 2ème édition sur Foundry VTT.
+      </p>
+      <p>
+        Je remercie Kristov de m'avoir donné l'opportunité, lors du développement du système CO2 pour
+        Foundry VTT, de participer à sa création. Ca m'a donné le virus de toujours vouloir créer des
+        nouveautés.
+      </p>
+      <P>
+        J'espère que ça va vous plaire avec toutes les fonctionnalités proposées en complément de ce super
+        système (gestion des actions par round, Zone Tactique et déplacements, gestion de sélections
+        d'armes...)
+      </P>
+      <p>
+        J'ai voulu faire une interface très compacte avec Prism afin de centraliser toutes les informations
+        nécessaires accessibles rapidement et les nouvelles fonctionnalités de jeu. Ca peut paraitre trop
+        dense mais au moins vous n'aurez pas beaucoup l'occasion d'ouvrir votre feuille de personnage !
+      </p>
+      <p>
+        N'hésitez pas à visionner les vidéos explicatives sur le système CO2 sur ma chaine YouTube :
+        AlchiFoundry (https://www.youtube.com/@AlchimisteFoundry).
+      </p>
+      <p>
+        Si ce travaille de passionné vous plait et vous permet de vivre des sessions de jeux plus fluides et
+        amusantes, n'hésitez pas à me payer un p'tit café sur Ko-fi : https://ko-fi.com/lalchimiste
+      </p>
+      <p>
+        Je suis disponible sur discord pour toutes les questions ou suggestions (l.alchimiste) et souvent
+        présent sur le Discord de la Fonderie dans le salon chroniques-oubliées.
+      </p>
+      <p>
+        Vous pouvez retrouver toute la gamme de produits du Jeu de Rôle Chroniques Oubliées sur le site
+        officiel de l'Éditeur Black Book Éditions
+        (https://shop.black-book-editions.fr/catalogue/gamme/1961/cof2).
+      </p>
 
       <h3 id="afficher-prism">1.2. Afficher Prism</h3>
+      <button
+        type="button"
+        class="co2prism-doc-image-button co2prism-doc-image-small co2prism-doc-image-left"
+        title="Agrandir l’image"
+      >
+        <img
+          class="co2prism-doc-image"
+          src="modules/co2prism/assets/prism_menu_foundry.webp"
+          alt="Logo de CO2 Prism"
+        >
+      </button>
+
       <p>
         <strong>Activer le module.</strong> La personne qui administre le monde Foundry doit activer
         <strong>CO2 Prism</strong> dans la gestion des modules. Prism est conçu pour un monde utilisant le système
         <strong>Chroniques Oubliées 2</strong> sous Foundry VTT v14.
       </p>
+      
       <p>
         <strong>Afficher ou masquer la barre.</strong> Dans les contrôles des tokens de la scène, cliquez sur le bouton
         représentant une <strong>gemme</strong> <i class="fa-solid fa-gem co2prism-doc-icon" aria-hidden="true"></i>
@@ -59,10 +118,22 @@
         Prism peut afficher votre personnage attribué dans Foundry. Lorsque plusieurs tokens sont sélectionnés, aucun
         acteur n'est suivi par cette sélection.
       </p>
-      <!-- #image emplacement du bouton gemme dans les contrôles de tokens -->
+      
+      
 
       <h3 id="reperer-interface">1.3. Présentation générale</h3>
-      <!-- #image capture globale de Prism avec tous les volets ouverts -->
+
+      <button
+        type="button"
+        class="co2prism-doc-image-button co2prism-doc-image-large co2prism-doc-image-left"
+        title="Agrandir l’image"
+      >
+        <img
+          class="co2prism-doc-image"
+          src="modules/co2prism/assets/prism_global_deverrouiller.webp"
+          alt="Logo de CO2 Prism"
+        >
+      </button>
       <p>
         <strong>Les trois thèmes.</strong> Prism adapte ses couleurs selon l'acteur suivi : <strong>bleu</strong> pour
         un personnage, <strong>rouge</strong> pour une rencontre et <strong>jaune</strong> pour un compagnon. Vous
@@ -139,6 +210,7 @@
       </p>
 
       <h3 id="portrait">3.1. Portrait et identité</h3>
+
       <p>
         <strong>Le portrait.</strong> L'image centrale correspond à l'acteur actuellement suivi par Prism. Elle change
         lorsque vous sélectionnez un autre token autorisé sur la scène. Un double clic gauche sur le portrait permet
@@ -151,6 +223,7 @@
       </p>
 
       <h3 id="ressources">3.2. Ressources</h3>
+
       <!-- #image gros plan des quatre jauges et des boutons de repos -->
       <p>
         Les jauges présentent les valeurs actuelles et maximales des ressources disponibles. Leur remplissage donne un
@@ -185,6 +258,7 @@
       </p>
 
       <h3 id="effets">3.3. États et effets</h3>
+
       <p>
         Les effets associés à l'acteur sont affichés sous son nom. Ils permettent de repérer rapidement les situations
         qui l'affectent, sans ouvrir sa fiche. Survolez un effet en maintenant <strong>Maj (Shift)</strong> pour obtenir
@@ -193,6 +267,7 @@
       </p>
 
       <h3 id="cibles">3.4. Tokens ciblés</h3>
+
       <!-- #image portrait avec plusieurs miniatures de tokens ciblés -->
       <p>
         <strong>Les miniatures des cibles.</strong> Lorsque vous ciblez des tokens sur la scène, leurs images
@@ -294,6 +369,7 @@
       <!-- #image volet Combat ouvert avec les raccourcis et les commandes visibles -->
 
       <h3 id="defenses">6.1. Défenses</h3>
+
       <p>
         Le volet affiche la <strong>Défense (DEF)</strong> et la <strong>réduction des dégâts (RD)</strong> de l'acteur.
         Ces valeurs sont consultables directement, sans ouvrir sa fiche.
@@ -309,6 +385,7 @@
       </p>
 
       <h3 id="durees-action">6.2. La gestion des durées d'action</h3>
+
       <p>
         Prism peut suivre les temps d'action disponibles pour votre acteur. Les quatre commandes <strong>A</strong>,
         <strong>L</strong>, <strong>AM</strong> et <strong>M</strong> se trouvent dans le volet Combat :
@@ -346,6 +423,7 @@
       <!-- #image boutons A L AM M et ligne supérieure du budget d'action -->
 
       <h3 id="mouvements">6.3. Les mouvements</h3>
+
       <p>
         Le bloc <strong>Déplacement</strong> indique la capacité de mouvement de l'acteur en <strong>mètres</strong> et
         en <strong>cases</strong>. Selon les réglages et les temps disponibles, les valeurs affichées permettent de
@@ -384,6 +462,7 @@
       </p>
 
       <h3 id="raccourcis-action">6.4. Les raccourcis d'action</h3>
+
       <p>
         Les <strong>raccourcis d'action</strong> permettent de lancer depuis Prism les actions de votre acteur, sans
         rechercher à chaque fois leur commande dans la liste des actions de sa fiche. Ils occupent
@@ -449,8 +528,8 @@
         complète.
       </p>
 
-
       <h3 id="mains">6.5. Les deux mains</h3>
+
       <p>
         Deux carrés spécifiques représentent la <strong>main droite</strong> et la <strong>main gauche</strong> de
         l'acteur. Dans ces raccourcis, il est possible de glisser-déposer les actions provenant d'un équipement qui est
@@ -575,4 +654,11 @@
       <!-- CONCLUSION : ajouter ici le texte de conclusion du créateur. -->
     </section>
   </article>
+
+  <dialog class="co2prism-doc-image-dialog" aria-label="Image agrandie">
+    <form method="dialog">
+      <button type="submit" autofocus>Fermer</button>
+    </form>
+    <img alt="">
+  </dialog>
 </div>
