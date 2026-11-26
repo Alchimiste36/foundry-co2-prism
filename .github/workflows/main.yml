@@ -146,4 +146,4 @@ jobs:
       #    method: 'POST'
       #    contentType: 'application/json'
       #    customHeaders: '{"Authorization": "${{ secrets.FVTT_PACKAGE_RELEASE_TOKEN }}"}'
-      #    data: '{"id": "cof2ta_reliques_union","dry-run":false,"release":{"version":"${{github.event.release.tag_name}}","manifest":"https://github.com/Alchimiste36/cof2ta_reliques_union/releases/download/${{github.event.release.tag_name}}/module.json","notes":"https://github.com/Alchimiste36/cof2ta_reliques_union/blob/main/CHANGELOG.md","compatibility":{"minimum":"13","verified":"13","maximum":"13"}}}'
+      #    data: '{"id": "co2prism","dry-run":false,"release":{"version":"${{github.event.release.tag_name}}","manifest":"https://github.com/Alchimiste36/co2prism/releases/download/${{github.event.release.tag_name}}/module.json","notes":"https://github.com/Alchimiste36/co2prism/blob/main/CHANGELOG.md","compatibility":{"minimum":"14","verified":"14","maximum":"14"}}}'
