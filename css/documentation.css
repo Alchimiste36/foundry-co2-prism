@@ -52,7 +52,7 @@
   width: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 1.25rem;
+  padding: 0.5rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -218,6 +218,67 @@
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+.co2prism-documentation .co2prism-doc-image-button {
+  display: block;
+  width: var(--doc-image-width, 16rem);
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  margin-block: 1rem;
+  margin-inline: 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.co2prism-documentation .co2prism-doc-image-button.co2prism-doc-image-small {
+  --doc-image-width: 5rem;
+}
+
+.co2prism-documentation .co2prism-doc-image-button.co2prism-doc-image-large {
+  --doc-image-width: 15rem;
+}
+
+.co2prism-documentation .co2prism-doc-image-button.co2prism-doc-image-wide {
+  --doc-image-width: 100%;
+}
+
+.co2prism-documentation .co2prism-doc-image-button.co2prism-doc-image-left {
+  float: left;
+  margin: 0 12px 10px 0;
+}
+
+.co2prism-documentation .co2prism-doc-image-button.co2prism-doc-image-center {
+  float: none;
+  margin-inline: auto;
+}
+
+.co2prism-documentation .co2prism-doc-image-button.co2prism-doc-image-right {
+  float: right;
+  margin: 0 0 10px 12px;
+}
+
+.co2prism-documentation .co2prism-doc-image-button > .co2prism-doc-image {
+  width: 100%;
+}
+
+.co2prism-documentation .co2prism-doc-image-dialog {
+  max-width: 95vw;
+  max-height: 95vh;
+}
+
+.co2prism-documentation .co2prism-doc-image-dialog form {
+  margin-bottom: 0.5rem;
+}
+
+.co2prism-documentation .co2prism-doc-image-dialog img {
+  display: block;
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
 }
 
 .co2prism-documentation figcaption {

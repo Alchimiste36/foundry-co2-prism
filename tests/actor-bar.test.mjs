@@ -993,20 +993,20 @@ test("écritures rapides : ordre par acteur, permissions revérifiées et erreur
   await Promise.resolve();
   select(b); await bar.setActivePreset(3);
   assert.equal(bar.configuration.activePreset, 3);
-  release(); await Promise.all([p2, p3, p1]);
-  assert.equal(a.flags.co2prism.hands.active, 2);
+  release(); assert.deepEqual(await Promise.all([p2, p3, p1]), [false, false, false]);
+  assert.equal(a.flags.co2prism.hands.active, undefined);
   assert.equal(b.flags.co2prism.hands.active, 3);
-  assert.deepEqual(writes.filter(write => write.actor === a).map(write => write.value), [2]);
+  assert.deepEqual(writes.filter(write => write.actor === a).map(write => write.key), ["hands.active", "hands"]);
   select(a);
   const denied = bar.setActivePreset(2);
   a.testUserPermission = (_user, level) => level === "OBSERVER";
   assert.equal(await denied, false);
   a.testUserPermission = () => true;
   a.setFlag = async () => { throw Error("Persistence unavailable"); };
-  assert.equal(await bar.setActivePreset(1), false);
-  assert.equal(errors.length, 1);
+  assert.equal(await bar.setActivePreset(2), false);
+  assert.deepEqual(errors, ["CO2PRISM.Combat.HandsEquipmentFailed", "CO2PRISM.Combat.HandsEquipmentFailed"]);
   a.setFlag = save;
-  assert.equal(await bar.setActivePreset(1), true);
+  assert.equal(await bar.setActivePreset(2), true);
 });
 
 test("configuration : droits Owner/MJ, sélection neutre et entrées refusées", async () => {
@@ -1571,6 +1571,266 @@ test("presets de mains : équipement, restauration, raccourcis communs et modifi
   assert.equal(JSON.stringify(a.flags.co2prism.shortcuts), shortcuts);
 });
 
+test("mains : paires complémentaires, isolation des presets et nettoyage prudent", async () => {
+  const { bar, a, item, create, warnings } = setupShortcuts();
+  item.system.usage.oneHand = item.system.usage.preferOneHand = true;
+  Object.defineProperty(item.system, "grip", { get: () => item.system.usage.preferOneHand ? "oneHand" : "twoHands" });
+  const one = "isWieldedOneHand", two = "isWieldedTwoHands";
+  item.actions = [[one], [two], [one], [], [one, two]].map((predicates, indice) => ({
+    source: item.uuid, indice, conditions: predicates.map(predicate => ({ predicate })),
+    isVisible: async () => false
+  }));
+  item.system.actions = item.actions;
+  const ref = indice => ({ itemId: item.id, indice, source: item.uuid });
+  const { item: other } = create("other");
+  other.parent = a;
+  other.id = "other";
+  other.name = item.name;
+  makeHandWeapon(other);
+  other.actions[0].conditions = [{ predicate: two }];
+  a.items.set(other.id, other);
+  const calls = [];
+  const toggle = a.toggleEquipmentEquipped;
+  a.toggleEquipmentEquipped = async id => { calls.push(id); await toggle(id); };
+  const key = "left-hand";
+  const current = () => bar.readConfiguration(a);
+  const entry = preset => current().handPresets[preset][key];
+  const save = (preset, reference) => bar.saveShortcut(a, preset, bar.slotRows(a)[0][0], reference);
+  const remove = (preset, actionIndex) => bar.manageShortcut({ actor: a, token: bar.token, preset,
+    key, reference: entry(preset), actionIndex });
+  const indices = preset => Array.from(bar.shortcutReferences(entry(preset)), action => action.indice);
+  assert.equal(await save(1, ref(0)), true);
+  for (const invalid of [ref(0), ref(2), ref(3), ref(4), {
+    itemId: other.id, indice: 0, source: other.actions[0].source
+  }]) assert.equal(await save(1, invalid), false);
+  assert.equal(await save(1, ref(1)), true);
+  assert.equal(await save(1, ref(2)), false);
+  assert.equal(warnings.filter(text => text.endsWith("HandPairInvalid")).length, 6);
+  assert.deepEqual(indices(1), [0, 1]);
+  assert.deepEqual(Object.keys(entry(1)), ["actions"]);
+  assert.equal(bar.handItem(a, entry(1)), item);
+  assert.deepEqual(calls, [item.id]);
+  item.actions[1].isVisible = async (source, actor) => source === item && actor === a;
+  assert.equal((await bar.visibleHandPairAction(a, [ref(0), ref(1)])).index, 1);
+  assert.equal((await bar.visibleHandPairAction(a, [ref(1), ref(0)])).index, 0);
+  item.actions[1].isVisible = async () => false;
+  assert.equal(await bar.setActivePreset(2), true);
+  for (const single of [3, 4]) {
+    assert.equal(await save(2, ref(single)), true);
+    assert.equal(await save(2, ref(1)), false);
+    assert.equal(await remove(2), true);
+  }
+  assert.equal(await save(2, ref(1)), true);
+  assert.equal(await save(2, ref(0)), true);
+  assert.deepEqual(indices(2), [1, 0]);
+  assert.deepEqual(indices(1), [0, 1]);
+  assert.equal(await remove(2, 1), true);
+  assert.deepEqual(indices(2), [1]);
+  assert.equal(entry(2).actions, undefined);
+  assert.ok(item.system.equipped);
+  assert.equal(await remove(2), true);
+  assert.equal(entry(2), null);
+  assert.ok(!item.system.equipped);
+  assert.equal(await bar.setActivePreset(3), true);
+  assert.equal(await save(3, ref(0)), true);
+  assert.equal(await save(3, ref(1)), true);
+  assert.equal(await remove(3, 0), true);
+  assert.deepEqual(indices(3), [1]);
+  const saved = JSON.parse(JSON.stringify(a.flags));
+  assert.equal(saved.co2prism.hands.presets[1][key].actions.length, 2);
+  item.system.actions = undefined;
+  bar.pruneShortcuts(bar.slotRows());
+  await bar.configWrites.get(a);
+  assert.deepEqual(indices(1), [0, 1]);
+  item.system.actions = item.actions;
+  bar.pruneShortcuts(bar.slotRows());
+  await bar.configWrites.get(a);
+  assert.deepEqual(indices(1), [0, 1]);
+  item.actions = item.actions.filter(action => action.indice !== 0);
+  item.system.actions = item.actions;
+  bar.pruneShortcuts(bar.slotRows());
+  await bar.configWrites.get(a);
+  assert.deepEqual(indices(1), [1]);
+  assert.equal(bar.handItem(a, entry(1)), item);
+  assert.equal(bar.resolveShortcut(a, entry(1), true).action, item.actions[0]);
+  assert.equal(bar.resolveShortcut(a, entry(1)), null);
+  assert.equal(await bar.visibleHandPairAction(a, [ref(1), ref(2)]), null);
+  assert.equal(await bar.setActivePreset(1), true);
+  item.actions = item.actions.filter(action => action.indice !== 1);
+  item.system.actions = item.actions;
+  bar.pruneShortcuts(bar.slotRows());
+  await bar.configWrites.get(a);
+  assert.equal(entry(1), null);
+  assert.equal(entry(3), null);
+  assert.equal(item.system.usage.preferOneHand, true);
+  a.flags.co2prism.hands.presets[1][key] = ref(1);
+  a.items.delete(item.id);
+  bar.pruneShortcuts(bar.slotRows());
+  await bar.configWrites.get(a);
+  assert.equal(entry(1), null);
+});
+
+test("prise polyvalente : ordre natif, équipement secondaire, restauration et presets", async () => {
+  const { bar, a, item, warnings } = setupShortcuts();
+  const calls = [];
+  const prepare = (weapon, id) => {
+    Object.assign(weapon.system.usage, { oneHand: true, twoHand: true, preferOneHand: false });
+    Object.defineProperties(weapon.system, {
+      isOtherHandBusy: { get: () => [...a.items.values()].some(other => other !== weapon && other.system.equipped) },
+      grip: { get: () => weapon.system.usage.preferOneHand || weapon.system.isOtherHandBusy ? "oneHand" : "twoHands" }
+    });
+    weapon.update = async changes => {
+      const preference = changes["system.usage.preferOneHand"];
+      calls.push([id, "preference", preference]);
+      if (!refusePreference) weapon.system.usage.preferOneHand = preference;
+    };
+  };
+  let refusePreference = false, refusedEquipment;
+  const shield = makeHandWeapon({ id: "shield", parent: a, system: {} });
+  shield.system.isWeapon = false;
+  shield.system.isShield = true;
+  const second = makeHandWeapon({ id: "second", parent: a, system: {} });
+  a.items.set(shield.id, shield); a.items.set(second.id, second);
+  prepare(item, item.id); prepare(second, second.id);
+  a.toggleEquipmentEquipped = async (id, bypass) => {
+    assert.equal(bypass, false);
+    const target = a.items.get(id);
+    const value = !target.system.equipped;
+    calls.push([id, "equipped", value]);
+    if (id !== refusedEquipment) target.system.equipped = value;
+  };
+  const direct = target => ({ kind: "equipment", itemId: target.id });
+  const slots = () => bar.slotRows(a)[0];
+  const save = (side, target) => bar.saveShortcut(a, 1, slots()[side], direct(target));
+  const context = side => {
+    const { key, reference } = slots()[side];
+    return { actor: a, token: bar.token, preset: 1, key, reference };
+  };
+  const flip = (side, weapon) => bar.changeHandGrip(context(side), weapon, weapon.system.grip);
+  assert.equal(await save(0, item), true);
+  assert.equal(slots()[1].mirror.itemId, item.id);
+  assert.equal(await save(1, shield), true);
+  assert.equal(slots()[1].mirror, undefined);
+  item.system.usage.preferOneHand = true;
+  calls.length = 0;
+  const flags = JSON.stringify(a.flags);
+  assert.equal(await flip(0, item), true);
+  assert.deepEqual(calls.splice(0), [[shield.id, "equipped", false], [item.id, "preference", false]]);
+  assert.equal(JSON.stringify(a.flags), flags);
+  assert.equal(slots()[1].reference.itemId, shield.id);
+  assert.equal(await save(1, second), true);
+  assert.deepEqual(calls, []);
+  assert.equal(second.system.equipped, false);
+  assert.equal(await flip(1, second), false);
+  refusedEquipment = second.id;
+  assert.equal(await flip(0, item), false);
+  assert.deepEqual(calls.splice(0), [[item.id, "preference", true], [second.id, "equipped", true],
+    [item.id, "preference", false]]);
+  assert.equal(warnings.at(-1), "CO2PRISM.Combat.HandsEquipmentFailed");
+  refusedEquipment = undefined;
+  assert.equal(await flip(0, item), true);
+  assert.deepEqual(calls.splice(0), [[item.id, "preference", true], [second.id, "equipped", true]]);
+  assert.equal(second.system.usage.preferOneHand, false);
+  refusePreference = true;
+  assert.equal(await flip(0, item), false);
+  assert.deepEqual(calls.splice(0), [[second.id, "equipped", false], [item.id, "preference", false],
+    [second.id, "equipped", true]]);
+  refusePreference = false;
+  assert.equal(await flip(1, second), true);
+  assert.deepEqual(calls.splice(0), [[item.id, "equipped", false]]);
+  assert.equal(item.system.usage.preferOneHand, true);
+  assert.equal(second.system.grip, "twoHands");
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.ok(calls.every(([, field]) => field === "equipped"));
+  assert.equal(item.system.usage.preferOneHand, true);
+  assert.equal(second.system.usage.preferOneHand, false);
+});
+
+test("presets : mémoire des préférences natives, isolation et rollback", async () => {
+  const { bar, a, item, warnings } = setupShortcuts();
+  const shield = makeHandWeapon({ id: "shield", parent: a, system: {} });
+  const ordinary = makeHandWeapon({ id: "sword", parent: a, system: {} });
+  Object.assign(shield.system, { isWeapon: false, isShield: true, equipped: false });
+  a.items.set(shield.id, shield); a.items.set(ordinary.id, ordinary);
+  Object.assign(item.system.usage, { oneHand: true, twoHand: true, preferOneHand: false });
+  Object.defineProperties(item.system, {
+    isOtherHandBusy: { get: () => [...a.items.values()].some(owned => owned !== item && owned.system.equipped) },
+    grip: { get: () => item.system.usage.preferOneHand || item.system.isOtherHandBusy ? "oneHand" : "twoHands" }
+  });
+  const calls = [];
+  item.update = async patch => {
+    const preference = patch["system.usage.preferOneHand"];
+    calls.push(["preference", preference]);
+    item.system.usage.preferOneHand = preference;
+  };
+  a.toggleEquipmentEquipped = async id => {
+    const model = a.items.get(id).system;
+    model.equipped = !model.equipped;
+    calls.push([id, model.equipped]);
+  };
+  const ref = target => ({ kind: "equipment", itemId: target.id });
+  const presets = a.flags.co2prism.hands = { active: 1, presets: {
+    1: { "left-hand": ref(item), "right-hand": ref(shield) },
+    2: { "left-hand": ref(ordinary) }, 3: { "right-hand": ref(item) }
+  } };
+  item.system.equipped = true;
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.deepEqual(presets.gripPreferences, { 1: { [item.id]: false } });
+  assert.equal(await bar.setActivePreset(3), true);
+  assert.equal(item.system.usage.preferOneHand, false);
+  item.system.usage.preferOneHand = true;
+  calls.length = 0;
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.deepEqual(calls, [[shield.id, true], [shield.id, false], ["preference", false]]);
+  assert.equal(item.system.grip, "twoHands");
+  assert.equal(presets.gripPreferences[3][item.id], true);
+  assert.equal(presets.presets[1]["right-hand"].itemId, shield.id);
+  assert.equal(await bar.setActivePreset(3), true);
+  assert.equal(item.system.usage.preferOneHand, true);
+  assert.equal(item.system.grip, "oneHand");
+  const setFlag = a.setFlag;
+  a.setFlag = async () => { throw Error("Écriture refusée"); };
+  calls.length = 0;
+  assert.equal(await bar.setActivePreset(1), false);
+  assert.deepEqual(calls, [[shield.id, true], [shield.id, false], ["preference", false],
+    ["preference", true], [shield.id, true], [shield.id, false]]);
+  assert.equal(presets.active, 3);
+  assert.equal(shield.system.equipped, false);
+  assert.equal(item.system.usage.preferOneHand, true);
+  assert.equal(warnings.at(-1), "CO2PRISM.Combat.HandsEquipmentFailed");
+  a.setFlag = setFlag;
+  const external = makeHandWeapon({ id: "outside", parent: a, system: {} });
+  a.items.set(external.id, external);
+  external.system.equipped = true;
+  assert.equal(await bar.setActivePreset(1), false);
+  assert.equal(presets.active, 3);
+  assert.equal(external.system.equipped, true);
+  assert.equal(shield.system.equipped, false);
+  assert.equal(item.system.usage.preferOneHand, true);
+  a.items.delete(external.id);
+  assert.equal(await bar.setActivePreset(1), true);
+  item.system.usage.preferOneHand = true;
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.equal(shield.system.equipped, true);
+  assert.equal(item.system.grip, "oneHand");
+  presets.presets[1]["left-hand"] = null;
+  assert.equal(await bar.setActivePreset(2), true);
+  assert.equal(presets.gripPreferences[1], undefined);
+  assert.equal(presets.gripPreferences[3][item.id], true);
+  const second = makeHandWeapon({ id: "second", parent: a, system: {} });
+  Object.assign(second.system.usage, { twoHand: true, preferOneHand: false });
+  a.items.set(second.id, second);
+  presets.presets[1] = { "left-hand": ref(item), "right-hand": ref(second) };
+  presets.gripPreferences[1] = { [item.id]: false, [second.id]: false };
+  assert.equal(await bar.setActivePreset(1), true);
+  assert.ok(item.system.equipped && second.system.equipped);
+  assert.equal(item.system.grip, "oneHand");
+  assert.equal(item.system.usage.preferOneHand, false);
+  assert.equal(warnings.at(-1), "CO2PRISM.Combat.GripPresetConflict");
+});
+
 test("presets de mains : MAJ délègue la politique des mains libres à CO2", async t => {
   let source;
   try {
@@ -1643,6 +1903,61 @@ test("raccourcis : 3/1 initiaux, mains permanentes et croissance indépendante",
   assert.ok(bar.slotRows().every(row => row.filter(slot => slot.terminal).length === 1));
   assert.equal(bar.slotRows()[0][0].hand, "left");
   assert.equal(bar.slotRows()[0][1].hand, "right");
+});
+
+test("raccourcis d’Items : dépôt embarqué, groupes mixtes, persistance et nettoyage", async () => {
+  const { bar, a, create, event, node, context } = setupShortcuts();
+  const add = (type, count) => {
+    const owned = { id: type, uuid: `${a.uuid}.Item.${type}`, parent: a, type, name: type,
+      system: {}, testUserPermission: () => true, canUserModify: () => true };
+    owned.actions = owned.system.actions = Array.from({ length: count }, (_, indice) =>
+      ({ source: owned.uuid, indice, type: "heal", actionName: `Action ${indice}` }));
+    a.items.set(owned.id, owned);
+    return owned;
+  };
+  const equipment = add("equipment", 0), capacity = add("capacity", 1), container = add("container", 2), path = add("path", 0);
+  const payload = owned => ({ type: "Item", uuid: owned.uuid });
+  const terminal = () => bar.slotRows()[0].at(-1);
+  const ordinary = () => bar.slotRows().flat().filter(slot => !slot.hand && !slot.terminal);
+  const drop = (owned, slot = terminal()) => bar.dropSlot(event(payload(owned)), slot, node);
+  assert.equal(await drop(path), false);
+  assert.equal(await drop(create("foreign").item), false);
+  assert.equal(await drop({ uuid: "Compendium.example.gear.Item.equipment" }), false);
+  for (const owned of [equipment, capacity, container]) assert.equal(await drop(owned), true);
+  assert.equal(await drop(capacity, bar.slotRows()[0][0]), false);
+  const [first, second] = ordinary();
+  assert.equal(await drop(capacity, first), true);
+  assert.equal(await drop(container, ordinary()[0]), true);
+  assert.equal(await bar.dropSlot(event({ type: "co.action", source: capacity.uuid, indice: 0 }), ordinary()[0], node), true);
+  assert.equal(await drop(capacity, ordinary()[0]), false);
+  const current = () => bar.readConfiguration(a).shortcuts[first.key];
+  const captures = actionIndex => ({ actor: a, token: bar.token, key: first.key, reference: current(), actionIndex });
+  assert.equal(await bar.manageShortcut(captures(0), { key: first.key, actionIndex: 2 }), true);
+  assert.equal(await bar.manageShortcut(captures(), bar.slotRows()[1].at(-1)), true);
+  const saved = JSON.parse(JSON.stringify(a.flags));
+  assert.deepEqual(saved.co2prism.shortcuts[first.key].actions.map(ref => [ref.kind ?? "action", ref.itemId]),
+    [["item", capacity.id], ["item", container.id], ["item", equipment.id], ["action", capacity.id]]);
+  assert.equal(saved.co2prism.shortcuts[first.key].row, 2);
+  assert.equal(saved.co2prism.shortcuts[second.key].kind, "item");
+  const itemContext = { actor: a, token: bar.token, surface: "shortcut", item: capacity, itemId: capacity.id, slotKey: first.key, actionIndex: 0 };
+  assert.equal(bar.equipmentOperationItem(itemContext), capacity);
+  context.game.settings.get = () => true;
+  assert.equal(bar.equipmentOperationItem(itemContext), capacity);
+  capacity.canUserModify = () => false;
+  assert.equal(bar.equipmentOperationItem(itemContext), null);
+  capacity.canUserModify = () => true;
+  context.game.settings.get = () => false;
+  a.items.delete(equipment.id); a.items.delete(container.id);
+  bar.pruneShortcuts(bar.slotRows()); await bar.configWrites.get(a);
+  assert.equal(current().actions.length, 2);
+  assert.equal(await bar.manageShortcut(captures(1)), true);
+  assert.equal(current().kind, "item");
+  assert.equal(current().itemId, capacity.id);
+  assert.equal(current().actions, undefined);
+  assert.equal(current().source, undefined);
+  const previousToken = bar.token;
+  bar.token = {};
+  assert.equal(bar.equipmentOperationItem({ ...itemContext, token: previousToken, actionIndex: undefined }), null);
 });
 
 test("groupes de raccourcis : capacité, persistance, déplacement et nettoyage individuel", async () => {

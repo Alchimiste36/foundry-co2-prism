@@ -87,7 +87,7 @@
   box-sizing: border-box;
   width: max-content;
   max-width: min(34rem, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  max-height: min(calc(100vh - 24px), var(--co2prism-tooltip-height, 100vh));
   overflow: auto;
   padding: 0.65rem 0.85rem;
   border: 1px solid var(--prism-edge);
@@ -1286,6 +1286,18 @@
   position: relative;
   overflow: hidden;
 }
+.co2prism-slot-group.co2prism-hand-action-pair {
+  grid-template: minmax(0, 1fr) / repeat(2, minmax(0, 1fr));
+}
+.co2prism-hand-action-pair .co2prism-slot-image {
+  inset: 0 auto auto 50%;
+  width: auto;
+  max-width: none;
+  height: 100%;
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  object-position: center;
+}
 .co2prism-slot-quadrant[aria-hidden="true"] {
   background: var(--prism-ink);
   pointer-events: none;
@@ -1333,6 +1345,26 @@
   position: absolute;
   top: 0;
   left: 0;
+}
+.co2prism-slot-item-icon {
+  color: var(--prism-negative);
+}
+.co2prism-slot-item-marker {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  color: #ff3030;
+  padding: calc(3 * var(--unit));
+  font-size: calc(19 * var(--unit));
+  text-shadow: var(--prism-text-shadow);
+}
+.co2prism-bar .co2prism-slot-item-command {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .co2prism-slot-time {
   position: absolute;
@@ -1464,7 +1496,7 @@
   color: var(--prism-muted);
 }
 .co2prism-corner button > i,
-.co2prism-bar :is(.co2prism-rest, [data-co2prism-action="fortune"]) > i {
+.co2prism-bar :is(.co2prism-rest, .co2prism-grip-control, [data-co2prism-action="fortune"]) > i {
   background-image: var(--prism-actor-gloss);
   background-clip: text;
   color: transparent;
@@ -1476,12 +1508,15 @@
 }
 .co2prism-corner button[aria-expanded="true"]:enabled > i,
 .co2prism-lock[aria-pressed="false"] > i,
-.co2prism-bar :is(.co2prism-rest, [data-co2prism-action="fortune"]):enabled > i {
+.co2prism-bar :is(.co2prism-rest, .co2prism-grip-control, [data-co2prism-action="fortune"]):enabled > i {
   opacity: 1;
   filter: brightness(var(--prism-icon-brightness, 1)) drop-shadow(0 1px 1px #0e0714d9)
     drop-shadow(0 0 max(2px, calc(5 * var(--unit))) color-mix(in srgb, var(--prism-electric-glass) 77%, transparent));
 }
 .co2prism-bar :is(.co2prism-corner button, .co2prism-rest, [data-co2prism-action="fortune"]):enabled:hover > i {
+  --prism-icon-brightness: 1.24;
+}
+.co2prism-bar .co2prism-grip-control:enabled:is(:hover, :focus-visible) > i {
   --prism-icon-brightness: 1.24;
 }
 .co2prism-bar :is(.co2prism-rest, [data-co2prism-action="fortune"]):disabled > i {
@@ -1941,6 +1976,9 @@
   background: var(--prism-free);
 }
 .co2prism-slot-hand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   position: absolute;
   top: calc(4 * var(--co2prism-unit));
   inset-inline: 0;
@@ -1953,8 +1991,26 @@
   text-shadow: var(--prism-text-shadow);
   pointer-events: none;
 }
-[data-co2prism-hand="left"] > .co2prism-slot-hand {
+.co2prism-slot-hand [data-side="left"] {
   transform: scaleX(-1);
+}
+.co2prism-slot-hand.co2prism-grip-control {
+  --button-focus-outline-color: transparent;
+  min-width: max(18px, calc(25 * var(--unit)));
+  height: max(18px, calc(25 * var(--unit)));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--prism-electric-glass);
+  pointer-events: auto;
+}
+.co2prism-grip-control:not(:disabled):is(:hover, :focus-visible) {
+  outline: none;
+  background: transparent;
+}
+.co2prism-grip-control:disabled {
+  opacity: 0.55;
 }
 .co2prism-slot-unavailable {
   background: var(--prism-unavailable);
