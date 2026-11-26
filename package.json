@@ -1,6 +1,6 @@
 {
   "name": "co2prism",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "description": "Prism pour CO2, module for Foundry VTT.",

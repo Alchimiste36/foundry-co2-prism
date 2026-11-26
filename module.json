@@ -2,7 +2,7 @@
   "id": "co2prism",
   "title": "CO2 Prism",
   "description": "Interface pour Chroniques Oubliées 2 dans Foundry VTT, avec ressources, raccourcis, équipement, suivi des déplacements et budget d’actions.",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "socket": true,
   "compatibility": {
     "minimum": "14",
