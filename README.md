@@ -34,7 +34,8 @@ J'ai voulu faire **une interface très compacte avec Prism** afin de centraliser
 
 **Compatibilité :** Foundry VTT v14 — système Chroniques Oubliées 2 (`co2`).
 
-1. Installer le module via son manifest dans Foundry VTT, ou placer son dossier dans `Data/modules/co2prism/`.
+1. Installer le module via son manifest dans Foundry VTT, ou placer son dossier dans `Data/modules/co2prism/` ou via le manifest :
+   https://github.com/Alchimiste36/foundry-co2-prism/releases/latest/download/module.json
 2. Ouvrir un monde utilisant le système CO2.
 3. Activer **CO2 Prism** dans la gestion des modules.
 
@@ -46,5 +47,11 @@ La documentation intégrée détaille l'ensemble des fonctionnalités et leur co
 
 ## Soutiens
 
-Si ce travail vous plait et surtout vous aide lors de vos parties de Jeu de Rôles Chroniques Oubliées 2ème édition sur Foundry VTT, n'hésitez pas à m'offrir un p'tit café sur Ko-fi pour me motiver à créer de nouveaux outils pour les meneuses et meneurs : https://ko-fi.com/lalchimiste
+Si ce travail vous plait et surtout vous aide lors de vos parties de Jeu de Rôles Chroniques Oubliées 2ème édition sur Foundry VTT, n'hésitez pas à m'offrir un p'tit café sur Ko-fi pour me motiver à créer de nouveaux outils pour les meneuses et meneurs.
 Je suis ouvert à toutes les suggestions, propositions et remontées de bug sur gitHub ou directement sur Discord : l.alchimiste
+
+<ul>
+<li><a href="https://github.com/Alchimiste36/Foundry-co2-prim">Dépôt GitHub du projet</a></p></li>
+<li><a href="https://www.youtube.com/@AlchimisteFoundry">Chaine YouTube Alchimiste Foundry</a></p></li>
+<li><a href="https://ko-fi.com/lalchimiste">Pour m'offrir un petit café pour le travail effectué. Merci d'avance !</a></p></li>
+</ul>

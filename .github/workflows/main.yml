@@ -97,6 +97,10 @@ jobs:
           MANIFEST: ${{ env.latest_manifest_url }}
           DOWNLOAD: ${{ env.release_module_url }}
 
+      # Mise à jour des versions des fichiers npm
+      - name: Update npm package version
+        run: npm version "${{ steps.get_version.outputs.version-without-v }}" --no-git-tag-version --allow-same-version
+
       # `npm ci` is recommended:
       # https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
       - name: Install Dependencies
