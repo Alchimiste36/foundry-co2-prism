@@ -15,7 +15,7 @@ Ce module fan made a été créée par **l'Alchimiste** pour faciliter la vie de
 J'ai voulu faire **une interface très compacte avec Prism** afin de centraliser toutes les informations nécessaires accessibles rapidement et les nouvelles fonctionnalités de jeu. Ca peut paraitre trop dense mais au moins vous n'aurez pas beaucoup l'occasion d'ouvrir votre feuille de personnage !
 
 <p align="center">
-  <img src="assets/prism_global_deverrouiller.PNG" alt="Aperçu de CO2 Prism et de ses raccourcis" width="1000">
+  <img src="assets/prism_global_deverrouiller.webp" alt="Aperçu de CO2 Prism et de ses raccourcis" width="1000">
 </p>
 
 ## Principales fonctionnalités

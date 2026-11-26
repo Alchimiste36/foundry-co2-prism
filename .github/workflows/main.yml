@@ -115,9 +115,10 @@ jobs:
              ./module.zip                        \
             `# The files that will be included.` \
             module.json                          \
-            mtt.mjs                              \
+            co2prism.mjs                         \
             README.md                            \
             CHANGELOG.md                         \
+            assets/                              \
             css/                                 \
             module/                              \
             lang/                                \
